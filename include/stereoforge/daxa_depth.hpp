@@ -1,7 +1,7 @@
 #pragma once
 #include <stereoforge/daxa_preprocess.hpp>
 namespace stereoforge {
-enum class DaxaDepthStereoSchedule { Sequential,PairedPerPath,LayeredPerPath };
+enum class DaxaDepthStereoSchedule { Sequential,PairedPerPath,LayeredPerPath,SharedCensusSequential };
 struct DaxaDepthConfig {
     StereoConfig stereo;
     float lr_tolerance=1.f;
@@ -50,6 +50,7 @@ public:
         DaxaImageView image(DaxaPreprocessPlane)const; // Independently retained RGB views consume preprocessing capacity.
         CaptureLease source()const;std::shared_ptr<const DaxaRectification> calibration()const;
         MetricCalibration metric_calibration()const;DaxaDepthTiming timings()const;
+        DaxaStereo::Frame stereo_frame(DaxaStereoReference)const; // SharedCensusSequential GPU producer lease; independently consumes aligned stereo capacity.
     };
     DaxaDepthPipeline(DaxaRectification,DaxaDepthConfig,std::shared_ptr<DaxaFoundation>,CaptureLease prototype);
     Frame enqueue(CaptureLease); // No wait/readback/application heap allocation. Full ring rejects before upload.

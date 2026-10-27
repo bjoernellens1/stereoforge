@@ -82,7 +82,13 @@ def check_depth_submission(source, header):
     assert 'slot->preprocessing=std::move(pre)' in enqueue and 'slot->left=std::move(left)' in enqueue and 'slot->right=std::move(right)' in enqueue
     assert retire.index('available_slot(slot.use_count(),slot->submit,oldest)') < retire.index('slot->left={}')
     assert retire.index('slot->preprocessing={}') < retire.index('left->collect_completed_inputs_at(oldest)') < retire.index('preprocessing->collect_completed_sources_at(oldest)'), 'release completed unleased output producers before stereo/pre source retirement'
-    assert not re.search(r'DaxaStereo::Frame\s+\w+\s*\(', header), 'hidden Stereo leases must not escape aligned depth slots'
+    getters = re.findall(r'DaxaStereo::Frame\s+(\w+)\s*\(', header)
+    assert getters == ['stereo_frame'], 'only the explicit shared-schedule Stereo lease may escape aligned depth slots'
+    getter = body(source, 'DaxaStereo::Frame DaxaDepthPipeline::Frame::stereo_frame(')
+    assert 'owner_->config.stereo_schedule==DaxaDepthStereoSchedule::SharedCensusSequential' in getter, 'independent leases require aligned shared-schedule admission'
+    assert getter.index('validate()') < getter.index('SharedCensusSequential') < getter.index('return ')
+    assert 'reference==DaxaStereoReference::Left||reference==DaxaStereoReference::Right' in getter
+    assert 'return reference==DaxaStereoReference::Left?slot_->left:slot_->right' in getter
     assert 'DaxaImageView image(' in header, 'independent RGB retention must be explicit'
     assert 'slot_->preprocessing.plane(p)' in body(source, 'DaxaImageView DaxaDepthPipeline::Frame::image(')
 
@@ -384,3 +390,18 @@ def test_diagnostic_guard_catches_source_metadata_echo_instead_of_output_associa
     app=(ROOT/'apps/daxa_depth_benchmark.cpp').read_text()
     with pytest.raises(AssertionError):
         check_combined_diagnostics((ROOT/'src/daxa_depth.cpp').read_text(),app.replace('auto final_source=output.source()','auto final_source=source'))
+
+
+def test_depth_lease_guard_rejects_removing_shared_schedule_admission_restriction():
+    source = (ROOT/'src/daxa_depth.cpp').read_text()
+    restriction = 'owner_->config.stereo_schedule==DaxaDepthStereoSchedule::SharedCensusSequential'
+    assert restriction in source
+    with pytest.raises(AssertionError, match='aligned shared-schedule'):
+        check_depth_submission(source.replace(restriction, 'true', 1), (ROOT/'include/stereoforge/daxa_depth.hpp').read_text())
+
+
+def test_depth_lease_guard_rejects_another_hidden_producer_escape():
+    source = (ROOT/'src/daxa_depth.cpp').read_text()
+    header = (ROOT/'include/stereoforge/daxa_depth.hpp').read_text() + '\nDaxaStereo::Frame hidden_producer();\n'
+    with pytest.raises(AssertionError, match='only the explicit'):
+        check_depth_submission(source, header)

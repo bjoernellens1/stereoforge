@@ -40,7 +40,7 @@ def test_schedule_requires_value(tmp_path):
     assert not (tmp_path / 'report.json').exists()
 
 
-@pytest.mark.parametrize('mode', ['sequential', 'paired-per-path', 'layered-per-path'])
+@pytest.mark.parametrize('mode', ['sequential', 'paired-per-path', 'layered-per-path', 'shared-census-sequential'])
 def test_each_explicit_schedule_reaches_fixture_preflight_without_device(tmp_path, mode):
     result = invoke(tmp_path, '--stereo-schedule', mode)
     assert result.returncode == 1 and 'missing fixture file' in result.stderr

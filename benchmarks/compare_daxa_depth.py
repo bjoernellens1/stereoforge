@@ -27,11 +27,13 @@ RAW_PLANES=base.OUTPUT_PLANES
 RHI_PLANES=RAW_PLANES+('depth.f32','depth_validity.u32')
 TIMINGS=('enqueue_cpu_ms','wait_cpu_ms','timestamp_query_cpu_ms','host_wall_ms','upload_cpu_ms','gpu_upload_ms','gpu_decode_ms','gpu_rectify_ms','gpu_left_stereo_ms','gpu_right_stereo_ms','gpu_lr_ms','gpu_metric_metadata_ms','gpu_combined_queue_span_ms')
 STEREO_SCOPES={
+    'shared-census-sequential':'shared_census_then_sequential_reference_phase_intervals; no_isolated_per_reference_times',
     'sequential':'sequential_per_reference_graphs',
     'paired-per-path':'paired_per_path_phase_intervals_include_both_references; no_isolated_per_reference_times',
     'layered-per-path':'layered_per_path_phase_intervals_include_both_references; no_isolated_per_reference_times',
 }
 STEREO_DISPATCH_FORMS={
+    'shared-census-sequential':'shared_census_once_then_sequential_independent_references',
     'sequential':'two_sequential_reference_graphs',
     'paired-per-path':'two_reference_dispatches_per_phase',
     'layered-per-path':'two_reference_dispatches_census_clear; z2_single_dispatch_aggregation_selection',
@@ -119,6 +121,14 @@ def requested_bytes(manifest,profile,slots):
     return observations,pre+2*stereo+observations
 
 
+def requested_bytes_for_schedule(manifest,profile,slots,stereo_schedule):
+    if type(stereo_schedule) is not str or stereo_schedule not in STEREO_SCOPES:raise ValueError('unknown stereo schedule')
+    observations,total=requested_bytes(manifest,profile,slots)
+    # Legacy accounting remains frozen; only this schedule shares the quartet.
+    if stereo_schedule=='shared-census-sequential':total-=16*profile['width']*profile['height']*slots
+    return observations,total
+
+
 def compiler_header_identities(directory,targets=None):
     headers={}
     for target,source in targets or (('daxa_depth_benchmark','apps/daxa_depth_benchmark.cpp'),('stereoforge_daxa_depth','src/daxa_depth.cpp'),('stereoforge_daxa_calibration','src/daxa_calibration.cpp'),('stereoforge_daxa_preprocess','src/daxa_preprocess.cpp'),('stereoforge_daxa_stereo','src/daxa_stereo.cpp'),('stereoforge_daxa_frame','src/daxa_frame.cpp'),('stereoforge_daxa_foundation','src/daxa_foundation.cpp')):
@@ -189,12 +199,21 @@ def validate_report(report,manifest,metadata,metric,identity,profile,frames,warm
         timing('gpu_paired_stereo_ms',report.get('gpu_paired_stereo_ms'),positive=True)
         phases=report.get('gpu_paired_stereo_phases_ms')
         expected_phases=set(PAIRED_PHASES+(PAIRED_DIAGONALS if profile['paths']==8 else ())+('select',))
+        if stereo_schedule=='shared-census-sequential':
+            reference_phases=PAIRED_PHASES[2:]+(PAIRED_DIAGONALS if profile['paths']==8 else ())+('select',)
+            expected_phases={'shared_census_left','shared_census_right'}|{eye+'_'+phase for eye in ('left','right') for phase in reference_phases}
         if not isinstance(phases,dict) or set(phases)!=expected_phases:raise ValueError('changed/missing paired stereo phases')
         for key,row in phases.items():timing(key,row,positive=True)
     if report['gpu_combined_queue_span_ms']['mean']<=0:raise ValueError('actual combined GPU span absent')
     for key in ('initialization_ms','diagnostic_after_timing_ms'):
         if type(report.get(key)) not in (int,float) or not math.isfinite(report[key]) or report[key]<0:raise ValueError('invalid bounded extra timing')
-    for key,value in zip(('requested_observation_buffer_bytes','requested_combined_buffer_bytes'),requested_bytes(manifest,profile,slots)):
+    if stereo_schedule=='shared-census-sequential':
+        census_bytes=16*profile['width']*profile['height']*slots
+        shared=dict(census_descriptor_storage_shared=True,census_dispatches_per_frame=2,independent_reference_penalty_buffers=True,
+                    requested_census_descriptor_buffer_bytes=census_bytes,census_descriptor_buffer_savings_bytes=census_bytes)
+        for key,value in shared.items():
+            if type(report.get(key)) is not type(value) or report[key]!=value:raise ValueError('changed/missing shared census contract: '+key)
+    for key,value in zip(('requested_observation_buffer_bytes','requested_combined_buffer_bytes'),requested_bytes_for_schedule(manifest,profile,slots,stereo_schedule)):
         if type(report.get(key)) is not int or report[key]!=value or not 0<value<2*1024**3:raise ValueError('changed requested buffer memory accounting')
     for key in ('stereo_shared_shader_source_sha256_pair','stereo_layered_shader_source_sha256'):
         if report.get(key)!=identity[key]:raise ValueError('actual compiled stereo helper source identity changed: '+key)

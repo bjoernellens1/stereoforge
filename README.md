@@ -259,6 +259,12 @@ output gates. It also measured a regression: about 40.5–40.9 ms host wall agai
 32.2–32.3 ms Sequential in matched ABBA runs. Sequential remains the default.
 See [layered scheduling evidence](docs/daxa-depth-layered-evidence.md).
 
+The opt-in `--stereo-schedule shared-census-sequential` computes Census once per
+physical image and shares one descriptor quartet per slot. At the same 720p
+profile it saves 29,491,200 B of requested buffers; matched ABBA runs do not
+establish a repeatable latency improvement. Sequential remains the default.
+See [shared Census evidence](docs/daxa-depth-shared-census-evidence.md).
+
 ## Standalone C++ runtime
 
 Build without Python, SlangPy or SGL using `cmake --preset standalone` and

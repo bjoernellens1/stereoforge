@@ -24,7 +24,7 @@ struct DaxaStereoReadback {
     bool intermediates_reconstructed=false;
 };
 struct DaxaStereoTiming {
-    static constexpr unsigned max_stages=13;
+    static constexpr unsigned max_stages=22;
     unsigned stage_count=0;
     double total_gpu_ms=0;
     std::array<double,max_stages> stage_gpu_ms{};
@@ -95,8 +95,9 @@ public:
     static std::string specialized_shader_identity(); // Actual compiled Parameters:shared-body SHA256.
     static std::string layered_shader_identity(); // Actual compiled layered wrapper SHA256.
 private:
+    DaxaStereo(StereoConfig,const DaxaFrame&,DaxaSgmVariant,unsigned,std::optional<MetricCalibration>,std::shared_ptr<DaxaFoundation>,uint32_t,DaxaStereoReference,bool shared_census,const DaxaStereo* descriptor_owner);
     // Depth-only combined scheduling. Setup owns no Frame/producer marker.
-    void setup_pair(DaxaStereo& right,bool layered=false);
+    void setup_pair(DaxaStereo& right,bool layered=false,bool shared_census=false);
     unsigned pair_slot_at(uint64_t oldest)const; // Both aligned slots available, before upstream upload.
     std::array<Frame,2> process_pair_at(const DaxaFrame&,uint64_t oldest,unsigned slot);
     DaxaStereoTiming pair_timings(const Frame& left,const Frame& right)const;

@@ -85,14 +85,15 @@ def test_phase_guard_rejects_inter_eye_timestamp():
         check_pair_graph(source.replace(marker, 'ti.recorder.dispatch({grid[0],grid[1],1});ti.recorder.write_timestamp({});}', 1))
 
 
-@pytest.fixture(scope='module')
-def pair_bookkeeping_probe(tmp_path_factory):
+def build_pair_bookkeeping_probe(tmp_path_factory, schedule='paired-per-path', paths=4, stereo_transform=None):
     compiler=shutil.which('c++')
     if compiler is None:
         pytest.skip('C++ compiler unavailable for extracted CPU-only bookkeeping probe')
     depth=(ROOT/'src/daxa_depth.cpp').read_text()
     pre=(ROOT/'src/daxa_preprocess.cpp').read_text()
     stereo=(ROOT/'src/daxa_stereo.cpp').read_text()
+    if stereo_transform is not None:
+        stereo = stereo_transform(stereo)
     frame=(ROOT/'include/stereoforge/daxa_frame.hpp').read_text()
     program=r'''
 #include <array>
@@ -134,10 +135,10 @@ struct PreImpl {std::shared_ptr<Context> context;std::shared_ptr<const Maps> cal
 std::shared_ptr<const Maps> DaxaFrame::calibration()const{return owner_->calibration;}uint64_t DaxaFrame::context_id()const{return reinterpret_cast<uintptr_t>(owner_->context.get());}
 class DaxaPreprocess {public:std::shared_ptr<PreImpl> impl_;static constexpr unsigned Staging=0;DaxaFrame enqueue_at(CaptureLease,uint64_t);size_t collect_completed_sources_at(uint64_t);};
 enum B:unsigned {Left,Right,LeftDesc,RightDesc,LeftValid,RightValid,Costs,Sums,Disparity,Confidence,Validity,Depth,DepthValid,Counters,Penalties,Params,BufferCount};
-enum class DaxaDepthStereoSchedule{Sequential,PairedPerPath,LayeredPerPath};struct DaxaDepthConfig {DaxaDepthStereoSchedule stereo_schedule=DaxaDepthStereoSchedule::PairedPerPath;};
+enum class DaxaDepthStereoSchedule{Sequential,PairedPerPath,LayeredPerPath,SharedCensusSequential};struct DaxaDepthConfig {DaxaDepthStereoSchedule stereo_schedule=DaxaDepthStereoSchedule::PairedPerPath;};
 enum class DaxaStereoReference{Left,Right};enum class DaxaStereoPlane{Disparity,Confidence,Validity};enum class DaxaPreprocessPlane{LeftSupport,RightSupport,LeftLuma,RightLuma};
 struct StereoSlot{std::array<uint64_t,BufferCount> buffers{};std::array<External,BufferCount> external{};bool per_reference_timings_available=true;Parameters parameters;DaxaFrame input;CaptureLease source;uint64_t submit=0,generation=0;};
-struct StereoImpl;struct PairSlot {std::array<std::array<External,BufferCount>,2> external;std::unique_ptr<Graph> graph;unsigned started=0,finished=0;};struct Pair {std::shared_ptr<StereoImpl> right;std::vector<std::unique_ptr<PairSlot>> slots;};
+struct StereoImpl;struct PairSlot {std::array<std::array<External,BufferCount>,2> external;std::unique_ptr<Graph> graph;unsigned started=0,finished=0;};struct Pair {unsigned stages=8;std::shared_ptr<StereoImpl> right;std::vector<std::unique_ptr<PairSlot>> slots;};
 struct StereoImpl {std::unique_ptr<Pair> paired;std::shared_ptr<const Maps> calibration;unsigned stages=8;uint64_t next_generation=1;std::shared_ptr<Context> context;std::vector<std::shared_ptr<StereoSlot>> slots;DaxaStereoReference reference;void require_thread()const{}};
 class DaxaStereo {public:std::shared_ptr<StereoImpl> impl_;class Frame {std::shared_ptr<StereoImpl> owner_;std::shared_ptr<StereoSlot> slot_;public:Frame()=default;Frame(std::shared_ptr<StereoImpl> o,std::shared_ptr<StereoSlot> s):owner_(o),slot_(s){}DaxaStereoReference reference()const{return owner_->reference;}CaptureLease source()const{return slot_->source;}uint64_t context_id()const{return reinterpret_cast<uintptr_t>(owner_->context.get());}std::shared_ptr<const Maps> calibration_owner()const{return slot_->input.calibration();}const std::string& calibration_identity()const{return slot_->input.calibration()->rectified_identity;}};
  Frame process_at(const DaxaFrame* pre,uint64_t oldest){for(auto& s:impl_->slots)if(detail::available_slot(s.use_count(),s->submit,oldest)){s->input=*pre;s->source=pre->source();s->submit=++impl_->context->device.latest;impl_->context->device.collect_garbage();return Frame(impl_,s);}throw std::runtime_error("stereo full");}
@@ -165,7 +166,7 @@ class DaxaDepthPipeline {public:struct Slot {DaxaFrame preprocessing;DaxaStereo:
 using namespace stereoforge;
 void check(bool x,const char* msg){if(!x)throw std::runtime_error(msg);}
 int main(int argc,char** argv){try{
- auto context=std::make_shared<Context>();auto e=std::make_shared<DaxaDepthPipeline::Impl>();e->context=context;if(argc>1)e->config.stereo_schedule=DaxaDepthStereoSchedule::LayeredPerPath;
+ auto context=std::make_shared<Context>();auto e=std::make_shared<DaxaDepthPipeline::Impl>();e->context=context;if(argc>1)e->config.stereo_schedule=std::string(argv[1])=="shared"?DaxaDepthStereoSchedule::SharedCensusSequential:DaxaDepthStereoSchedule::LayeredPerPath;
  e->preprocessing=std::make_unique<DaxaPreprocess>();e->preprocessing->impl_=std::make_shared<PreImpl>();auto pre=e->preprocessing->impl_;pre->context=context;pre->calibration=std::make_shared<Maps>();
  std::array<std::vector<uint8_t>,2> staging;for(auto& bytes:staging)bytes.resize(1280*2*720*2);
  for(unsigned i=0;i<2;++i){auto s=std::make_shared<PreSlot>();s->buffers[0]=reinterpret_cast<uintptr_t>(staging[i].data());s->graph=std::make_unique<Graph>(Graph{&context->device,true});pre->slots.push_back(std::move(s));}
@@ -192,6 +193,9 @@ int main(int argc,char** argv){try{
  // Exhaust both aligned right producer slots; pair admission must reject before upload.
  std::array<std::shared_ptr<StereoSlot>,2> held_right{e->right->impl_->slots[0],e->right->impl_->slots[1]};uploads=context->device.uploads;latest=context->device.latest;caught=false;
  try{pipeline.enqueue(source);}catch(const std::exception&){caught=true;}check(caught&&context->device.uploads==uploads&&context->device.latest==latest,"aligned pair ring rejection occurred after upload");held_right={};
+ // Either producer ring must reject before touching upstream upload/submission.
+ std::array<std::shared_ptr<StereoSlot>,2> held_left{e->left->impl_->slots[0],e->left->impl_->slots[1]};uploads=context->device.uploads;latest=context->device.latest;caught=false;
+ try{pipeline.enqueue(source);}catch(const std::exception&){caught=true;}check(caught&&context->device.uploads==uploads&&context->device.latest==latest,"aligned left ring rejection occurred after upload");held_left={};
  // Warm state and fixed allocation; extract actual depth/retirement/staging methods.
  constexpr unsigned frames=256;allocations=0;auto before_snapshots=context->device.snapshots;auto before_submissions=context->device.latest;auto before_gc=context->device.gc;tracking=true;auto start=std::chrono::steady_clock::now();
  for(unsigned i=0;i<frames;++i){auto out=pipeline.enqueue(source);out.validate();complete();out={};}
@@ -202,11 +206,20 @@ int main(int argc,char** argv){try{
  return 0;
 }catch(const std::exception& ex){tracking=false;std::cerr<<ex.what()<<'\n';return 1;}}
 '''
+    if schedule == 'shared-census-sequential':
+        assert paths in (4, 8)
+        phases = 6 + 2 * paths
+        program = program.replace('unsigned stages=8;', f'unsigned stages={phases};').replace('&s->finished,8}', f'&s->finished,{phases}'+'}')
     directory=tmp_path_factory.mktemp('daxa-depth-bookkeeping')
     code=directory/'probe.cpp';code.write_text(program);binary=directory/'probe'
     build=subprocess.run([compiler,'-std=c++20','-O3',str(code),'-o',str(binary)],capture_output=True,text=True,timeout=60)
     assert build.returncode==0,build.stderr
     return binary
+
+
+@pytest.fixture(scope='module')
+def pair_bookkeeping_probe(tmp_path_factory):
+    return build_pair_bookkeeping_probe(tmp_path_factory)
 
 
 @pytest.mark.parametrize('schedule',['paired-per-path','layered-per-path'])

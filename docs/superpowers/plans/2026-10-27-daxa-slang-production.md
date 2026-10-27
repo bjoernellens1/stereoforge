@@ -570,7 +570,7 @@ penalty/output buffers and required inter-path barriers; Census/clear stay as
 two independent dispatches in this initial layered experiment. This tests one
 shader program for both references without changing SGM recurrences or quality.
 
-- [ ] B extracts one explicit-parameter implementation into canonical
+- [x] B extracts one explicit-parameter implementation into canonical
   `python/stereoforge/shaders/ops/sgm_specialized.slang`, with shared guarded
   `daxa/stereo_parameters.slang` and new `daxa/stereo_layered.slang` wrapper.
   Existing specialized wrappers pass the same parameters into the same helpers.
@@ -578,31 +578,84 @@ shader program for both references without changing SGM recurrences or quality.
   supplies both parameter addresses/pass/XY group stride; static layout guards
   and device push/z-dispatch checks are mandatory. No algorithm duplication,
   atomics, precision/search changes, new compositor or per-frame memory.
-- [ ] Uniformly reject z>=2 before address loads or collective/barrier work.
+- [x] Uniformly reject z>=2 before address loads or collective/barrier work.
   One workgroup uses one eye and unchanged full-wave32/64 rules; all selection
   group threads participate consistently. Retain canonical invalid defaults,
   exact metadata, source/owner identity, pre-upload admission and producer life.
-- [ ] A extends the existing bound nine-observation/six-raw-plane harness for
+- [x] A extends the existing bound nine-observation/six-raw-plane harness for
   all three scheduling modes. Reports require the actual dispatch form and
   null isolated-eye timing for either paired mode, real paired phase/total
   statistics and the same actual upload-through-metric span. Add compiled
   runtime identities for shared Parameters/helper and layered wrapper; bind
   all three source files, four new SPIR-V files and actual compiler dependencies.
-- [ ] C independently guards/probes actual hot paths, uniform eye/bounds/XY
+- [x] C independently guards/probes actual hot paths, uniform eye/bounds/XY
   mapping, one-dispatch phase structure, allocations/lifetimes/completion and
   truthful timing/compiled source identity. Preserve prior controls.
-- [ ] Build and hash all 29 existing shader controls. Explicitly list every
+- [x] Build and hash all 29 existing shader controls. Explicitly list every
   changed binary; helper extraction alone is not evidence of byte identity.
   Before new-mode GPU qualification root requalifies any changed legacy shader
   through its appropriate exact integer/direct-P/frozen-GPU output controls.
   Keep unresolved general scalar compound-float gates open.
-- [ ] After independent functional/performance clearance, root runs new native
+- [x] After independent functional/performance clearance, root runs new native
   CPU/GPU core+sync contracts, small and dynamic/P8/W64/packing16 exact controls,
   full 720p fixed-quality nine+six output comparison and lifetime stress.
   Root alone launches GPU work. No mode is promoted on build/CPU/source review.
-- [ ] Root repeats fixed-profile 100/20 sequential/layered/layered/sequential
+- [x] Root repeats fixed-profile 100/20 sequential/layered/layered/sequential
   measurements with outputs resident, no concurrent GPU jobs, validation and
   readback excluded from performance samples. Actual complete queue span and
   host wall are the result; compare repeats and frame budget without adding
   per-eye costs or claiming occupancy/bandwidth mechanisms without evidence.
   Record acceleration or regression and continue the full goal either way.
+
+
+### Exact data reuse: shared Census, sequential independent references
+
+The layered experiment is qualified and published as `eaea904`; the
+[measured evidence](../../daxa-depth-layered-evidence.md) records exact outputs
+but a negative full-chain result. Sequential GPU means were 31.883/31.795 ms,
+versus 39.971/40.312 ms layered. The goal remains sustained live 720p/60 Hz,
+wide RGB-D and temporal/adaptive integration; this experiment does not finish it.
+
+The next bounded exact optimization is `SharedCensusSequential`, CLI
+`shared-census-sequential`. Capture already supplies one side-by-side YUYV
+frame and preprocessing already serves both references. Compute the two Census
+images once, share their descriptors and validity, and preserve complete
+independent Left and Right SGM. Raw Hamming pair costs are symmetric, but the
+independent aggregated path histories are not interchangeable. The later
+single-aggregation/dual-disparity technique observed in libSGM must remain a
+separate quality-changing experiment with explicit provenance and quality gates.
+
+- [x] Native implementation: one physical four-buffer descriptor/validity
+  quartet per aligned slot, with shared RAII storage retaining the Foundation.
+  Both engine slots retain this storage; no Frame/Impl ownership cycle and no
+  duplicate allocation. Either retained reference keeps descriptors alive;
+  aligned admission prevents overwriting them before both consumers retire.
+- [x] A shared graph registers each aliased physical buffer once, runs exactly
+  two Census dispatches, then all Left clear/path/selection work, then all Right
+  clear/path/selection work. Preserve same-eye penalty hazards and explicitly
+  order the Right clear after Left selection to isolate data sharing from
+  interleaved scheduling. No shader algorithm, precision or search changes.
+- [x] Keep Sequential default and all prior controls. Add actual timing phase
+  names for shared Census and each reference's clear/path/selection, fourteen
+  for P4 and twenty-two for P8; isolated eye times remain null. Combined GPU
+  span remains actual upload-start through metric-end, with host wall separate.
+- [x] Report actual descriptor storage, two Census dispatches, independent
+  reference penalties and savings. Requested application buffers decrease by
+  16*width*height*slots, exactly 29,491,200 B at 720p/two slots, to
+  811,009,328 B at D128/P4. Preserve the 2 GiB guard and distinguish requested
+  buffer bytes from peak driver/allocator memory.
+- [x] Extend the existing source-bound nine-observation/six-raw-plane harness
+  with strict new-mode memory/phase/identity claims. Preserve existing oracle
+  arithmetic, metadata, masks and invalid conventions without tolerances.
+- [x] Independent functional and mandatory performance review must pass before
+  root GPU execution. Guard allocation/admission, graph hazards, descriptor
+  ownership, queries, aliasing, source pairing and unchanged shader binaries.
+  Use an extracted actual host-path probe; report its excluded SDK/GPU scope.
+- [x] Root builds and verifies all 33 shader controls byte-identical, runs CPU,
+  native GPU core/sync, exact small/full720p/P8W64 packing16 gates, and retained
+  producer/frame lifetime and repeated-fixture stress checks.
+- [x] Root measures fixed-quality 100/20 Sequential/shared/shared/Sequential
+  runs without readback or validation, retaining outputs on GPU. Promote only
+  on measured useful benefit; record memory-only benefit honestly if latency
+  improvement is small. Further descriptor-load/cost reuse and single-volume
+  dual-disparity research remain open toward the full 60 Hz goal.

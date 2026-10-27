@@ -101,7 +101,7 @@ def native_report(m,metadata,metric,schedule="sequential",paths=4):
         **{key:dict(stats) for key in depth.TIMINGS})
     report['paths']=paths
     report['requested_observation_buffer_bytes'],report['requested_combined_buffer_bytes']=depth.requested_bytes(m,dict(profile(),paths=paths),1)
-    forms={'sequential':'two_sequential_reference_graphs','paired-per-path':'two_reference_dispatches_per_phase','layered-per-path':'two_reference_dispatches_census_clear; z2_single_dispatch_aggregation_selection'}
+    forms={'sequential':'two_sequential_reference_graphs','paired-per-path':'two_reference_dispatches_per_phase','layered-per-path':'two_reference_dispatches_census_clear; z2_single_dispatch_aggregation_selection','shared-census-sequential':'shared_census_once_then_sequential_independent_references'}
     report.update(stereo_dispatch_form=forms[schedule],stereo_shared_shader_source_sha256_pair='parameters:specialized',stereo_layered_shader_source_sha256='layered',stereo_schedule=schedule,per_reference_stereo_timings_available=schedule=='sequential',
                   stereo_timing_scope=r_scope(schedule),
                   gpu_paired_stereo_ms=None,gpu_paired_stereo_phases_ms={})
@@ -111,11 +111,19 @@ def native_report(m,metadata,metric,schedule="sequential",paths=4):
         phases=['census_left','census_right','zero_packed_penalties','aggregate_pos_x','aggregate_neg_x','aggregate_pos_y','aggregate_neg_y']
         if paths==8:phases+=['aggregate_pos_x_pos_y','aggregate_neg_x_neg_y','aggregate_pos_x_neg_y','aggregate_neg_x_pos_y']
         report['gpu_paired_stereo_phases_ms']={key:dict(stats) for key in phases+['select']}
+    if schedule=='shared-census-sequential':
+        names=['zero_packed_penalties','aggregate_pos_x','aggregate_neg_x','aggregate_pos_y','aggregate_neg_y']
+        if paths==8:names+=['aggregate_pos_x_pos_y','aggregate_neg_x_neg_y','aggregate_pos_x_neg_y','aggregate_neg_x_pos_y']
+        phases=['shared_census_left','shared_census_right']+[eye+'_'+name for eye in ('left','right') for name in names+['select']]
+        report['gpu_paired_stereo_phases_ms']={key:dict(stats) for key in phases}
+        census=16*report['width']*report['height']*report['slots']
+        report.update(census_descriptor_storage_shared=True,census_dispatches_per_frame=2,independent_reference_penalty_buffers=True,requested_census_descriptor_buffer_bytes=census,census_descriptor_buffer_savings_bytes=census)
+        report['requested_combined_buffer_bytes']-=census
     return report
 
 
 @pytest.mark.parametrize('mutation',[None,'scope','support_policy','layers','units','metric_bits','metric_float','compiler','shader','integer_false','packed_false','compound_true','preprocess_false','lr_false','source_id','metadata','retirement','memory','nonfinite','diagnostic','missing_plane','changed_plane','changed_raw','missing_raw','changed_input','changed_source','changed_report','wrong_adapter','rhi_metric','rhi_profile','admission_missing','admission_changed','changed_setup_manifest'])
-@pytest.mark.parametrize('schedule',['sequential','paired-per-path','layered-per-path'])
+@pytest.mark.parametrize('schedule',['sequential','paired-per-path','layered-per-path','shared-census-sequential'])
 def test_mocked_whole_combined_protocol(tmp_path,monkeypatch,mutation,schedule):
     manifest,m,metadata,metric=fixture(tmp_path);ident=identity();luma=(np.arange(40,dtype='<u4').tobytes(),np.arange(40,80,dtype='<u4').tobytes());supports=(np.ones(40,'<u4').tobytes(),)*2
     def planes(path):
@@ -223,10 +231,10 @@ def test_actual_compiler_dependency_headers_are_hashed_fail_closed(tmp_path,monk
 
 
 def r_scope(schedule):
-    return {'sequential':'sequential_per_reference_graphs','paired-per-path':'paired_per_path_phase_intervals_include_both_references; no_isolated_per_reference_times','layered-per-path':'layered_per_path_phase_intervals_include_both_references; no_isolated_per_reference_times'}[schedule]
+    return {'sequential':'sequential_per_reference_graphs','paired-per-path':'paired_per_path_phase_intervals_include_both_references; no_isolated_per_reference_times','layered-per-path':'layered_per_path_phase_intervals_include_both_references; no_isolated_per_reference_times','shared-census-sequential':'shared_census_then_sequential_reference_phase_intervals; no_isolated_per_reference_times'}[schedule]
 
 
-@pytest.mark.parametrize('schedule',['sequential','paired-per-path','layered-per-path'])
+@pytest.mark.parametrize('schedule',['sequential','paired-per-path','layered-per-path','shared-census-sequential'])
 @pytest.mark.parametrize('paths',[4,8])
 @pytest.mark.parametrize('mutation',[None,'mode','unknown_mode','scope','availability','availability_missing','left_fabricated','right_fabricated','paired_total','phase_missing','phase_extra','phase_zero','phase_nonfinite','pair_zero'])
 def test_schedule_timing_report_contract(tmp_path,schedule,paths,mutation):
@@ -242,10 +250,10 @@ def test_schedule_timing_report_contract(tmp_path,schedule,paths,mutation):
     if mutation=='paired_total':r['gpu_paired_stereo_ms']=positive if schedule=='sequential' else None
     if mutation=='phase_missing':
         if schedule=='sequential':del r['gpu_paired_stereo_phases_ms']
-        else:del r['gpu_paired_stereo_phases_ms']['select']
+        else:del r['gpu_paired_stereo_phases_ms']['left_select' if schedule=='shared-census-sequential' else 'select']
     if mutation=='phase_extra':r['gpu_paired_stereo_phases_ms']['made_up_phase']=positive
     if mutation in ('phase_zero','phase_nonfinite'):
-        r['gpu_paired_stereo_phases_ms']['select']=dict(positive,mean=0. if mutation=='phase_zero' else float('nan'))
+        r['gpu_paired_stereo_phases_ms']['left_select' if schedule=='shared-census-sequential' else 'select']=dict(positive,mean=0. if mutation=='phase_zero' else float('nan'))
     if mutation=='pair_zero':r['gpu_paired_stereo_ms']=dict(positive,p50=0.)
     expected=dict(profile(),paths=paths)
     if mutation is None:
@@ -253,7 +261,8 @@ def test_schedule_timing_report_contract(tmp_path,schedule,paths,mutation):
     else:
         with pytest.raises(ValueError):depth.validate_report(r,m,metadata,metric,ident,expected,1,0,1,32,False,stereo_schedule=schedule)
     # Mode selection cannot weaken any oracle or memory requirement.
-    assert good['requested_combined_buffer_bytes']==depth.requested_bytes(m,dict(profile(),paths=paths),1)[1]
+    savings=16*40 if schedule=='shared-census-sequential' else 0
+    assert good['requested_combined_buffer_bytes']==depth.requested_bytes(m,dict(profile(),paths=paths),1)[1]-savings
 
 
 @pytest.mark.parametrize('schedule',['paired','PairedPerPath','layered','LayeredPerPath',None,True,0])
@@ -263,7 +272,7 @@ def test_unknown_schedule_rejected_before_inputs_or_child(tmp_path,monkeypatch,s
     with pytest.raises(ValueError):depth.run_comparison(Path('/fixture'),Path('/rhi'),Path('/daxa'),Path('/compiler'),tmp_path/'out',validation_only=True,stereo_schedule=schedule)
 
 
-@pytest.mark.parametrize('schedule',['sequential','paired-per-path','layered-per-path'])
+@pytest.mark.parametrize('schedule',['sequential','paired-per-path','layered-per-path','shared-census-sequential'])
 @pytest.mark.parametrize('field',['stereo_dispatch_form','stereo_shared_shader_source_sha256_pair','stereo_layered_shader_source_sha256'])
 @pytest.mark.parametrize('missing',[False,True])
 def test_actual_dispatch_form_and_compiled_helper_identity_are_required(tmp_path,schedule,field,missing):
@@ -306,3 +315,49 @@ def test_actual_layered_helper_and_spirv_binding_tamper(tmp_path,monkeypatch,nam
     else:
         paths[name].write_bytes(b'tampered actual source or shader bytes')
         assert probe()!=before
+
+
+@pytest.mark.parametrize('paths',[4,8])
+@pytest.mark.parametrize('field',['census_descriptor_storage_shared','census_dispatches_per_frame','independent_reference_penalty_buffers','requested_census_descriptor_buffer_bytes','census_descriptor_buffer_savings_bytes'])
+@pytest.mark.parametrize('mutation',['missing','changed','wrong_type'])
+def test_shared_census_reuse_claims_fail_closed(tmp_path,paths,field,mutation):
+    _,m,metadata,metric=fixture(tmp_path);report=native_report(m,metadata,metric,'shared-census-sequential',paths)
+    if mutation=='missing':del report[field]
+    elif mutation=='wrong_type':report[field]=str(report[field])
+    else:report[field]=False if type(report[field]) is bool else report[field]+1
+    with pytest.raises(ValueError):depth.validate_report(report,m,metadata,metric,identity(),dict(profile(),paths=paths),1,0,1,32,False,stereo_schedule='shared-census-sequential')
+
+
+@pytest.mark.parametrize('paths',[4,8])
+@pytest.mark.parametrize('mutation',['legacy_phases','null_total','missing_eye','zero_span','legacy_memory','stereo_compound'])
+def test_shared_census_rejects_legacy_or_fabricated_evidence(tmp_path,paths,mutation):
+    _,m,metadata,metric=fixture(tmp_path);report=native_report(m,metadata,metric,'shared-census-sequential',paths)
+    assert len(report['gpu_paired_stereo_phases_ms'])==(14 if paths==4 else 22)
+    if mutation=='legacy_phases':report['gpu_paired_stereo_phases_ms']=native_report(m,metadata,metric,'paired-per-path',paths)['gpu_paired_stereo_phases_ms']
+    if mutation=='null_total':report['gpu_paired_stereo_ms']=None
+    if mutation=='missing_eye':del report['gpu_left_stereo_ms']
+    if mutation=='zero_span':report['gpu_combined_queue_span_ms']['mean']=0.
+    if mutation=='legacy_memory':report['requested_combined_buffer_bytes']+=16*40
+    if mutation=='stereo_compound':report['stereo_compound_float_reference_checked']=True
+    with pytest.raises(ValueError):depth.validate_report(report,m,metadata,metric,identity(),dict(profile(),paths=paths),1,0,1,32,False,stereo_schedule='shared-census-sequential')
+
+
+def test_shared_census_memory_savings_preserve_legacy_720p_formula():
+    m=dict(source=dict(eye_width=1280,height=720,stride_bytes=5120))
+    p=dict(width=1280,height=720,disparities=128,paths=4,p2=32)
+    assert depth.requested_bytes(m,p,2)[1]==840500528
+    assert depth.requested_bytes_for_schedule(m,p,2,'shared-census-sequential')[1]==811009328
+    for schedule in ('sequential','paired-per-path','layered-per-path'):
+        assert depth.requested_bytes_for_schedule(m,p,2,schedule)==depth.requested_bytes(m,p,2)
+    with pytest.raises(ValueError):depth.requested_bytes_for_schedule(m,p,2,'unknown')
+
+
+@pytest.mark.parametrize('paths,p2',[(4,32),(8,32),(4,63),(8,31)])
+@pytest.mark.parametrize('slots',[1,2])
+def test_shared_census_memory_is_one_quartet_per_slot(paths,p2,slots):
+    m=dict(source=dict(eye_width=17,height=9,stride_bytes=68))
+    p=dict(width=13,height=7,disparities=32,paths=paths,p2=p2)
+    old=depth.requested_bytes(m,p,slots)
+    new=depth.requested_bytes_for_schedule(m,p,slots,'shared-census-sequential')
+    assert new[0]==old[0]
+    assert old[1]-new[1]==16*13*7*slots

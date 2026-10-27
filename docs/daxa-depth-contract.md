@@ -144,7 +144,9 @@ completed, unleased depth producers first, then stereo inputs/unleased metadata,
 then preprocessing source metadata. Held or in-flight outputs remain protected.
 A full output ring rejects before upload. Independently retained image views
 consume preprocessing capacity and can also cause pre-upload backpressure; no
-public stereo producer lease can escape separately. `drain()` waits during
+stereo producer lease can escape separately in the legacy schedules. Only
+`SharedCensusSequential` permits the typed `Frame::stereo_frame(reference)`
+getter; either retained producer blocks aligned slot reuse before upload. `drain()` waits during
 shutdown; ordinary enqueue performs no intermediate wait or full readback.
 
 Source metadata survives through `Frame::source()`: original ID/timestamps and
@@ -210,3 +212,13 @@ leases and paired timing interpretation; Census/clear work remains duplicated.
 Its shared-body extraction and required legacy-control requalification are
 documented in [layered evidence](daxa-depth-layered-evidence.md). Sequential
 remains the default; qualification and timing are explicit per experiment.
+
+
+`SharedCensusSequential` is a separate opt-in mode that physically shares one
+Census descriptor/validity quartet per slot, dispatches Census twice total, then
+runs complete Left and Right clear/path/select sequences with independent
+penalties and outputs. It uses 14 phases for P4 or 22 for P8, joint timings and
+null per-eye statistics. Its private sharing constructor, retained producer
+ownership, actual buffer savings and measured limits are documented in
+[shared Census evidence](daxa-depth-shared-census-evidence.md). The default
+remains Sequential.
