@@ -12,3 +12,8 @@ The shader source release commit is `b90e642b60c6283abec2fb8b505c940617ff3938`.
 No PyPI publication is assumed.
 
 Compiled source and helper SHA256 values are recorded at setup. The composed shader includes the exact released helper bytes; both enter its cache identity.
+
+The shared dependency CI checks the pinned released helper bytes, default-route
+independence and compile-cache invalidation on a CPU runner. Native GPU differential
+results remain separately scoped to the recorded device; this CI does not qualify
+an untested device or enable the shared route by default.
