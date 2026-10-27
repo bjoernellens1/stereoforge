@@ -43,3 +43,11 @@ copies from the pinned source archives. Preserve both when distributing their
 source or compiled code. Optional Daxa dependency licenses and the exact system
 Vulkan/window-library inventory are pending if those components are bundled;
 this inventory does not clear a complete native bundle or Slang SDK redistribution.
+
+The Daxa build applies three versioned dependency fixes: external resource-view
+registration, Linux/headless compatibility, and first-access scheduler batch initialization
+(`cmake/patches/daxa-3.6-first-access-group-batch.patch`). The third fix preserves
+the scheduler compactness assertion and task reordering. These are modifications
+to the same MIT-licensed Daxa source; they introduce no new source-license
+obligations. Qualification remains limited to the foundation and immutable
+resident-view POC described in [daxa-view-evidence.md](../docs/daxa-view-evidence.md).

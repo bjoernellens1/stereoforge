@@ -1,0 +1,16 @@
+--- a/src/utils/impl_task_graph.cpp
++++ b/src/utils/impl_task_graph.cpp
+@@ -2366,7 +2366,12 @@
+                     // Remember the first possible batch we can go in when the access group changed.
+                     if (tmp_latest_access_group->access_group != access_group)
+                     {
+-                        tmp_latest_access_group->min_batch_index = tmp_latest_access_group->max_batch_index + 1;
++                        // The first access group has no prior dependency. Starting it at
++                        // max_batch_index + 1 invents a batch-zero gap when another
++                        // task reads the same group and the optimizer moves the first.
++                        tmp_latest_access_group->min_batch_index = tmp_latest_access_group->access_group == nullptr
++                            ? first_batch_after_latest_submit
++                            : tmp_latest_access_group->max_batch_index + 1;
+                     }
+                     tmp_latest_access_group->max_batch_index = std::max(tmp_latest_access_group->max_batch_index, min_batch_index);
+                     tmp_latest_access_group->access_group = access_group;

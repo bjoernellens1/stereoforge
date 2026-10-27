@@ -169,6 +169,11 @@ The stereo pipeline migration and sustained real-time operation remain open.
 See [foundation evidence](docs/daxa-foundation-evidence.md) for current results,
 source patches, licenses and timing scope.
 
+The independent resident compositor also matches all eleven RHI output planes
+exactly in strict and preview mode. See [view evidence](docs/daxa-view-evidence.md)
+for the matched 720p measurements, lifetime tests and separate validation runs.
+This retained-fixture result does not qualify live capture or the full pipeline.
+
 ```bash
 cmake --preset daxa
 cmake --build --preset daxa

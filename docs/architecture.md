@@ -4,8 +4,12 @@ Production architecture decision (2026-10-27): target C++20 + Daxa TaskGraph +
 Slang, with Daxa as the single Vulkan device/resource/graph owner for the core
 classical/temporal/view pipeline. This is a planned migration gated by Linux dependency/capability/license checks, the
 upstream external-resource-view regression, and a matched resident proof of
-concept; Daxa is not yet adopted or qualified. Keep the working Slang RHI path
-frozen as comparison/migration evidence, not underneath Daxa. Reusable Slang
+concept. The foundation and immutable resident-view POC are locally qualified
+within the scopes in [daxa-view-evidence.md](daxa-view-evidence.md); full pipeline
+adoption remains open. The pinned Daxa dependency also requires the narrow
+third patch for first-access scheduler batch initialization; task reordering,
+transient-lifetime optimization and scheduler assertions remain enabled. Keep
+the working Slang RHI path frozen as comparison/migration evidence, not underneath Daxa. Reusable Slang
 operations stay independent of Daxa bindings; curated manually fused/unfused
 variants use bounded offline benchmarks and reviewed configuration. There is no
 custom task scheduler, arbitrary fusion compiler or general auto-tuner. SlangPy

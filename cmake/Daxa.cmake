@@ -54,6 +54,7 @@ function(sf_daxa_apply_patch filename)
 endfunction()
 sf_daxa_apply_patch(daxa-3.6-linux-headless.patch)
 sf_daxa_apply_patch(daxa-3.6-external-resource-views.patch)
+sf_daxa_apply_patch(daxa-3.6-first-access-group-batch.patch)
 set(SF_DAXA_SOURCE_DIR "${sf_daxa_SOURCE_DIR}")
 # Retain upstream runtime assertions in the optimized qualification build.
 target_compile_definitions(daxa PUBLIC DAXA_VALIDATION=1)

@@ -166,3 +166,22 @@ Khronos layer makes the Daxa probe exit 1 with a blocked JSON report; missing
 validation is not silently passed. Daxa still allocates internal command-recorder
 objects per execution and garbage-collects them; no allocation-free claim is made.
 Tiny-graph benchmark timings cover CPU submission/completion only.
+
+
+Daxa Task 2 resident-view follow-up: strict/preview 720p outputs match all eleven
+frozen-RHI planes byte for byte. Daxa core and synchronization validation suites
+pass **5/5** each, with zero diagnostics, including teardown; four Daxa-only
+720p core/synchronization cases are clean. The initial paired forced-layer run
+failed validation (112 error reports and 6 warning reports from the frozen RHI)
+despite exact numerical parity; its original report is retained and the frozen RHI is unchanged. The
+third Daxa dependency patch fixes first-access scheduler batch initialization,
+with an actual graph-completion reproducer failing unpatched and passing patched.
+This is an immutable retained-fixture POC, with mutable capture/stereo integration
+and sustained 60 Hz qualification still open. See
+[daxa-view-evidence.md](daxa-view-evidence.md) for measured scope and limitations.
+
+Task 2 final regression: **363 Python tests pass** (5.28 s); the existing
+standalone RHI CTest passes **5/5** (2.12 s). The final exclusive paired resident
+benchmark shows lower Daxa CPU enqueue cost but no consistent median total-latency
+advantage across strict and preview modes. Incremental migration is supported
+within this POC boundary; full production cutover remains open.
