@@ -29,7 +29,16 @@ TIMINGS=('enqueue_cpu_ms','wait_cpu_ms','timestamp_query_cpu_ms','host_wall_ms',
 STEREO_SCOPES={
     'sequential':'sequential_per_reference_graphs',
     'paired-per-path':'paired_per_path_phase_intervals_include_both_references; no_isolated_per_reference_times',
+    'layered-per-path':'layered_per_path_phase_intervals_include_both_references; no_isolated_per_reference_times',
 }
+STEREO_DISPATCH_FORMS={
+    'sequential':'two_sequential_reference_graphs',
+    'paired-per-path':'two_reference_dispatches_per_phase',
+    'layered-per-path':'two_reference_dispatches_census_clear; z2_single_dispatch_aggregation_selection',
+}
+SHARED_SHADER_SOURCES=('python/stereoforge/shaders/daxa/stereo_parameters.slang','python/stereoforge/shaders/ops/sgm_specialized.slang')
+LAYERED_SHADER_SOURCE='python/stereoforge/shaders/daxa/stereo_layered.slang'
+LAYERED_ENTRIES=('aggregate_layered8','aggregate_layered16','select_layered8','select_layered16')
 PAIRED_PHASES=('census_left','census_right','zero_packed_penalties','aggregate_pos_x','aggregate_neg_x','aggregate_pos_y','aggregate_neg_y')
 PAIRED_DIAGONALS=('aggregate_pos_x_pos_y','aggregate_neg_x_neg_y','aggregate_pos_x_neg_y','aggregate_neg_x_pos_y')
 mirror_rows=right.mirror_rows
@@ -131,7 +140,11 @@ def native_identities(rhi,native,compiler,manifest):
     if directory!=Path(stereo['daxa']['offline_shader_directory']):raise ValueError('offline shader directory getters disagree')
     common['offline_spirv_sha256'].update({'daxa-stereo-'+k+'.spv':v for k,v in stereo['daxa']['offline_spirv_sha256'].items()})
     for entry in ('lr_consistency','metric_observation'):common['offline_spirv_sha256']['daxa-depth-'+entry+'.spv']=base.sha256(directory/('daxa-depth-'+entry+'.spv'))
+    for entry in LAYERED_ENTRIES:common['offline_spirv_sha256']['daxa-stereo-'+entry+'.spv']=base.sha256(directory/('daxa-stereo-'+entry+'.spv'))
     common['source_sha256'].update(stereo['source_sha256'])
+    for name in SHARED_SHADER_SOURCES+(LAYERED_SHADER_SOURCE,):common['source_sha256'][name]=base.sha256(base.ROOT/name)
+    common['stereo_shared_shader_source_sha256_pair']=':'.join(common['source_sha256'][name] for name in SHARED_SHADER_SOURCES)
+    common['stereo_layered_shader_source_sha256']=common['source_sha256'][LAYERED_SHADER_SOURCE]
     for name in ('include/stereoforge/daxa_calibration.hpp','src/daxa_calibration.cpp','include/stereoforge/daxa_depth.hpp','src/daxa_depth.cpp','apps/daxa_depth_benchmark.cpp','cmake/DaxaDepth.cmake',
                  'benchmarks/compare_daxa_depth.py','benchmarks/compare_daxa_preprocess.py','benchmarks/compare_daxa_stereo.py','benchmarks/compare_daxa_stereo_right.py','benchmarks/compare_daxa_view.py','benchmarks/compare_native_resident.py'):
         common['source_sha256'][name]=base.sha256(base.ROOT/name)
@@ -150,7 +163,7 @@ def native_identities(rhi,native,compiler,manifest):
 def validate_report(report,manifest,metadata,metric,identity,profile,frames,warmup,slots,wave,validation,stereo_schedule="sequential"):
     if type(stereo_schedule) is not str or stereo_schedule not in STEREO_SCOPES:raise ValueError("unknown stereo schedule")
     expected=dict(profile,schema='stereoforge.daxa_depth.v1',scope=SCOPE,frames=frames,warmup=warmup,slots=slots,required_wave_size=wave,metric_support_policy=SUPPORT_POLICY,layers='left_then_right',depth_units='axial_Z_metres_rectified_rays',
-        stereo_schedule=stereo_schedule,stereo_timing_scope=STEREO_SCOPES[stereo_schedule],per_reference_stereo_timings_available=stereo_schedule=='sequential',
+        stereo_schedule=stereo_schedule,stereo_dispatch_form=STEREO_DISPATCH_FORMS[stereo_schedule],stereo_timing_scope=STEREO_SCOPES[stereo_schedule],per_reference_stereo_timings_available=stereo_schedule=='sequential',
         source_metadata=metadata,source_id=metadata['frame_id'],original_identity=manifest['calibration']['original_identity'],rectified_identity=manifest['calibration']['rectified_identity'],fixture_manifest_sha256=identity['manifest_sha256'],capture_sha256=manifest['capture']['sha256'],record_ordinal=manifest['capture']['record_ordinal'],
         gpu_combined_scope=GPU_SCOPE,requested_memory_scope=MEMORY_SCOPE,admission_completion_policy=ADMISSION_POLICY,lr_mask_metadata_reference_checked=True,both_stereo_integer_reference_checked=True,both_stereo_packed_penalties_reference_checked=True,expected_preprocess_planes_checked=True,metric_compound_float_reference_checked=False,stereo_compound_float_reference_checked=False,completed_output_retirements=frames+warmup,capture_drops='not_measured; repeated_fixture',camera_age='unknown; no_clock_mapping',validation_requested=validation)
     expected.update({k:metadata[k] for k in ('camera_timestamp_ns','host_ingress_timestamp_ns','camera_clock_domain','host_clock_domain','controls_json')})
@@ -166,7 +179,7 @@ def validate_report(report,manifest,metadata,metric,identity,profile,frames,warm
         if not isinstance(row,dict) or set(row)!={'p50','p95','mean'} or any(type(v) not in (int,float) or not math.isfinite(v) or v<0 or (positive and v==0) for v in row.values()) or row['p95']<row['p50']:raise ValueError('invalid combined timing: '+key)
     for key in TIMINGS:
         if key in ('gpu_left_stereo_ms','gpu_right_stereo_ms'):
-            if stereo_schedule=='paired-per-path':
+            if stereo_schedule!='sequential':
                 if key not in report or report[key] is not None:raise ValueError('paired per-reference timing must be unavailable: '+key)
                 continue
         timing(key,report.get(key))
@@ -183,6 +196,8 @@ def validate_report(report,manifest,metadata,metric,identity,profile,frames,warm
         if type(report.get(key)) not in (int,float) or not math.isfinite(report[key]) or report[key]<0:raise ValueError('invalid bounded extra timing')
     for key,value in zip(('requested_observation_buffer_bytes','requested_combined_buffer_bytes'),requested_bytes(manifest,profile,slots)):
         if type(report.get(key)) is not int or report[key]!=value or not 0<value<2*1024**3:raise ValueError('changed requested buffer memory accounting')
+    for key in ('stereo_shared_shader_source_sha256_pair','stereo_layered_shader_source_sha256'):
+        if report.get(key)!=identity[key]:raise ValueError('actual compiled stereo helper source identity changed: '+key)
     pairs=identity['shader_source_sha256_pairs']
     for key,value in (('shader_source_sha256_pair',pairs['depth']),('preprocessing_shader_source_sha256_pair',pairs['preprocess']),('stereo_shader_source_sha256_pair',pairs['stereo'])):
         if report.get(key)!=value:raise ValueError('actual combined shader source identity changed')
@@ -210,7 +225,7 @@ def run_comparison(manifest_path,rhi,native,compiler,output,disparities=128,path
         for filename,data in ((name+'.u32',luma[eye]),('mirror-'+name+'.u32',mirror_rows(luma[eye],width,height))):
             path=output/filename;path.write_bytes(data);path.chmod(0o444);derived[filename]=base.sha256(path)
     evidence=dict(schema=1,passed=False,selected=None,profile=profile,frames=frames,warmup=warmup,slots=slots,wave_size=wave_size,validation_requested=validation,performance_qualified_counts=not validation_only,
-        stereo_schedule=stereo_schedule,stereo_timing_scope=STEREO_SCOPES[stereo_schedule],fixture_manifest_entry_sha256=manifest_entry_sha256,scope='Repeated exact recorded fixture: combined upload/preprocess/dualSGM/LR/metric/metadata; no fresh-camera, physical truth, motion, RGB-D synthesis or sustained60Hz qualification.',
+        stereo_schedule=stereo_schedule,stereo_dispatch_form=STEREO_DISPATCH_FORMS[stereo_schedule],stereo_timing_scope=STEREO_SCOPES[stereo_schedule],fixture_manifest_entry_sha256=manifest_entry_sha256,scope='Repeated exact recorded fixture: combined upload/preprocess/dualSGM/LR/metric/metadata; no fresh-camera, physical truth, motion, RGB-D synthesis or sustained60Hz qualification.',
         timing_contract=dict(native=GPU_SCOPE,rhi='Two independent transfer-inclusive oracle runs; no warmup, no comparable performance ratio.',diagnostics='All fifteen native dumps and native exact integer/P checks after samples; frozen RHI oracle outside native timing.'),
         support_policy=SUPPORT_POLICY,compound_cpu_float_reference_checked=False,frozen_gpu_output_bytes_checked=False,children={},cpu_opencv=cv_identity,
         inherited_validation_environment={k:os.environ[k] for k in ('VK_INSTANCE_LAYERS','VK_LAYER_VALIDATE_SYNC','VK_LAYER_ENABLES','VK_LOADER_DEBUG','SF_DAXA_VALIDATION') if k in os.environ})

@@ -38,3 +38,30 @@ def test_schedule_requires_value(tmp_path):
     result = invoke(tmp_path, '--stereo-schedule')
     assert result.returncode == 1 and 'missing option value' in result.stderr
     assert not (tmp_path / 'report.json').exists()
+
+
+@pytest.mark.parametrize('mode', ['sequential', 'paired-per-path', 'layered-per-path'])
+def test_each_explicit_schedule_reaches_fixture_preflight_without_device(tmp_path, mode):
+    result = invoke(tmp_path, '--stereo-schedule', mode)
+    assert result.returncode == 1 and 'missing fixture file' in result.stderr
+    assert 'unknown depth stereo schedule' not in result.stderr
+    assert not (tmp_path / 'report.json').exists()
+
+
+def test_compiled_shared_and_layered_source_hash_getter_is_cpu_only(tmp_path):
+    import hashlib
+    import json
+    if not BINARY.is_file():
+        pytest.skip('offline depth benchmark not built')
+    env = os.environ.copy()
+    env['VK_DRIVER_FILES'] = env['VK_ICD_FILENAMES'] = str(tmp_path / 'absent-icd.json')
+    result = subprocess.run([str(BINARY), '--shader-source-identities'], env=env,
+                            capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stderr
+    source = ROOT / 'python/stereoforge/shaders'
+    sha = lambda path: hashlib.sha256((source / path).read_bytes()).hexdigest()
+    assert json.loads(result.stdout) == {
+        'stereo_shader_source_sha256_pair': sha('daxa/stereo.slang') + ':' + sha('ops/sgm.slang'),
+        'stereo_shared_shader_source_sha256_pair': sha('daxa/stereo_parameters.slang') + ':' + sha('ops/sgm_specialized.slang'),
+        'stereo_layered_shader_source_sha256': sha('daxa/stereo_layered.slang'),
+    }

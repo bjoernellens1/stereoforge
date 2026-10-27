@@ -553,3 +553,56 @@ shared surface. Root alone executes GPU workloads and makes promotion decisions.
   its causal result and continue with a separately reviewed layered dispatch or
   all-path atomic experiment. A negative scheduling experiment does not close
   the full stereo optimization, wide RGB-D or live 60 Hz goal.
+
+
+### Next causal variant: one layered dispatch per path
+
+The first paired graph is qualified as a negative control at `2094237`:
+100/20 ABBA means 32.056/32.013 ms sequential host wall versus 40.255/41.298 ms
+paired host wall, each value already covering BOTH references. These are
+separate repeated-run measurements, never per-eye costs to sum. Sequential stays
+default. All 29 shader binaries remained unchanged in that first experiment.
+
+Append `LayeredPerPath`, CLI `layered-per-path`, retaining both controls. Use
+one compute dispatch with z=2 per aggregation path and one z=2 selection dispatch.
+Workgroup z chooses the eye; XY flattening must exclude z. Keep separate packed
+penalty/output buffers and required inter-path barriers; Census/clear stay as
+two independent dispatches in this initial layered experiment. This tests one
+shader program for both references without changing SGM recurrences or quality.
+
+- [ ] B extracts one explicit-parameter implementation into canonical
+  `python/stereoforge/shaders/ops/sgm_specialized.slang`, with shared guarded
+  `daxa/stereo_parameters.slang` and new `daxa/stereo_layered.slang` wrapper.
+  Existing specialized wrappers pass the same parameters into the same helpers.
+  Preserve exact subpixel expression/control flow and legacy Push16. New Push24
+  supplies both parameter addresses/pass/XY group stride; static layout guards
+  and device push/z-dispatch checks are mandatory. No algorithm duplication,
+  atomics, precision/search changes, new compositor or per-frame memory.
+- [ ] Uniformly reject z>=2 before address loads or collective/barrier work.
+  One workgroup uses one eye and unchanged full-wave32/64 rules; all selection
+  group threads participate consistently. Retain canonical invalid defaults,
+  exact metadata, source/owner identity, pre-upload admission and producer life.
+- [ ] A extends the existing bound nine-observation/six-raw-plane harness for
+  all three scheduling modes. Reports require the actual dispatch form and
+  null isolated-eye timing for either paired mode, real paired phase/total
+  statistics and the same actual upload-through-metric span. Add compiled
+  runtime identities for shared Parameters/helper and layered wrapper; bind
+  all three source files, four new SPIR-V files and actual compiler dependencies.
+- [ ] C independently guards/probes actual hot paths, uniform eye/bounds/XY
+  mapping, one-dispatch phase structure, allocations/lifetimes/completion and
+  truthful timing/compiled source identity. Preserve prior controls.
+- [ ] Build and hash all 29 existing shader controls. Explicitly list every
+  changed binary; helper extraction alone is not evidence of byte identity.
+  Before new-mode GPU qualification root requalifies any changed legacy shader
+  through its appropriate exact integer/direct-P/frozen-GPU output controls.
+  Keep unresolved general scalar compound-float gates open.
+- [ ] After independent functional/performance clearance, root runs new native
+  CPU/GPU core+sync contracts, small and dynamic/P8/W64/packing16 exact controls,
+  full 720p fixed-quality nine+six output comparison and lifetime stress.
+  Root alone launches GPU work. No mode is promoted on build/CPU/source review.
+- [ ] Root repeats fixed-profile 100/20 sequential/layered/layered/sequential
+  measurements with outputs resident, no concurrent GPU jobs, validation and
+  readback excluded from performance samples. Actual complete queue span and
+  host wall are the result; compare repeats and frame budget without adding
+  per-eye costs or claiming occupancy/bandwidth mechanisms without evidence.
+  Record acceleration or regression and continue the full goal either way.

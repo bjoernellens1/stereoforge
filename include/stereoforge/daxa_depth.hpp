@@ -1,7 +1,7 @@
 #pragma once
 #include <stereoforge/daxa_preprocess.hpp>
 namespace stereoforge {
-enum class DaxaDepthStereoSchedule { Sequential,PairedPerPath };
+enum class DaxaDepthStereoSchedule { Sequential,PairedPerPath,LayeredPerPath };
 struct DaxaDepthConfig {
     StereoConfig stereo;
     float lr_tolerance=1.f;

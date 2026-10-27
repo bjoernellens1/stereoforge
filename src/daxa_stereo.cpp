@@ -115,6 +115,7 @@ constexpr const char* entries[]={"census","cost","aggregate_baseline","aggregate
 struct Parameters {std::array<uint64_t,14> address{};uint32_t width,height,disparities,paths,p1,p2,subpixel,metric;float fx,baseline_m,cx_offset;uint32_t packing_bits=0;uint64_t penalties_address=0;};
 static_assert(sizeof(Parameters)==168&&offsetof(Parameters,width)==112&&offsetof(Parameters,fx)==144);
 struct Push {uint64_t parameters;uint32_t pass=0,groups_x=1;};static_assert(sizeof(Push)==16);
+struct LayeredPush {uint64_t left_parameters,right_parameters;uint32_t pass,groups_x;};static_assert(sizeof(LayeredPush)==24&&offsetof(LayeredPush,pass)==16);
 std::vector<uint32_t> load_shader(const char* name){auto path=std::filesystem::path(SF_DAXA_STEREO_SPIRV_DIRECTORY)/(std::string("daxa-stereo-")+name+".spv");std::ifstream file(path,std::ios::binary|std::ios::ate);if(!file)throw std::runtime_error("missing offline stereo SPIR-V: "+path.string());auto bytes=file.tellg();require(bytes>0&&bytes%4==0,"invalid stereo SPIR-V bytes");std::vector<uint32_t> words(size_t(bytes)/4);file.seekg(0);file.read(reinterpret_cast<char*>(words.data()),bytes);if(!file)throw std::runtime_error("SPIR-V read failed");return words;}
 unsigned buffer_index(DaxaStereoPlane plane){switch(plane){case DaxaStereoPlane::Disparity:return Disparity;case DaxaStereoPlane::Confidence:return Confidence;case DaxaStereoPlane::Validity:return Validity;case DaxaStereoPlane::Depth:return Depth;case DaxaStereoPlane::DepthValidity:return DepthValid;case DaxaStereoPlane::Costs:return Costs;case DaxaStereoPlane::Sums:return Sums;case DaxaStereoPlane::LeftCensus:return LeftDesc;case DaxaStereoPlane::RightCensus:return RightDesc;case DaxaStereoPlane::LeftCensusValid:return LeftValid;case DaxaStereoPlane::RightCensusValid:return RightValid;case DaxaStereoPlane::PackedPenalties:return Penalties;}throw std::invalid_argument("unknown stereo plane");}
 }
@@ -138,6 +139,8 @@ struct DaxaStereo::Pair {
         unsigned started=0,finished=0;
     };
     std::shared_ptr<Impl> right;
+    bool layered=false;
+    std::array<daxa::ComputePipeline,4> layered_pipelines;
     std::vector<std::unique_ptr<Slot>> slots;
 };
 struct DaxaStereo::Impl {
@@ -224,12 +227,17 @@ DaxaStereo::Frame DaxaStereo::process_at(const DaxaFrame* input,uint64_t oldest)
         slot->generation=e.next_generation++;slot->started=0;slot->finished=0;try{slot->graph->execute({});}catch(...){slot->submit=d.latest_queue_submit_index(daxa::QUEUE_MAIN);throw;}require(slot->started==e.stages&&slot->finished==e.stages,"stereo graph callback count changed");slot->submit=d.latest_queue_submit_index(daxa::QUEUE_MAIN);return Frame(impl_,slot);
     }throw std::runtime_error("Daxa stereo slots retained or still in flight");
 }
-void DaxaStereo::setup_pair(DaxaStereo& other){
+void DaxaStereo::setup_pair(DaxaStereo& other,bool layered){
     auto& l=*impl_;auto& r=*other.impl_;l.require_thread();r.require_thread();
     require(!l.paired&&!r.paired&&l.context==r.context&&l.calibration&&l.calibration==r.calibration,"pair requires one shared context and exact calibrated owner");
     require(l.reference==DaxaStereoReference::Left&&r.reference==DaxaStereoReference::Right&&l.variant==DaxaSgmVariant::PackedSpecialized&&r.variant==l.variant&&!l.metric&&!r.metric,"pair requires Left/Right packed-specialized without standalone metric");
     auto a=l.config,b=r.config;require(a.width==b.width&&a.height==b.height&&a.disparities==b.disparities&&a.paths==b.paths&&a.p1==b.p1&&a.p2==b.p2&&a.subpixel==b.subpixel&&l.wave_size==r.wave_size&&l.packing==r.packing&&l.slots.size()==r.slots.size(),"pair stereo profile mismatch");
-    l.paired=std::make_unique<Pair>();auto& pair=*l.paired;pair.right=other.impl_;auto& d=l.context->device;size_t n=size_t(a.width)*a.height;
+    l.paired=std::make_unique<Pair>();auto& pair=*l.paired;pair.right=other.impl_;pair.layered=layered;auto& d=l.context->device;size_t n=size_t(a.width)*a.height;
+    if(layered){
+        VkPhysicalDeviceProperties properties{};vkGetPhysicalDeviceProperties(daxa_dvc_get_vk_physical_device(d.get()),&properties);require(l.group_limits[2]>=2&&properties.limits.maxPushConstantsSize>=sizeof(LayeredPush),"layered stereo requires groupCountZ>=2 and24-byte push constants");
+        constexpr const char* names[]={"aggregate_layered8","aggregate_layered16","select_layered8","select_layered16"};
+        for(unsigned i=0;i<pair.layered_pipelines.size();++i){if((i%2==0)!=(l.packing==8))continue;auto words=load_shader(names[i]);daxa::ShaderInfo shader{.byte_code=words.data(),.byte_code_size=uint32_t(words.size())};if(i<2){shader.create_flags=daxa::ShaderCreateFlagBits::REQUIRE_FULL_SUBGROUPS;shader.required_subgroup_size=l.wave_size;}pair.layered_pipelines[i]=d.create_compute_pipeline({.shader_info=shader,.push_constant_size=sizeof(LayeredPush),.name=names[i]});}
+    }
     for(unsigned index=0;index<l.slots.size();++index){
         auto s=std::make_unique<Pair::Slot>();auto* raw=s.get();auto prefix="stereo_pair_"+std::to_string(index)+"_";s->queries=d.create_timeline_query_pool({.query_count=l.query_count,.name=prefix+"phase_queries"});
         s->graph=std::make_unique<daxa::TaskGraph>(daxa::TaskGraphInfo{.device=d,
@@ -244,15 +252,16 @@ void DaxaStereo::setup_pair(DaxaStereo& other){
             }
         }
         auto add=[&](unsigned stage,std::array<unsigned,2> pipeline,unsigned pass,uint32_t groups,std::initializer_list<unsigned> reads,std::initializer_list<unsigned> writes,std::initializer_list<unsigned> readwrites){
-            auto grid=dispatch_grid(groups,l.group_limits);auto task=daxa::InlineTask::Compute("paired_phase_"+std::to_string(stage));
+            auto grid=dispatch_grid(groups,l.group_limits);bool layered_phase=pair.layered&&stage>=3;auto layered_pipeline=stage==3+a.paths?(l.packing==8?2u:3u):(l.packing==8?0u:1u);auto* pair_owner=&pair;auto task=daxa::InlineTask::Compute("paired_phase_"+std::to_string(stage));
             // Both eyes participate in one phase hazard declaration. In particular
             // reads_writes(Penalties) preserves every SAME-EYE path WAW barrier.
             for(unsigned eye=0;eye<2;++eye){task.reads(views[eye][Params]);for(auto resource:reads)if(eye==0||resource>=2)task.reads(views[eye][resource]);for(auto resource:writes)task.writes(views[eye][resource]);for(auto resource:readwrites)task.reads_writes(views[eye][resource]);}
-            graph.add_task(task.executes([&l,&r,raw,addresses,stage,pipeline,pass,grid](daxa::TaskInterface ti){
+            graph.add_task(task.executes([&l,&r,raw,addresses,stage,pipeline,pass,grid,layered_phase,layered_pipeline,pair_owner](daxa::TaskInterface ti){
                 if(stage<2)ti.recorder.pipeline_barrier({.src_access=daxa::AccessConsts::COMPUTE_SHADER_WRITE,.dst_access=daxa::AccessConsts::COMPUTE_SHADER_READ});
                 ti.recorder.write_timestamp({.query_pool=raw->queries,.pipeline_stage=daxa::PipelineStageFlagBits::COMPUTE_SHADER,.query_index=2+stage*2});
                 // No barrier or timestamp between the independent eye dispatches.
-                for(unsigned eye=0;eye<2;++eye){auto& engine=eye?r:l;ti.recorder.set_pipeline(engine.pipelines[pipeline[eye]]);ti.recorder.push_constant(Push{addresses[eye],pass,grid[0]});ti.recorder.dispatch({grid[0],grid[1],1});}
+                if(layered_phase){ti.recorder.set_pipeline(pair_owner->layered_pipelines[layered_pipeline]);ti.recorder.push_constant(LayeredPush{addresses[0],addresses[1],pass,grid[0]});ti.recorder.dispatch({grid[0],grid[1],2});}
+                else for(unsigned eye=0;eye<2;++eye){auto& engine=eye?r:l;ti.recorder.set_pipeline(engine.pipelines[pipeline[eye]]);ti.recorder.push_constant(Push{addresses[eye],pass,grid[0]});ti.recorder.dispatch({grid[0],grid[1],1});}
                 ti.recorder.write_timestamp({.query_pool=raw->queries,.pipeline_stage=daxa::PipelineStageFlagBits::COMPUTE_SHADER,.query_index=3+stage*2});
             }));
         };
@@ -303,6 +312,8 @@ uint32_t DaxaStereo::required_wave_size()const{return impl_->wave_size;}
 uint64_t DaxaStereo::allocated_bytes()const{return impl_->allocated;}
 unsigned DaxaStereo::validation_errors()const{return impl_->context->validation_errors.load();}
 const char* DaxaStereo::variant_name(DaxaSgmVariant v){if(v==DaxaSgmVariant::Baseline)return "baseline";if(v==DaxaSgmVariant::Wave)return "wave";if(v==DaxaSgmVariant::Packed)return "packed";if(v==DaxaSgmVariant::PackedSpecialized)return "packed-specialized";if(v==DaxaSgmVariant::PackedD128)return "packed-d128";if(v==DaxaSgmVariant::PackedQuad)return "packed-quad";if(v==DaxaSgmVariant::PackedShuffle)return "packed-shuffle";throw std::invalid_argument("unknown stereo variant");}
+std::string DaxaStereo::specialized_shader_identity(){return std::string(SF_DAXA_STEREO_PARAMETERS_SHA256)+":"+SF_DAXA_STEREO_SPECIALIZED_SHA256;}
+std::string DaxaStereo::layered_shader_identity(){return SF_DAXA_STEREO_LAYERED_SHA256;}
 std::string DaxaStereo::shader_directory(){return SF_DAXA_STEREO_SPIRV_DIRECTORY;}
 std::string DaxaStereo::shader_identity(){return std::string(SF_DAXA_STEREO_WRAPPER_SHA256)+":"+SF_DAXA_STEREO_OPS_SHA256;}
 namespace {

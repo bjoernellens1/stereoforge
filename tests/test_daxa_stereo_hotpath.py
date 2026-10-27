@@ -13,6 +13,15 @@ from test_kernel_variant_hotpath import body
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def shader_source():
+    # Read the real shared algorithm after its extraction from the legacy wrapper.
+    # Keep every old body/mutation/oracle assertion active against that source.
+    wrapper=(ROOT/'python/stereoforge/shaders/daxa/stereo.slang').read_text()
+    shared=(ROOT/'python/stereoforge/shaders/ops/sgm_specialized.slang').read_text()
+    assert '#include "../ops/sgm_specialized.slang"' in wrapper
+    return shared+'\n'+wrapper
+
+
 def check_resident_hotpath(source):
     entry = body(source, 'DaxaStereo::Frame DaxaStereo::process()')
     process = body(source, 'DaxaStereo::Frame DaxaStereo::process_at(')
@@ -52,7 +61,7 @@ def test_benchmark_keeps_consumer_and_full_reference_export_outside_frame_timing
 
 
 def test_wave_line_identity_does_not_assume_local_ids_equal_subgroup_ids():
-    source = (ROOT / 'python/stereoforge/shaders/daxa/stereo.slang').read_text()
+    source = shader_source()
     wave = body(source, 'void aggregate_wave(')
     assert not re.search(r'thread\.x\s*/\s*lanes', wave), 'Vulkan local invocation IDs do not determine subgroup membership'
     assert 'WaveGetWaveIndex()' in wave or 'SubgroupId' in source, 'wave line identity must use the real subgroup builtin'
@@ -87,12 +96,12 @@ def check_packed_resource_and_word_ownership(source, shader):
 
 
 def test_packed_variant_omits_dense_planes_and_accumulates_owned_words():
-    check_packed_resource_and_word_ownership((ROOT/'src/daxa_stereo.cpp').read_text(), (ROOT/'python/stereoforge/shaders/daxa/stereo.slang').read_text())
+    check_packed_resource_and_word_ownership((ROOT/'src/daxa_stereo.cpp').read_text(), shader_source())
 
 
 def test_packed_resource_guard_catches_restoring_dense_allocations():
     source = (ROOT/'src/daxa_stereo.cpp').read_text()
-    shader = (ROOT/'python/stereoforge/shaders/daxa/stereo.slang').read_text()
+    shader = shader_source()
     branch = 'if(packing&&(b==Costs||b==Sums))continue;'
     assert branch in source
     with pytest.raises(AssertionError, match='omit both dense'):
@@ -101,7 +110,7 @@ def test_packed_resource_guard_catches_restoring_dense_allocations():
 
 def test_packed_word_guard_catches_unnecessary_per_frame_atomics():
     source = (ROOT/'src/daxa_stereo.cpp').read_text()
-    shader = (ROOT/'python/stereoforge/shaders/daxa/stereo.slang').read_text()
+    shader = shader_source()
     marker = 'void aggregate_packed_body<let Components:uint,let Bits:uint>(uint3 gid){'
     assert marker in shader
     with pytest.raises(AssertionError, match='atomics are unnecessary'):
@@ -145,23 +154,23 @@ def check_reference_direction_specialization(shader):
 
 
 def test_right_cost_is_compile_time_bounded_and_left_remains_delegated():
-    check_reference_direction_specialization((ROOT/'python/stereoforge/shaders/daxa/stereo.slang').read_text())
+    check_reference_direction_specialization(shader_source())
 
 
 @pytest.mark.parametrize('old,new', [('d<width-x&&reference_valid','d<=width-x&&reference_valid'), ('target_valid[i+d]','target_valid[i-d]'), ('if(!RightReference)return specialized_cost(', 'if(p.paths==4)return specialized_cost(')])
 def test_direction_guard_rejects_row_crossing_wrong_sign_or_runtime_branch(old,new):
-    shader=(ROOT/'python/stereoforge/shaders/daxa/stereo.slang').read_text()
+    shader=shader_source()
     with pytest.raises(AssertionError):
         check_reference_direction_specialization(shader.replace(old,new,1))
 
 
 def test_specialized_variant_hoists_pixel_inputs_and_selects_constant_layouts():
-    check_specialized_address_arithmetic((ROOT/'python/stereoforge/shaders/daxa/stereo.slang').read_text())
+    check_specialized_address_arithmetic(shader_source())
 
 
 @pytest.mark.parametrize('regression', ['uint discarded=i%p.width;', 'uint discarded=i/p.width;'])
 def test_specialized_guard_catches_restored_per_disparity_division(regression):
-    shader=(ROOT/'python/stereoforge/shaders/daxa/stereo.slang').read_text()
+    shader=shader_source()
     marker='uint specialized_cost(uint x,uint i,uint d,uint reference,bool reference_valid,uint* right_valid,uint* right_desc){'
     assert marker in shader
     with pytest.raises(AssertionError,match='without per-disparity division'):
@@ -169,7 +178,7 @@ def test_specialized_guard_catches_restored_per_disparity_division(regression):
 
 
 def test_specialized_guard_catches_runtime_packing_layout():
-    shader=(ROOT/'python/stereoforge/shaders/daxa/stereo.slang').read_text()
+    shader=shader_source()
     marker='uint specialized_sum<let Components:uint,let Bits:uint>(uint x,uint i,uint d,uint word_base,uint paths,uint reference,bool reference_valid,uint* right_valid,uint* right_desc,uint* words){'
     assert marker in shader
     with pytest.raises(AssertionError,match='compile-time'):
@@ -195,12 +204,12 @@ def check_d128_state_and_admission(source,shader):
 
 
 def test_d128_has_bounded_state_and_rejects_other_dimensions_before_device():
-    check_d128_state_and_admission((ROOT/'src/daxa_stereo.cpp').read_text(),(ROOT/'python/stereoforge/shaders/daxa/stereo.slang').read_text())
+    check_d128_state_and_admission((ROOT/'src/daxa_stereo.cpp').read_text(),shader_source())
 
 
 def test_d128_guard_detects_lost_admission_check():
     source=(ROOT/'src/daxa_stereo.cpp').read_text()
-    shader=(ROOT/'python/stereoforge/shaders/daxa/stereo.slang').read_text()
+    shader=shader_source()
     condition='variant!=DaxaSgmVariant::PackedD128||c.disparities==128'
     assert condition in source
     with pytest.raises(AssertionError,match='reject every other'):
@@ -210,7 +219,7 @@ def test_d128_guard_detects_lost_admission_check():
 @pytest.mark.parametrize('old,new,diagnostic',[('disparities=128','disparities=p.disparities','compile-time'),('prev[4],next[4]','prev[8],next[8]','four components')])
 def test_d128_guard_detects_generic_state_regressions(old,new,diagnostic):
     source=(ROOT/'src/daxa_stereo.cpp').read_text()
-    shader=(ROOT/'python/stereoforge/shaders/daxa/stereo.slang').read_text()
+    shader=shader_source()
     start=shader.index('void aggregate_d128_body<')
     with pytest.raises(AssertionError,match=diagnostic):
         check_d128_state_and_admission(source,shader[:start]+shader[start:].replace(old,new))
@@ -254,7 +263,7 @@ def check_quad_collectives(shader):
 
 
 def test_quad_selection_uses_full_active_pixel_groups_without_lds():
-    shader=(ROOT/'python/stereoforge/shaders/daxa/stereo.slang').read_text()
+    shader=shader_source()
     source=(ROOT/'src/daxa_stereo.cpp').read_text()
     check_quad_collectives(shader)
     setup=body(source,'void DaxaStereo::Impl::setup(')
@@ -264,7 +273,7 @@ def test_quad_selection_uses_full_active_pixel_groups_without_lds():
 
 @pytest.mark.parametrize('insert,diagnostic',[('return;','uniform shuffles'),('GroupMemoryBarrierWithGroupSync();','LDS, barriers')])
 def test_quad_guard_catches_early_tail_exit_or_restored_barrier(insert,diagnostic):
-    shader=(ROOT/'python/stereoforge/shaders/daxa/stereo.slang').read_text()
+    shader=shader_source()
     marker='void select_quad_body<let Components:uint,let Bits:uint>(uint3 gid){'
     assert marker in shader
     with pytest.raises(AssertionError,match=diagnostic):
@@ -272,7 +281,7 @@ def test_quad_guard_catches_early_tail_exit_or_restored_barrier(insert,diagnosti
 
 
 def test_quad_guard_catches_assumed_subgroup_identity():
-    shader=(ROOT/'python/stereoforge/shaders/daxa/stereo.slang').read_text()
+    shader=shader_source()
     start=shader.index('void select_quad_body<')
     with pytest.raises(AssertionError,match='actual subgroup'):
         check_quad_collectives(shader[:start]+shader[start:].replace('WaveGetWaveIndex()','0'))
@@ -280,6 +289,8 @@ def test_quad_guard_catches_assumed_subgroup_identity():
 
 def check_shuffle_minimum_only(shader):
     original=body(shader,'void aggregate_specialized_body<')
+    # Canonicalize only the new explicit bindings back to the legacy wrapper names.
+    original=original.replace('parameters.','p.').replace('sgm_direction(path)','sgm_direction(pc.pass)').replace('(gid.y*groups_x+gid.x)','linear_group(gid)')
     # Compare shuffle to the left instantiation, folding only exact compile-time routing.
     original=original.replace('RightReference?p.right_desc_address:p.left_desc_address','p.left_desc_address').replace('RightReference?p.left_desc_address:p.right_desc_address','p.right_desc_address')
     original=original.replace('RightReference?p.right_valid_address:p.left_valid_address','p.left_valid_address').replace('RightReference?p.left_valid_address:p.right_valid_address','p.right_valid_address')
@@ -299,14 +310,14 @@ def check_shuffle_minimum_only(shader):
 
 
 def test_shuffle_variant_changes_only_full_wave_minimum():
-    check_shuffle_minimum_only((ROOT/'python/stereoforge/shaders/daxa/stereo.slang').read_text())
+    check_shuffle_minimum_only(shader_source())
     setup=body((ROOT/'src/daxa_stereo.cpp').read_text(),'void DaxaStereo::Impl::setup(')
     assert 'i==19||i==20' in setup[:setup.index('shader.create_flags=')]
 
 
 @pytest.mark.parametrize('old,new,diagnostic',[('offset<32','offset<16','five full-wave'),('if(lanes==64)','if(lane==0)','five full-wave'),('uint local_min=SGM_REDUCTION_INF','uint local_min=0','only the minimum')])
 def test_shuffle_guard_detects_lost_partners_active_sources_or_neutral_value(old,new,diagnostic):
-    shader=(ROOT/'python/stereoforge/shaders/daxa/stereo.slang').read_text()
+    shader=shader_source()
     start=shader.index('void aggregate_shuffle_body<')
     with pytest.raises(AssertionError,match=diagnostic):
         check_shuffle_minimum_only(shader[:start]+shader[start:].replace(old,new))
@@ -325,7 +336,7 @@ def scalar_cpu_probe(tmp_path_factory):
         pytest.skip('C++ compiler unavailable for CPU-only scalar/model probe')
     source = (ROOT / 'src/daxa_stereo.cpp').read_text()
     header = (ROOT / 'include/stereoforge/daxa_stereo.hpp').read_text()
-    shader = (ROOT / 'python/stereoforge/shaders/daxa/stereo.slang').read_text()
+    shader = shader_source()
     ops = (ROOT / 'python/stereoforge/shaders/ops/sgm.slang').read_text()
     # Compile the actual pure CPU definitions with a CPU-only declaration shim.
     # No Daxa headers, Vulkan library, runtime owner, queue or device is involved.

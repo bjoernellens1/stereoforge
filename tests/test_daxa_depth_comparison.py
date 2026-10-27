@@ -79,7 +79,7 @@ def fixture(tmp_path):
 
 def identity():
     return dict(compiler_sha256='compiler',manifest_sha256='manifest',capture_sha256='capture',fixture_file_sha256={},source_sha256={},
-                shader_source_sha256_pairs=dict(depth='dw:do',preprocess='pw:po',stereo='sw:so'))
+                shader_source_sha256_pairs=dict(depth='dw:do',preprocess='pw:po',stereo='sw:so'),stereo_shared_shader_source_sha256_pair='parameters:specialized',stereo_layered_shader_source_sha256='layered')
 
 
 def profile():return dict(width=8,height=5,disparities=16,paths=4,p1=8,p2=32,subpixel=True)
@@ -101,10 +101,11 @@ def native_report(m,metadata,metric,schedule="sequential",paths=4):
         **{key:dict(stats) for key in depth.TIMINGS})
     report['paths']=paths
     report['requested_observation_buffer_bytes'],report['requested_combined_buffer_bytes']=depth.requested_bytes(m,dict(profile(),paths=paths),1)
-    report.update(stereo_schedule=schedule,per_reference_stereo_timings_available=schedule=='sequential',
-                  stereo_timing_scope='sequential_per_reference_graphs' if schedule=='sequential' else 'paired_per_path_phase_intervals_include_both_references; no_isolated_per_reference_times',
+    forms={'sequential':'two_sequential_reference_graphs','paired-per-path':'two_reference_dispatches_per_phase','layered-per-path':'two_reference_dispatches_census_clear; z2_single_dispatch_aggregation_selection'}
+    report.update(stereo_dispatch_form=forms[schedule],stereo_shared_shader_source_sha256_pair='parameters:specialized',stereo_layered_shader_source_sha256='layered',stereo_schedule=schedule,per_reference_stereo_timings_available=schedule=='sequential',
+                  stereo_timing_scope=r_scope(schedule),
                   gpu_paired_stereo_ms=None,gpu_paired_stereo_phases_ms={})
-    if schedule=='paired-per-path':
+    if schedule!='sequential':
         report['gpu_left_stereo_ms']=report['gpu_right_stereo_ms']=None
         report['gpu_paired_stereo_ms']=dict(stats)
         phases=['census_left','census_right','zero_packed_penalties','aggregate_pos_x','aggregate_neg_x','aggregate_pos_y','aggregate_neg_y']
@@ -114,7 +115,7 @@ def native_report(m,metadata,metric,schedule="sequential",paths=4):
 
 
 @pytest.mark.parametrize('mutation',[None,'scope','support_policy','layers','units','metric_bits','metric_float','compiler','shader','integer_false','packed_false','compound_true','preprocess_false','lr_false','source_id','metadata','retirement','memory','nonfinite','diagnostic','missing_plane','changed_plane','changed_raw','missing_raw','changed_input','changed_source','changed_report','wrong_adapter','rhi_metric','rhi_profile','admission_missing','admission_changed','changed_setup_manifest'])
-@pytest.mark.parametrize('schedule',['sequential','paired-per-path'])
+@pytest.mark.parametrize('schedule',['sequential','paired-per-path','layered-per-path'])
 def test_mocked_whole_combined_protocol(tmp_path,monkeypatch,mutation,schedule):
     manifest,m,metadata,metric=fixture(tmp_path);ident=identity();luma=(np.arange(40,dtype='<u4').tobytes(),np.arange(40,80,dtype='<u4').tobytes());supports=(np.ones(40,'<u4').tobytes(),)*2
     def planes(path):
@@ -222,10 +223,10 @@ def test_actual_compiler_dependency_headers_are_hashed_fail_closed(tmp_path,monk
 
 
 def r_scope(schedule):
-    return 'sequential_per_reference_graphs' if schedule=='sequential' else 'paired_per_path_phase_intervals_include_both_references; no_isolated_per_reference_times'
+    return {'sequential':'sequential_per_reference_graphs','paired-per-path':'paired_per_path_phase_intervals_include_both_references; no_isolated_per_reference_times','layered-per-path':'layered_per_path_phase_intervals_include_both_references; no_isolated_per_reference_times'}[schedule]
 
 
-@pytest.mark.parametrize('schedule',['sequential','paired-per-path'])
+@pytest.mark.parametrize('schedule',['sequential','paired-per-path','layered-per-path'])
 @pytest.mark.parametrize('paths',[4,8])
 @pytest.mark.parametrize('mutation',[None,'mode','unknown_mode','scope','availability','availability_missing','left_fabricated','right_fabricated','paired_total','phase_missing','phase_extra','phase_zero','phase_nonfinite','pair_zero'])
 def test_schedule_timing_report_contract(tmp_path,schedule,paths,mutation):
@@ -255,8 +256,53 @@ def test_schedule_timing_report_contract(tmp_path,schedule,paths,mutation):
     assert good['requested_combined_buffer_bytes']==depth.requested_bytes(m,dict(profile(),paths=paths),1)[1]
 
 
-@pytest.mark.parametrize('schedule',['paired','PairedPerPath',None,True,0])
+@pytest.mark.parametrize('schedule',['paired','PairedPerPath','layered','LayeredPerPath',None,True,0])
 def test_unknown_schedule_rejected_before_inputs_or_child(tmp_path,monkeypatch,schedule):
     monkeypatch.setattr(depth,'fixture_planes',lambda *a:pytest.fail('fixture must not be read'))
     monkeypatch.setattr(depth.subprocess,'run',lambda *a,**k:pytest.fail('child forbidden'))
     with pytest.raises(ValueError):depth.run_comparison(Path('/fixture'),Path('/rhi'),Path('/daxa'),Path('/compiler'),tmp_path/'out',validation_only=True,stereo_schedule=schedule)
+
+
+@pytest.mark.parametrize('schedule',['sequential','paired-per-path','layered-per-path'])
+@pytest.mark.parametrize('field',['stereo_dispatch_form','stereo_shared_shader_source_sha256_pair','stereo_layered_shader_source_sha256'])
+@pytest.mark.parametrize('missing',[False,True])
+def test_actual_dispatch_form_and_compiled_helper_identity_are_required(tmp_path,schedule,field,missing):
+    _,m,metadata,metric=fixture(tmp_path);report=native_report(m,metadata,metric,schedule)
+    if missing:del report[field]
+    else:report[field]='wrong_actual_compiled_input_or_dispatch'
+    with pytest.raises(ValueError):depth.validate_report(report,m,metadata,metric,identity(),profile(),1,0,1,32,False,stereo_schedule=schedule)
+
+
+@pytest.mark.parametrize('name',[
+ 'python/stereoforge/shaders/daxa/stereo_parameters.slang',
+ 'python/stereoforge/shaders/ops/sgm_specialized.slang',
+ 'python/stereoforge/shaders/daxa/stereo_layered.slang',
+ 'daxa-stereo-aggregate_layered8.spv','daxa-stereo-aggregate_layered16.spv',
+ 'daxa-stereo-select_layered8.spv','daxa-stereo-select_layered16.spv'])
+@pytest.mark.parametrize('removed',[False,True])
+def test_actual_layered_helper_and_spirv_binding_tamper(tmp_path,monkeypatch,name,removed):
+    root=tmp_path/'source';directory=tmp_path/'build';directory.mkdir()
+    names=['python/stereoforge/shaders/daxa/stereo_parameters.slang','python/stereoforge/shaders/ops/sgm_specialized.slang','python/stereoforge/shaders/daxa/stereo_layered.slang',
+           'daxa-stereo-aggregate_layered8.spv','daxa-stereo-aggregate_layered16.spv','daxa-stereo-select_layered8.spv','daxa-stereo-select_layered16.spv']
+    paths={n:(root/n if n.startswith('python/') else directory/n) for n in names}
+    for n,path in paths.items():path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(n.encode())
+    actual_sha=depth.base.sha256
+    def digest(path):return actual_sha(path) if Path(path) in paths.values() else 'bound:'+str(path)
+    monkeypatch.setattr(depth.base,'ROOT',root);monkeypatch.setattr(depth.base,'sha256',digest)
+    monkeypatch.setattr(depth.preprocess,'native_identities',lambda *a:dict(offline_shader_directory=str(directory),offline_spirv_sha256={},source_sha256={}))
+    monkeypatch.setattr(depth.right,'native_identities',lambda *a:dict(daxa=dict(offline_shader_directory=str(directory),offline_spirv_sha256={}),source_sha256={},rhi={}))
+    monkeypatch.setattr(depth,'compiler_header_identities',lambda *a:{})
+    monkeypatch.setattr(depth.preprocess,'validate_fixture',lambda *a:(dict(capture=dict(sha256='capture')),{}))
+    probe=lambda:depth.native_identities(Path('/rhi'),Path('/native'),Path('/compiler'),Path('/manifest'))
+    before=probe()
+    for n,path in paths.items():
+        if n.startswith('python/'):assert before['source_sha256'][n]==actual_sha(path)
+        else:assert before['offline_spirv_sha256'][n]==actual_sha(path)
+    assert before['stereo_shared_shader_source_sha256_pair']==':'.join(actual_sha(paths[n]) for n in names[:2])
+    assert before['stereo_layered_shader_source_sha256']==actual_sha(paths[names[2]])
+    if removed:
+        paths[name].unlink()
+        with pytest.raises(OSError):probe()
+    else:
+        paths[name].write_bytes(b'tampered actual source or shader bytes')
+        assert probe()!=before

@@ -92,9 +92,11 @@ public:
     static const char* variant_name(DaxaSgmVariant);
     static std::string shader_identity();
     static std::string shader_directory();
+    static std::string specialized_shader_identity(); // Actual compiled Parameters:shared-body SHA256.
+    static std::string layered_shader_identity(); // Actual compiled layered wrapper SHA256.
 private:
     // Depth-only combined scheduling. Setup owns no Frame/producer marker.
-    void setup_pair(DaxaStereo& right);
+    void setup_pair(DaxaStereo& right,bool layered=false);
     unsigned pair_slot_at(uint64_t oldest)const; // Both aligned slots available, before upstream upload.
     std::array<Frame,2> process_pair_at(const DaxaFrame&,uint64_t oldest,unsigned slot);
     DaxaStereoTiming pair_timings(const Frame& left,const Frame& right)const;

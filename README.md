@@ -253,6 +253,12 @@ within each scan-direction phase. It preserves exact outputs but measured
 40–41 ms host wall against 32 ms sequential on the current AMD system;
 sequential remains the default. See [paired scheduling evidence](docs/daxa-depth-paired-evidence.md).
 
+A separate opt-in `--stereo-schedule layered-per-path` uses an eye-layered
+aggregation/selection dispatch while preserving separate accumulators and exact
+output gates. It also measured a regression: about 40.5–40.9 ms host wall against
+32.2–32.3 ms Sequential in matched ABBA runs. Sequential remains the default.
+See [layered scheduling evidence](docs/daxa-depth-layered-evidence.md).
+
 ## Standalone C++ runtime
 
 Build without Python, SlangPy or SGL using `cmake --preset standalone` and

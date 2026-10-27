@@ -15,7 +15,7 @@ Offline fixture creation can use Python/OpenCV; native processing uses C++ and
 offline Slang SPIR-V.
 
 `DaxaDepthConfig` contains `StereoConfig`, `lr_tolerance` (default 1), one or two
-slots, and required full subgroup size 32 or 64. Both references use
+slots, required full subgroup size 32 or 64, and an explicit stereo schedule. Both references use
 `PackedSpecialized`; existing disparity, path, penalty and packing limits apply.
 The benchmark fixes subpixel=true and LR tolerance=1. Its default slot count is
 2, while the C++ configuration defaults to 1.
@@ -156,7 +156,7 @@ be combined into a camera-age measurement.
 ## Resident processing and diagnostics
 
 The frame path performs one packed-source staging copy, GPU decode/remap/gray,
-two stereo graphs, LR and metric/metadata materialization. Coherent parameter
+stereo scheduling, LR and metric/metadata materialization. Coherent parameter
 updates and producer compute writes have explicit same-queue visibility before
 consumption. It performs no full luma/output CPU transfer, per-frame geometry
 validation or application heap allocation on successful warmed admissions.
@@ -204,4 +204,9 @@ The same-queue upload-through-metric span remains the complete depth measure.
 
 This explicit experimental mode measured a regression and is not promoted.
 See [paired evidence](daxa-depth-paired-evidence.md). It records two dispatches
-per phase; a combined layered kernel is a subsequent experiment.
+per phase. The separate optional `LayeredPerPath` mode uses one XY×2 dispatch
+per aggregation direction and selection, with the same buffers, path hazards,
+leases and paired timing interpretation; Census/clear work remains duplicated.
+Its shared-body extraction and required legacy-control requalification are
+documented in [layered evidence](daxa-depth-layered-evidence.md). Sequential
+remains the default; qualification and timing are explicit per experiment.
