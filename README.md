@@ -57,9 +57,11 @@ uv run stereoforge replay artifacts/recording --config configs/wide-rgbd.json \
 ```
 
 Outputs contain `rgb.png`, lossless `depth.npz` planes, and `metrics.json`.
-Recordings contain original left/right RGB, factory calibration, ordered IDs,
-timestamps/clock domains, sensor samples where available, configuration, and
-SHA256 checksums. Incomplete or corrupted recordings are rejected.
+The adapter converts camera USB YUYV to left/right RGB. Recordings losslessly
+preserve those RGB bytes, not the original packed YUYV or Bayer sensor data, plus
+factory calibration, ordered IDs, timestamps/clock domains, available sensor
+samples, configuration, and SHA256 checksums. Incomplete or corrupted recordings
+are rejected.
 
 Recording compression and processing can drop camera frames; capture metrics
 report SDK frame-ID gaps. Acquisition rate is distinct from depth throughput.
@@ -101,8 +103,8 @@ uv run stereoforge ablate artifacts/recording --motions motions.json \
   --backend vulkan --disparities 64 --output artifacts/ablations.json
 ```
 
-`motions.json` maps each destination frame ID to a 4x4 **previous raw left-camera
-to current raw left-camera** transform in metres. Supply every transition for
+`motions.json` maps each destination frame ID to a 4x4 **previous unrectified left-camera
+to current unrectified left-camera** transform in metres. Supply every transition for
 ablations. Identity transforms assert a static rig; they are never assumed.
 Stabilized output through the Python API requires a rig-to-world `TimedPose`
 with the image's exact timestamp and clock domain. Pose estimation/VIO is external.

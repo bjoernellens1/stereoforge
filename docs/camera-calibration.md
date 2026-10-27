@@ -24,3 +24,30 @@ sudo udevadm trigger --action=add /sys/class/hidraw/hidraw2
 
 Device node numbering can change. Reidentify the node before applying a temporary
 ACL. Reopening capture after permission changes reruns sensor initialization.
+
+## Camera and host processing boundary
+
+The camera supplies ISP-processed, synchronized images, image controls, sensor
+samples and USB transport. Its images are
+[unrectified post-ISP video](https://docs.stereolabs.com/docs/development/zed-sdk/modules/camera/recording),
+not Bayer sensor raw. Rectification, matching and metric depth are
+[host computations](https://support.stereolabs.com/articles/6815914373-how-does-the-zed-3d-perception-work);
+StereoForge also performs temporal processing and view synthesis on the host.
+Slang shaders cannot be deployed onto the camera through this capture interface.
+
+Currently the adapter converts packed USB YUYV to RGB on the CPU. The pipeline
+rectifies RGB and converts it to grayscale on the CPU before Vulkan stereo.
+This is not GPU rectification or a zero-copy capture path. Image controls applied
+before USB delivery are already reflected in the recorded pixels.
+
+Priorities below remain **unimplemented**, with separate correctness and
+transfer-inclusive performance gates:
+
+- Preserve packed YUYV, match directly from luminance, and create RGB lazily while
+  checking image quality against the existing conversion path.
+- Expose capture controls and record exposure, gain and white balance; validate
+  left/right consistency rather than assume matching settings.
+- Move rectification to Vulkan and add a persistent upload ring to reduce copies.
+
+These priorities do not establish control ranges, sensor rates or measured depth
+accuracy.

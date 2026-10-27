@@ -1,11 +1,14 @@
 # Execution and geometry contracts
 
 Optical coordinates use +X right, +Y down, +Z forward. Translations/depth use metres.
-`Calibration.right_to_left` is the raw right camera's rigid pose in the raw left
-camera/rig frame. Calibration identity hashes the canonical serialized parameters.
+`Calibration.right_to_left` is the unrectified right camera's rigid pose in the
+unrectified left camera/rig frame. Legacy image-geometry names such as
+`depth_to_raw` mean the unrectified post-ISP source geometry, not Bayer sensor
+raw data. Calibration identity hashes the canonical serialized parameters.
 Rectification creates a separate calibration identity and stores its rotations and
 projection matrices. `depth_to_raw` reprojects measured geometry with visibility
-checks before any raw-RGB view synthesis; it never treats rectified depth as raw.
+checks before source-RGB view synthesis; rectified and source geometry remain
+distinct.
 
 Host `StereoFrame` owns uint8 RGB arrays and records timestamp, clock domain,
 observation/frame identity, and raw sensor samples. `DepthFrame` owns disparity,
@@ -38,7 +41,7 @@ resources stay alive through completion even if the facade is destroyed. Readbac
 is explicit. A host completion token is not an imported cross-queue semaphore.
 
 View synthesis separates strict geometry from preview approximation. Both use
-original lens canvases. Virtual-camera projection, pose, requested canvas FOV,
+unrectified post-ISP lens canvases. Virtual-camera projection, pose, requested canvas FOV,
 depth convention, visibility, and color/depth masks are explicit. Cylindrical views
 can include rays behind the virtual +Z axis within their canvas; perspective views
 cannot. Translation never fabricates disoccluded surfaces. Raw sensor data and a

@@ -48,7 +48,7 @@ def discover_cameras():
 
 
 def yuyv_to_stereo(yuyv,calibration,timestamp_ns,frame_id,sensor_samples=None):
-    """Convert copied packed side-by-side YUYV, preserving both raw lens canvases."""
+    """Convert copied packed side-by-side YUYV, preserving unrectified post-ISP lens canvases."""
     left,right=calibration.left,calibration.right
     if (left.width,left.height)!=(right.width,right.height):
         raise ValueError('ZED capture requires equal left/right image dimensions')

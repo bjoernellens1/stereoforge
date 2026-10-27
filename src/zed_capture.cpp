@@ -130,7 +130,7 @@ public:
 };
 
 PYBIND11_MODULE(_zed_capture,m) {
-    m.doc()="ZED Open Capture raw stereo and IMU; no proprietary SDK";
+    m.doc()="ZED Open Capture unrectified post-ISP stereo and raw IMU; no proprietary SDK";
     py::register_exception<FrameTimeout>(m,"CaptureTimeout",PyExc_TimeoutError);
     py::class_<ZedCapture>(m,"ZedCapture")
       .def(py::init<int,int,int,int>(),py::arg("width")=1280,py::arg("height")=720,py::arg("fps")=60,py::arg("device_id")=-1)
