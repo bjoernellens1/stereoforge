@@ -1,5 +1,6 @@
 #pragma once
 #include <stereoforge/contracts.hpp>
+#include <stereoforge/daxa_frame.hpp>
 #include <stereoforge/daxa_foundation.hpp>
 #include <array>
 #include <memory>
@@ -41,6 +42,7 @@ class DaxaStereo {
     struct Impl;
     struct Slot;
     std::shared_ptr<Impl> impl_;
+    friend class DaxaPreprocessStereo;
 public:
     class Frame {
         std::shared_ptr<Impl> owner_;
@@ -60,11 +62,14 @@ public:
         uint64_t generation()const;
         uint64_t context_id()const;
         uint32_t packing_bits()const;
+        CaptureLease source()const;const std::string& calibration_identity()const;
     };
     static std::array<uint32_t,3> dispatch_grid(uint64_t groups,std::array<uint32_t,3> limits);
     static void validate_shape(StereoConfig,unsigned slots,std::optional<MetricCalibration>,DaxaSgmVariant variant=DaxaSgmVariant::Baseline); // CPU-only before input allocation.
     static void validate(StereoConfig,std::span<const uint32_t>,std::span<const uint32_t>,unsigned slots,std::optional<MetricCalibration>,DaxaSgmVariant variant=DaxaSgmVariant::Baseline);
     DaxaStereo(StereoConfig,std::span<const uint32_t> left,std::span<const uint32_t> right,DaxaSgmVariant,unsigned slots=1,bool validation=false,std::optional<MetricCalibration> metric=std::nullopt,std::shared_ptr<DaxaFoundation> owner={},uint32_t required_wave_size=0);
+    DaxaStereo(StereoConfig,const DaxaFrame& prototype,DaxaSgmVariant,unsigned slots,std::optional<MetricCalibration>,std::shared_ptr<DaxaFoundation>,uint32_t required_wave_size=0);
+    Frame process(const DaxaFrame&);size_t collect_completed_inputs();
     Frame process(); // No wait/full readback/own allocations; rejects retained/in-flight slots.
     DaxaStereoReadback readback(Frame const&,bool include_costs_and_sums=false)const;
     std::array<uint32_t,4> inspect(Frame const&)const; // Separate small GPU consumer/readback.
@@ -78,5 +83,8 @@ public:
     static const char* variant_name(DaxaSgmVariant);
     static std::string shader_identity();
     static std::string shader_directory();
+private:
+    Frame process_at(const DaxaFrame*,uint64_t oldest);
+    size_t collect_completed_inputs_at(uint64_t oldest);
 };
 }

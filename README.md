@@ -210,6 +210,21 @@ run after timing. `--check-integer-reference` verifies integer stages and packed
 words; it does not certify the unresolved scalar compound-float gate. The
 full GPU stereo CTests retain that stricter gate and are currently unqualified.
 
+## Experimental native preprocessing
+
+The optional C++/Daxa path now connects packed YUYV capture leases to original
+RGB, rectified RGB/luma and stereo on one GPU context. A repeated synthetic
+720p-per-eye fixture measures **0.45 ms preprocessing host wall**, or **16.08 ms
+including one-reference D128/four-path stereo** (30 samples, three warmups).
+Original RGB is retained for later wide-view integration. Full-size exact
+preprocessing/integer checks and core/synchronization validation pass.
+
+These measurements include staged upload and host waits, but exclude live
+acquisition, the second stereo reference/LR checks and RGB-D synthesis. They do
+not qualify complete 60 Hz operation. Enable `STEREOFORGE_DAXA_PREPROCESS=ON`
+alongside `STEREOFORGE_DAXA_STEREO=ON`; both remain optional. See the
+[preprocessing evidence and commands](docs/daxa-preprocess-evidence.md).
+
 ## Standalone C++ runtime
 
 Build without Python, SlangPy or SGL using `cmake --preset standalone` and

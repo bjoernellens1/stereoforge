@@ -1,0 +1,14 @@
+nlohmann/json v3.11.3 single_include/nlohmann/json.hpp
+SHA256: 9bea4c8066ef4a1c206b2be5a36302f8926f7fdc6087af5d20b417d0cf103ea6
+Source: https://github.com/nlohmann/json/blob/v3.11.3/single_include/nlohmann/json.hpp
+
+Copyright declarations retained from the inspected amalgamated header:
+
+// SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+// SPDX-FileCopyrightText: 2016-2021 Evan Nemerson <evan@nemerson.com>
+// SPDX-FileCopyrightText: 2018 The Abseil Authors
+// SPDX-FileCopyrightText: 2008-2009 Björn Hoehrmann <bjoern@hoehrmann.de>
+// SPDX-FileCopyrightText: 2009 Florian Loitsch <https://florian.loitsch.com/>
+
+These sections identify SPDX-License-Identifier: MIT. The complete upstream
+MIT permission/disclaimer text is retained in nlohmann-json.LICENSE.MIT.

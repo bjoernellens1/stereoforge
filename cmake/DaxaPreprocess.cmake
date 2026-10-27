@@ -1,0 +1,46 @@
+include_guard(GLOBAL)
+find_package(OpenSSL 3 REQUIRED COMPONENTS Crypto)
+include(FetchContent)
+FetchContent_Declare(sf_native_json
+  URL https://raw.githubusercontent.com/nlohmann/json/v3.11.3/single_include/nlohmann/json.hpp
+  URL_HASH SHA256=9bea4c8066ef4a1c206b2be5a36302f8926f7fdc6087af5d20b417d0cf103ea6
+  DOWNLOAD_NO_EXTRACT TRUE)
+FetchContent_MakeAvailable(sf_native_json)
+if(NOT TARGET stereoforge_capture)
+  find_package(Threads REQUIRED)
+  add_library(stereoforge_capture src/capture.cpp)
+  target_link_libraries(stereoforge_capture PUBLIC stereoforge_contracts PRIVATE Threads::Threads)
+  target_compile_features(stereoforge_capture PUBLIC cxx_std_20)
+endif()
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS shaders/daxa/preprocess.slang shaders/ops/preprocess.slang)
+file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/shaders/daxa/preprocess.slang" SF_DAXA_PREPROCESS_WRAPPER_SHA256)
+file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/shaders/ops/preprocess.slang" SF_DAXA_PREPROCESS_OPS_SHA256)
+set(sf_preprocess_spirv)
+foreach(entry decode_yuyv rectify_gray)
+  set(output "${CMAKE_CURRENT_BINARY_DIR}/daxa-preprocess-${entry}.spv")
+  add_custom_command(OUTPUT "${output}"
+    COMMAND "${SF_DAXA_SLANGC}" "${CMAKE_CURRENT_SOURCE_DIR}/shaders/daxa/preprocess.slang"
+    -target spirv -profile spirv_1_5 -restrictive-capability-check -matrix-layout-row-major -fvk-use-scalar-layout -O3
+    -entry "${entry}" -stage compute -o "${output}"
+    DEPENDS shaders/daxa/preprocess.slang shaders/ops/preprocess.slang VERBATIM)
+  list(APPEND sf_preprocess_spirv "${output}")
+endforeach()
+add_custom_target(daxa_preprocess_shaders DEPENDS ${sf_preprocess_spirv})
+add_library(stereoforge_daxa_preprocess src/daxa_preprocess.cpp)
+target_include_directories(stereoforge_daxa_preprocess PRIVATE "${sf_native_json_SOURCE_DIR}")
+target_link_libraries(stereoforge_daxa_preprocess PUBLIC stereoforge_daxa_stereo stereoforge_capture PRIVATE OpenSSL::Crypto GPUOpen::VulkanMemoryAllocator)
+target_compile_definitions(stereoforge_daxa_preprocess PRIVATE SF_DAXA_PREPROCESS_SPIRV_DIRECTORY="${CMAKE_CURRENT_BINARY_DIR}" SF_DAXA_PREPROCESS_WRAPPER_SHA256="${SF_DAXA_PREPROCESS_WRAPPER_SHA256}" SF_DAXA_PREPROCESS_OPS_SHA256="${SF_DAXA_PREPROCESS_OPS_SHA256}")
+add_dependencies(stereoforge_daxa_preprocess daxa_preprocess_shaders)
+file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/native/licenses")
+foreach(name nlohmann-json.LICENSE.MIT nlohmann-json.NOTICE openssl.LICENSE.Apache-2.0)
+  configure_file("${CMAKE_CURRENT_LIST_DIR}/../third_party/licenses/${name}" "${CMAKE_BINARY_DIR}/native/licenses/${name}" COPYONLY)
+endforeach()
+if(BUILD_TESTING)
+  add_executable(daxa_preprocess_contracts tests/daxa_preprocess.cpp)
+  target_link_libraries(daxa_preprocess_contracts PRIVATE stereoforge_daxa_preprocess)
+  add_test(NAME daxa_preprocess_cpu_contracts COMMAND daxa_preprocess_contracts --cpu-only)
+endif()
+
+add_executable(daxa_preprocess_benchmark apps/daxa_preprocess_benchmark.cpp)
+target_include_directories(daxa_preprocess_benchmark PRIVATE "${sf_native_json_SOURCE_DIR}")
+target_link_libraries(daxa_preprocess_benchmark PRIVATE stereoforge_daxa_preprocess)

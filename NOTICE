@@ -11,3 +11,9 @@ The upstream license-choice notice is retained alongside that license.
 This public source distribution is not a binary release. It does not claim
 ownership of, or grant additional rights to, third-party vendor binaries.
 Redistribution of dependencies must satisfy their respective license terms.
+
+The optional native preprocessing fixture loader uses nlohmann/json v3.11.3
+(MIT; see third_party/licenses/nlohmann-json.NOTICE for all inspected
+single-header copyright declarations) and separately obtained OpenSSL
+Crypto 3.x (Apache-2.0). Full inspected license texts are retained under
+third_party/licenses; preserve notices for the actual distributed versions.

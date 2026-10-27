@@ -17,8 +17,10 @@ foreach(entry IN LISTS sf_daxa_stereo_entries)
   list(APPEND sf_daxa_stereo_spirv "${output}")
 endforeach()
 add_custom_target(daxa_stereo_shaders DEPENDS ${sf_daxa_stereo_spirv})
+add_library(stereoforge_daxa_frame src/daxa_frame.cpp)
+target_link_libraries(stereoforge_daxa_frame PUBLIC stereoforge_daxa_foundation)
 add_library(stereoforge_daxa_stereo src/daxa_stereo.cpp)
-target_link_libraries(stereoforge_daxa_stereo PUBLIC stereoforge_daxa_foundation PRIVATE GPUOpen::VulkanMemoryAllocator)
+target_link_libraries(stereoforge_daxa_stereo PUBLIC stereoforge_daxa_foundation stereoforge_daxa_frame PRIVATE GPUOpen::VulkanMemoryAllocator)
 target_compile_definitions(stereoforge_daxa_stereo PRIVATE
   SF_DAXA_STEREO_SPIRV_DIRECTORY="${CMAKE_CURRENT_BINARY_DIR}"
   SF_DAXA_STEREO_WRAPPER_SHA256="${SF_DAXA_STEREO_WRAPPER_SHA256}"
@@ -34,4 +36,9 @@ if(BUILD_TESTING)
     add_test(NAME daxa_stereo_${variant}_contracts COMMAND daxa_stereo_contracts --gpu "${variant}")
     set_tests_properties(daxa_stereo_${variant}_contracts PROPERTIES LABELS "vulkan;hardware;daxa")
   endforeach()
+endif()
+
+option(STEREOFORGE_DAXA_PREPROCESS "Build staged native GPU preprocessing and luma bridge" OFF)
+if(STEREOFORGE_DAXA_PREPROCESS)
+  include("${CMAKE_CURRENT_LIST_DIR}/DaxaPreprocess.cmake")
 endif()

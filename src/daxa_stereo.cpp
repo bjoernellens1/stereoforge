@@ -1,4 +1,5 @@
 #include <stereoforge/daxa_stereo.hpp>
+#include <stereoforge/daxa_preprocess.hpp>
 #include <daxa/utils/task_graph.hpp>
 #include <daxa/c/device.h>
 #include <daxa/c/types.h>
@@ -123,12 +124,14 @@ struct DaxaStereo::Slot {
     std::unique_ptr<daxa::TaskGraph> graph;
     daxa::TimelineQueryPool queries;
     uint64_t submit=0,generation=0;
+    DaxaFrame input;CaptureLease source;
     unsigned started=0,finished=0;
 };
 struct DaxaStereo::Impl {
     std::shared_ptr<DaxaFoundation> context;
     StereoConfig config;
     DaxaSgmVariant variant;
+    std::shared_ptr<const DaxaRectification> calibration;
     std::optional<MetricCalibration> metric;
     std::array<daxa::ComputePipeline,21> pipelines;
     std::vector<daxa::BufferId> owned;
@@ -152,13 +155,15 @@ struct DaxaStereo::Impl {
     }
     ~Impl(){auto& d=context->device;d.wait_idle();slots.clear();pipelines={};for(auto b:owned)if(d.is_id_valid(b))d.destroy_buffer(b);d.collect_garbage();memory.clear();}
     daxa::BufferId allocate(size_t size,const std::string& name,bool host=false){auto& d=context->device;daxa::BufferInfo info{.size=size,.name=name};daxa::BufferId b;if(host){auto m=d.create_memory({.requirements=context->coherent_readback_requirements(info),.flags=daxa::MemoryFlagBits::HOST_ACCESS_RANDOM});b=d.create_buffer_from_memory_block({.buffer_info=info,.memory_block=m});memory.push_back(std::move(m));}else b=d.create_buffer(info);owned.push_back(b);allocated+=size;return b;}
-    void setup(std::span<const uint32_t> left,std::span<const uint32_t> right,unsigned count);
+    void setup(std::span<const uint32_t> left,std::span<const uint32_t> right,unsigned count,const DaxaFrame* prototype=nullptr);
     void completed(Frame const& f)const{f.validate();require(f.slot_->submit<context->device.oldest_pending_submit_index(),"GPU completion required before query access");}
 };
-void DaxaStereo::Impl::setup(std::span<const uint32_t> left,std::span<const uint32_t> right,unsigned count){
-    auto& d=context->device;size_t n=size_t(config.width)*config.height,volume=n*config.disparities;auto recorder=d.create_command_recorder({.name="one-time retained stereo luma upload"});std::array<daxa::BufferId,2> inputs;
+void DaxaStereo::Impl::setup(std::span<const uint32_t> left,std::span<const uint32_t> right,unsigned count,const DaxaFrame* prototype){
+    auto& d=context->device;size_t n=size_t(config.width)*config.height,volume=n*config.disparities;std::array<daxa::BufferId,2> inputs;
+    if(prototype){inputs[0]=prototype->plane(DaxaPreprocessPlane::LeftLuma).buffer();inputs[1]=prototype->plane(DaxaPreprocessPlane::RightLuma).buffer();}else{auto recorder=d.create_command_recorder({.name="one-time retained stereo luma upload"});
     for(unsigned eye=0;eye<2;++eye){auto image=eye?right:left;inputs[eye]=allocate(n*4,resource_names[eye]);auto staging=allocate(n*4,std::string("setup_staging_")+resource_names[eye],true);std::memcpy(d.buffer_host_address(staging).value(),image.data(),n*4);recorder.copy_buffer_to_buffer({.src_buffer=staging,.dst_buffer=inputs[eye],.size=n*4});}
     recorder.pipeline_barrier({.src_access=daxa::AccessConsts::TRANSFER_WRITE,.dst_access=daxa::AccessConsts::COMPUTE_SHADER_READ});auto commands=recorder.complete_current_commands();d.submit_commands({.command_lists={&commands,1}});d.wait_on_submit({.queue=daxa::QUEUE_MAIN,.queue_submit_index=d.latest_queue_submit_index(daxa::QUEUE_MAIN),.timeout=30'000'000'000ull});d.collect_garbage();
+    }
     for(unsigned i=0;i<pipelines.size();++i){
         bool specialized=variant==DaxaSgmVariant::PackedSpecialized,d128=variant==DaxaSgmVariant::PackedD128,quad=variant==DaxaSgmVariant::PackedQuad,shuffle=variant==DaxaSgmVariant::PackedShuffle;
         if((i==2&&variant!=DaxaSgmVariant::Baseline)||(i==3&&variant!=DaxaSgmVariant::Wave)||(i==7&&!packing)||(i>=8&&i<=10&&variant!=DaxaSgmVariant::Packed)||(i>=11&&i<=12&&!specialized&&!quad)||(i>=13&&i<=14&&!specialized&&!d128&&!shuffle)||(i>=15&&i<=16&&!d128)||(i>=17&&i<=18&&!quad)||(i>=19&&!shuffle)||((i==8||i==11||i==13||i==15||i==17||i==19)&&packing!=8)||((i==9||i==12||i==14||i==16||i==18||i==20)&&packing!=16))continue;
@@ -171,12 +176,12 @@ void DaxaStereo::Impl::setup(std::span<const uint32_t> left,std::span<const uint
         Parameters p{};for(unsigned b=0;b<14;++b)if(!s->buffers[b].is_empty())p.address[b]=d.device_address(s->buffers[b]).value();p.packing_bits=packing;if(packing)p.penalties_address=d.device_address(s->buffers[Penalties]).value();p.width=config.width;p.height=config.height;p.disparities=config.disparities;p.paths=config.paths;p.p1=config.p1;p.p2=config.p2;p.subpixel=config.subpixel;p.metric=bool(metric);if(metric){p.fx=metric->fx;p.baseline_m=metric->baseline_m;p.cx_offset=metric->cx_offset;}
         s->buffers[Params]=allocate(sizeof(p),prefix+resource_names[Params],true);std::memcpy(d.buffer_host_address(s->buffers[Params]).value(),&p,sizeof(p));auto address=d.device_address(s->buffers[Params]).value();s->queries=d.create_timeline_query_pool({.query_count=query_count,.name=prefix+"stage_queries"});auto* slot=s.get();
         s->graph=std::make_unique<daxa::TaskGraph>(daxa::TaskGraphInfo{.device=d,
-            .pre_task_callback=[this,slot](daxa::TaskInterface ti){if(slot->started++==0){ti.recorder.reset_timestamps({.query_pool=slot->queries,.start_index=0,.count=query_count});ti.recorder.write_timestamp({.query_pool=slot->queries,.pipeline_stage=daxa::PipelineStageFlagBits::TOP_OF_PIPE,.query_index=0});}},
+            .pre_task_callback=[this,slot](daxa::TaskInterface ti){if(slot->started++==0){if(calibration)ti.recorder.pipeline_barrier({.src_access=daxa::AccessConsts::HOST_WRITE,.dst_access=daxa::AccessConsts::COMPUTE_SHADER_READ});ti.recorder.reset_timestamps({.query_pool=slot->queries,.start_index=0,.count=query_count});ti.recorder.write_timestamp({.query_pool=slot->queries,.pipeline_stage=daxa::PipelineStageFlagBits::TOP_OF_PIPE,.query_index=0});}},
             .post_task_callback=[this,slot](daxa::TaskInterface ti){if(++slot->finished==stages)ti.recorder.write_timestamp({.query_pool=slot->queries,.pipeline_stage=daxa::PipelineStageFlagBits::BOTTOM_OF_PIPE,.query_index=1});},.name=prefix+"resident_single_reference"});
         auto& graph=*s->graph;std::array<daxa::TaskBufferView,BufferCount> views;
         for(unsigned b=0;b<BufferCount;++b)if(!s->buffers[b].is_empty()){s->external[b]=daxa::ExternalTaskBuffer({.buffer=s->buffers[b],.name=prefix+resource_names[b]});views[b]=graph.register_buffer(s->external[b]);}
         auto add=[&](unsigned stage,unsigned pipeline,unsigned pass,uint32_t groups,std::initializer_list<unsigned> reads,std::initializer_list<unsigned> writes,std::initializer_list<unsigned> readwrites){auto grid=DaxaStereo::dispatch_grid(groups,group_limits);auto task=daxa::InlineTask::Compute(std::string("stage_")+std::to_string(stage));task.reads(views[Params]);for(auto b:reads)task.reads(views[b]);for(auto b:writes)task.writes(views[b]);for(auto b:readwrites)task.reads_writes(views[b]);
-            graph.add_task(task.executes([this,slot,address,stage,pipeline,pass,grid](daxa::TaskInterface ti){ti.recorder.write_timestamp({.query_pool=slot->queries,.pipeline_stage=daxa::PipelineStageFlagBits::COMPUTE_SHADER,.query_index=2+stage*2});ti.recorder.set_pipeline(pipelines[pipeline]);ti.recorder.push_constant(Push{address,pass,grid[0]});ti.recorder.dispatch({grid[0],grid[1],1});ti.recorder.write_timestamp({.query_pool=slot->queries,.pipeline_stage=daxa::PipelineStageFlagBits::COMPUTE_SHADER,.query_index=3+stage*2});}));};
+            graph.add_task(task.executes([this,slot,address,stage,pipeline,pass,grid](daxa::TaskInterface ti){if(calibration&&stage<2){ti.recorder.pipeline_barrier({.src_access=daxa::AccessConsts::COMPUTE_SHADER_WRITE,.dst_access=daxa::AccessConsts::COMPUTE_SHADER_READ});}ti.recorder.write_timestamp({.query_pool=slot->queries,.pipeline_stage=daxa::PipelineStageFlagBits::COMPUTE_SHADER,.query_index=2+stage*2});ti.recorder.set_pipeline(pipelines[pipeline]);ti.recorder.push_constant(Push{address,pass,grid[0]});ti.recorder.dispatch({grid[0],grid[1],1});ti.recorder.write_timestamp({.query_pool=slot->queries,.pipeline_stage=daxa::PipelineStageFlagBits::COMPUTE_SHADER,.query_index=3+stage*2});}));};
         add(0,0,0,uint32_t((n+63)/64),{Left},{LeftDesc,LeftValid},{});add(1,0,1,uint32_t((n+63)/64),{Right},{RightDesc,RightValid},{});
         if(packing)add(2,7,0,uint32_t((n*((config.disparities+32/packing-1)/(32/packing))+63)/64),{},{Penalties},{});
         else add(2,1,0,uint32_t((volume+63)/64),{LeftDesc,RightDesc,LeftValid,RightValid},{Costs,Sums},{});
@@ -189,7 +194,22 @@ DaxaStereo::DaxaStereo(StereoConfig c,std::span<const uint32_t> left,std::span<c
 DaxaStereo::Frame::Frame(std::shared_ptr<Impl> owner,std::shared_ptr<Slot> slot):owner_(std::move(owner)),slot_(std::move(slot)),generation_(slot_->generation){}
 DaxaStereo::Frame& DaxaStereo::Frame::operator=(Frame other) noexcept{slot_.swap(other.slot_);owner_.swap(other.owner_);std::swap(generation_,other.generation_);return *this;}
 void DaxaStereo::Frame::validate()const{require(owner_&&slot_&&generation_==slot_->generation,"empty or stale Daxa stereo frame");}
-DaxaStereo::Frame DaxaStereo::process(){auto& e=*impl_;e.require_thread();auto& d=e.context->device;d.collect_garbage();auto pending=d.oldest_pending_submit_index();for(auto& s:e.slots){if(s.use_count()!=1||(s->submit&&s->submit>=pending))continue;s->generation=e.next_generation++;s->started=0;s->finished=0;s->graph->execute({});require(s->started==e.stages&&s->finished==e.stages,"stereo graph callback count changed");s->submit=d.latest_queue_submit_index(daxa::QUEUE_MAIN);return Frame(impl_,s);}throw std::runtime_error("Daxa stereo slots retained or still in flight");}
+DaxaStereo::DaxaStereo(StereoConfig c,const DaxaFrame& prototype,DaxaSgmVariant variant,unsigned slots,std::optional<MetricCalibration> metric,std::shared_ptr<DaxaFoundation> context,uint32_t wave){
+    validate_shape(c,slots,metric,variant);prototype.validate();require(context&&prototype.owner_->context==context,"foreign Daxa GPU input context");auto maps=prototype.calibration();require(maps->width==c.width&&maps->height==c.height,"GPU luma shape mismatch");impl_=std::make_shared<Impl>(c,variant,metric,std::move(context),false,wave);impl_->calibration=std::move(maps);impl_->setup({}, {},slots,&prototype); // No initial Frame/slot marker retained.
+}
+size_t DaxaStereo::collect_completed_inputs_at(uint64_t oldest){auto& e=*impl_;e.require_thread();size_t retired=0;for(auto& slot:e.slots)if(slot->input&&detail::completed_submission(slot->submit,oldest)){slot->input={};++retired;}for(auto& slot:e.slots)if(slot->source&&detail::available_slot(slot.use_count(),slot->submit,oldest))slot->source.reset();return retired;}
+size_t DaxaStereo::collect_completed_inputs(){impl_->require_thread();return collect_completed_inputs_at(impl_->context->device.oldest_pending_submit_index());}
+DaxaStereo::Frame DaxaStereo::process(){impl_->require_thread();return process_at(nullptr,impl_->context->device.oldest_pending_submit_index());}
+DaxaStereo::Frame DaxaStereo::process(const DaxaFrame& input){impl_->require_thread();return process_at(&input,impl_->context->device.oldest_pending_submit_index());}
+DaxaStereo::Frame DaxaStereo::process_at(const DaxaFrame* input,uint64_t oldest){
+    auto& e=*impl_;e.require_thread();require(bool(input)==bool(e.calibration),"wrong stereo input mode");if(input){input->validate();require(input->owner_->context==e.context,"foreign GPU input context");auto maps=input->calibration();require(maps==e.calibration&&maps->width==e.config.width&&maps->height==e.config.height&&maps->rectified_identity==e.calibration->rectified_identity&&maps->original_identity==e.calibration->original_identity,"GPU luma calibration/map-cache owner/shape mismatch");}
+    collect_completed_inputs_at(oldest);auto& d=e.context->device;d.collect_garbage();for(auto& slot:e.slots){if(!detail::available_slot(slot.use_count(),slot->submit,oldest))continue;
+        if(input){slot->input=*input;slot->source=input->source();for(unsigned eye=0;eye<2;++eye){auto buffer=input->plane(eye?DaxaPreprocessPlane::RightLuma:DaxaPreprocessPlane::LeftLuma).buffer();slot->buffers[eye]=buffer;slot->external[eye].set_buffer(buffer);auto* params=reinterpret_cast<Parameters*>(d.buffer_host_address(slot->buffers[Params]).value());params->address[eye]=d.device_address(buffer).value();}}
+        slot->generation=e.next_generation++;slot->started=0;slot->finished=0;try{slot->graph->execute({});}catch(...){slot->submit=d.latest_queue_submit_index(daxa::QUEUE_MAIN);throw;}require(slot->started==e.stages&&slot->finished==e.stages,"stereo graph callback count changed");slot->submit=d.latest_queue_submit_index(daxa::QUEUE_MAIN);return Frame(impl_,slot);
+    }throw std::runtime_error("Daxa stereo slots retained or still in flight");
+}
+CaptureLease DaxaStereo::Frame::source()const{validate();return slot_->source;}const std::string& DaxaStereo::Frame::calibration_identity()const{validate();require(bool(owner_->calibration),"retained-fixture stereo has no calibrated source metadata");return owner_->calibration->rectified_identity;}
+
 void DaxaStereo::Frame::wait()const{validate();auto& d=owner_->context->device;d.wait_on_submit({.queue=daxa::QUEUE_MAIN,.queue_submit_index=slot_->submit,.timeout=30'000'000'000ull});}
 DaxaStereoTiming DaxaStereo::Frame::timings()const{validate();owner_->completed(*this);constexpr size_t max_queries=2+DaxaStereoTiming::max_stages*2;std::array<uint64_t,max_queries*2> results{};auto status=daxa_timeline_query_pool_query_results(slot_->queries.get(),0,owner_->query_count,results.data());require(status==DAXA_RESULT_SUCCESS,"stereo timestamp query failed");for(unsigned i=0;i<owner_->query_count;++i)require(results[i*2+1]!=0,"stereo timestamp unavailable");uint64_t mask=owner_->timestamp_bits==64?UINT64_MAX:(uint64_t{1}<<owner_->timestamp_bits)-1;auto elapsed=[&](unsigned first,unsigned last){return double((results[last*2]-results[first*2])&mask)*double(owner_->timestamp_period)/1e6;};DaxaStereoTiming out;out.stage_count=owner_->stages;out.total_gpu_ms=elapsed(0,1);for(unsigned i=0;i<out.stage_count;++i)out.stage_gpu_ms[i]=elapsed(2+i*2,3+i*2);return out;}
 daxa::BufferId DaxaStereo::Frame::buffer(DaxaStereoPlane plane)const{validate();auto id=slot_->buffers[buffer_index(plane)];require(!id.is_empty(),"plane unavailable for this variant/calibration; packed penalties are not dense costs or sums");return id;}

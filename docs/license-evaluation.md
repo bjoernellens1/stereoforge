@@ -1,5 +1,20 @@
 # License evaluation — public source repository
 
+Native preprocessing follow-up (2026-10-27, integration in progress): the
+optional fixture loader selects nlohmann/json `v3.11.3` (MIT) and separately
+obtained OpenSSL Crypto 3.x (Apache-2.0) for setup-time JSON and SHA256 checks.
+The exact upstream JSON license and installed Fedora OpenSSL 3.5.9 license
+were inspected and retained under `third_party/licenses`. The JSON single header
+SHA256 `9bea4c8066ef4a1c206b2be5a36302f8926f7fdc6087af5d20b417d0cf103ea6`
+was independently verified against the optional CMake pin. Embedded MIT SPDX
+copyright declarations are preserved in `nlohmann-json.NOTICE`, including those
+for Niels Lohmann, Evan Nemerson, The Abseil Authors, Björn Hoehrmann and Florian
+Loitsch. No source-publication blocker is identified for these selections.
+All three retained notices were verified byte-for-byte in the optional build
+output `build/daxa/native/licenses`; complete binary redistribution remains
+outside this source review. Neither dependency
+performs per-frame image processing or adds a non-Vulkan compute backend.
+
 Daxa foundation follow-up (2026-10-27): the independent Daxa/Slang build
 selects Daxa tag `3.6`, revision `00761e80c1dd6d1972d5f4569ce49620a7b4d384`,
 and its required Vulkan Memory Allocator (VMA) `v3.1.0`, resolved revision
@@ -47,6 +62,8 @@ retain their own terms; the project license does not relicense them.
 
 | Component and inspected pin | License finding | Source-publication result / obligations |
 |---|---|---|
+| nlohmann/json `v3.11.3` | MIT; upstream LICENSE.MIT inspected | Optional native preprocessing fixture parser. Preserve copyright/permission/disclaimer when redistributing the header or compiled code. |
+| OpenSSL Crypto 3.x; installed Fedora 3.5.9 | Apache-2.0; exact installed LICENSE.txt inspected | Optional setup-time SHA256 verification; separately discovered system library. Preserve applicable notices for the actual redistributed version; no complete binary-bundle clearance. |
 | ZED Open Capture `93739154903a66c112ee52c3c6fbfd83b7218617` | MIT | Compatible with publication. Keep full copyright/permission/disclaimer when distributing its source or compiled capture module. |
 | hidapi header `d6b2a974608dec3b76fb1e36c189f22b9cf3650c` and local hidapi 0.15.0 | User-selectable GPL-3.0 / BSD-style / original terms; **StereoForge elects BSD-3-Clause** | GPL is not mandatory for this use. Preserve the elected BSD notice and disclaimer. The local capture module links the hidraw backend dynamically. |
 | pybind11 2.13.6 | BSD-3-Clause | Compatible; preserve its notice in redistributed bindings/binaries. |
@@ -86,7 +103,10 @@ runtime. CMake/Ninja, Python and system loader/runtime packages are also obtaine
 separately. A binary release must inventory the actual versions and system
 libraries it packages rather than infer their licenses from this source table.
 
-Primary evidence: [Daxa MIT](https://github.com/Ipotrick/Daxa/blob/00761e80c1dd6d1972d5f4569ce49620a7b4d384/LICENSE),
+Primary evidence: [nlohmann/json v3.11.3 MIT](https://github.com/nlohmann/json/blob/v3.11.3/LICENSE.MIT),
+OpenSSL installed package `/usr/share/licenses/openssl-libs/LICENSE.txt`
+(Fedora `openssl-libs`/`openssl-devel` 3.5.9-1.fc44; retained exact copy),
+[Daxa MIT](https://github.com/Ipotrick/Daxa/blob/00761e80c1dd6d1972d5f4569ce49620a7b4d384/LICENSE),
 [VMA MIT](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator/blob/009ecd192c1289c7529bff248a16cfe896254816/LICENSE.txt),
 [Open Capture MIT](https://github.com/stereolabs/zed-open-capture/blob/93739154903a66c112ee52c3c6fbfd83b7218617/LICENSE),
 [hidapi license choice](https://github.com/libusb/hidapi/blob/d6b2a974608dec3b76fb1e36c189f22b9cf3650c/LICENSE.txt),
@@ -117,6 +137,8 @@ Verified notice SHA256 values:
 
 | Notice | SHA256 |
 |---|---|
+| nlohmann/json v3.11.3 MIT | `86b998c792894ccb911a1cb7994f7a9652894e7a094c0b5e45be2f553f45cf14` |
+| Installed OpenSSL 3.5.9 Apache-2.0 | `7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a` |
 | Daxa MIT | `566dadaf9e98c94b563f168488e0b696ebc9e216ee6e126650c73a9c7a3c3914` |
 | VMA MIT | `f56ab0392925231e34dd008a7670bb5c5ead490203bc9e125de3106fef642a27` |
 | Open Capture MIT | `74e2b9fe5d883aec86d16546f68f7963232ceedd7e7b61c302303a5ae9a9f402` |

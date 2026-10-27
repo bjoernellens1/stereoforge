@@ -9,6 +9,8 @@ Python versions/hashes are in `uv.lock`; CMake source revisions/hashes are in
 
 | Component | Actual source license / election | Use |
 |---|---|---|
+| nlohmann/json v3.11.3 | MIT (exact upstream LICENSE.MIT retained) | Optional native preprocessing fixture parser; downloaded header, no vendored implementation |
+| OpenSSL Crypto 3.x; inspected installed 3.5.9 | Apache-2.0 (exact installed LICENSE retained) | Optional setup-time fixture SHA256 checks; system library, no per-frame processing |
 | Daxa tag `3.6`, `00761e80c1dd6d1972d5f4569ce49620a7b4d384` | MIT (actual LICENSE retained) | Independent native Vulkan foundation |
 | Vulkan Memory Allocator `v3.1.0`, `009ecd192c1289c7529bff248a16cfe896254816` | MIT (actual LICENSE.txt retained) | Required Daxa implementation dependency |
 | SlangPy 0.43.1 | Apache-2.0 WITH LLVM-exception (actual LICENSE; metadata omits exception) | Python research Vulkan; optional research native provider |
@@ -51,3 +53,12 @@ the scheduler compactness assertion and task reordering. These are modifications
 to the same MIT-licensed Daxa source; they introduce no new source-license
 obligations. Qualification remains limited to the foundation and immutable
 resident-view POC described in [daxa-view-evidence.md](../docs/daxa-view-evidence.md).
+
+The optional native preprocessing integration adds a pinned nlohmann/json
+single header and discovers OpenSSL Crypto separately. The JSON MIT permission text is retained as `nlohmann-json.LICENSE.MIT`, with
+embedded single-header copyright declarations in `nlohmann-json.NOTICE`; the inspected
+system OpenSSL license is `openssl.LICENSE.Apache-2.0`. Preserve the notices
+applicable to the actual version if distributing compiled artifacts. The CPU
+color-reference profile is derived from OpenCV 4.14.0 arithmetic; it does not
+link native OpenCV into the frame-processing runtime. Exact source provenance
+and reference checks are documented with the preprocessing contract.

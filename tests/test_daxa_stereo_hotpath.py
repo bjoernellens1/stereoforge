@@ -14,13 +14,17 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def check_resident_hotpath(source):
-    process = body(source, 'DaxaStereo::Frame DaxaStereo::process(')
+    entry = body(source, 'DaxaStereo::Frame DaxaStereo::process()')
+    process = body(source, 'DaxaStereo::Frame DaxaStereo::process_at(')
     timing = body(source, 'DaxaStereoTiming DaxaStereo::Frame::timings(')
     forbidden = r'\b(?:allocate|create_buffer|create_memory|create_compute_pipeline|create_command_recorder|make_shared|make_unique|get_query_results|wait_on_submit|wait_idle|readback|inspect|memcpy|malloc|calloc|realloc)(?:<[^;()]*>)?\s*\('
-    assert not re.search(forbidden, process), 'resident process must not allocate, wait, or read back'
+    assert not re.search(forbidden, entry + process), 'resident process must not allocate, wait, or read back'
+    assert 'process_at(nullptr,' in entry, 'retained fixture entry uses the same guarded implementation'
+    assert entry.count('oldest_pending_submit_index(') == 1, 'one completion snapshot at the public entry'
+    assert 'oldest_pending_submit_index(' not in process, 'shared process uses its supplied completion snapshot'
     assert process.count('->execute(') == 1
     assert 'collect_garbage(' in process, 'completed Daxa command resources must be retired'
-    assert 'use_count()' in process and 'oldest_pending_submit_index(' in process, 'reuse needs both lease release and GPU completion'
+    assert 'available_slot(slot.use_count(),slot->submit,oldest)' in process, 'reuse needs both lease release and GPU completion'
     assert 'std::array<uint64_t,' in timing and 'daxa_timeline_query_pool_query_results(' in timing
     assert not re.search(r'get_query_results\s*\(|wait_on_submit\s*\(|std::vector', timing), 'timestamp access is nonblocking and uses caller-owned stack storage'
 
