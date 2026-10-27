@@ -1,0 +1,13 @@
+name: CPU contracts and replay
+on: [push, pull_request]
+jobs:
+  cpu:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.9.5'
+      - run: uv sync --locked --extra test --python 3.12
+      - run: uv run pytest -m 'not gpu' -q
+      - run: cmake --preset cpu && cmake --build --preset cpu && ctest --preset cpu

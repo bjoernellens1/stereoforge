@@ -1,0 +1,9 @@
+{
+  "version": 3,
+  "configurePresets": [
+    {"name": "cpu", "generator": "Ninja", "binaryDir": "${sourceDir}/build/cpu", "cacheVariables": {"CMAKE_BUILD_TYPE": "Release", "BUILD_TESTING": "ON"}},
+    {"name": "vulkan", "inherits": "cpu", "binaryDir": "${sourceDir}/build/vulkan", "cacheVariables": {"STEREOFORGE_RHI": "ON", "Python_EXECUTABLE": "${sourceDir}/.venv/bin/python"}}
+  ],
+  "buildPresets": [{"name": "cpu", "configurePreset": "cpu"}, {"name": "vulkan", "configurePreset": "vulkan"}],
+  "testPresets": [{"name": "cpu", "configurePreset": "cpu", "output": {"outputOnFailure": true}}, {"name": "vulkan", "configurePreset": "vulkan", "output": {"outputOnFailure": true}}]
+}
