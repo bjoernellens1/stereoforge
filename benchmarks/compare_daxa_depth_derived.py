@@ -168,7 +168,19 @@ def native_identities(rhi,native,compiler,manifest,reference):
     return identity
 
 
-def validate_report(report,manifest,metadata,metric,identity,profile,frames,warmup,slots,wave,validation,stereo_schedule="shared-census-sequential"):
+def normalize_lr_tolerance(value):
+    """Normalize once through binary32 without NumPy overflow warnings."""
+    if type(value) not in (int,float):raise ValueError('invalid LR tolerance: finite nonnegative float32 required')
+    try:
+        number=float(value)
+        if not math.isfinite(number) or number<0:raise ValueError('invalid LR tolerance: finite nonnegative float32 required')
+        return struct.unpack('<f',struct.pack('<f',number))[0]
+    except (OverflowError,struct.error) as error:
+        raise ValueError('invalid LR tolerance: float32 overflow') from error
+
+
+def validate_report(report,manifest,metadata,metric,identity,profile,frames,warmup,slots,wave,validation,stereo_schedule="shared-census-sequential",lr_tolerance=1.0):
+    lr_tolerance=normalize_lr_tolerance(lr_tolerance)
     if stereo_schedule!='shared-census-sequential':raise ValueError('derived mode requires shared census schedule')
     expected=dict(profile,schema='stereoforge.daxa_depth.derived.v1',right_reference_mode=RIGHT_REFERENCE_MODE,left_estimator='independent-sgm',right_estimator=RIGHT_REFERENCE_MODE,lr_dependency='left-aggregated-correlated',lr_references_independent=False,metric_provenance_valid_value=5,metric_provenance_invalid_value=0,metric_provenance_scope='both_left_and_right_layers_share_correlated_LR_dependency',right_recurrence_allocated=False,stereo_phase_count=profile['paths']+5,scope=SCOPE,frames=frames,warmup=warmup,slots=slots,required_wave_size=wave,metric_support_policy=SUPPORT_POLICY,layers='left_then_right',depth_units='axial_Z_metres_rectified_rays',
         stereo_schedule=stereo_schedule,stereo_dispatch_form='shared_census_once_left_aggregation_then_derived_right_selection',stereo_timing_scope='shared_census_left_aggregation_derived_right_selection_phase_intervals; no_isolated_per_reference_times',per_reference_stereo_timings_available=stereo_schedule=='sequential',
@@ -177,7 +189,7 @@ def validate_report(report,manifest,metadata,metric,identity,profile,frames,warm
     expected.update({k:metadata[k] for k in ('camera_timestamp_ns','host_ingress_timestamp_ns','camera_clock_domain','host_clock_domain','controls_json')})
     for key,value in expected.items():
         if key not in report or preprocess.canonical(report[key])!=preprocess.canonical(value):raise ValueError('changed/missing combined report contract: '+key)
-    if type(report.get('lr_tolerance')) not in (int,float) or report['lr_tolerance']!=1:raise ValueError('changed LR tolerance')
+    if type(report.get('lr_tolerance')) not in (int,float) or report['lr_tolerance']!=lr_tolerance:raise ValueError('changed LR tolerance')
     actual=report.get('metric_calibration',{})
     if set(actual)!=set(metric):raise ValueError('missing cached metric values/bitpatterns')
     for key in ('fx','baseline_m','cx_offset'):
@@ -273,7 +285,8 @@ def quality_difference(derived,independent,width,height):
     return dict(scope='development_difference_from_independent_right_SGM; not_physical_truth',promoted=False,derived_valid=int(av.sum()),independent_valid=int(bv.sum()),validity_disagreement=int((av!=bv).sum()),common_valid=int(both.sum()),mean_absolute_disparity_difference=float(difference.mean()) if difference.size else None,max_absolute_disparity_difference=float(difference.max()) if difference.size else None)
 
 
-def run_comparison(manifest_path,rhi,native,compiler,output,reference,disparities=128,paths=4,p1=8,p2=32,frames=30,warmup=3,slots=2,wave_size=32,validation=False,validation_only=False,stereo_schedule='shared-census-sequential'):
+def run_comparison(manifest_path,rhi,native,compiler,output,reference,disparities=128,paths=4,p1=8,p2=32,frames=30,warmup=3,slots=2,wave_size=32,validation=False,validation_only=False,stereo_schedule='shared-census-sequential',lr_tolerance=1.0):
+    lr_tolerance=normalize_lr_tolerance(lr_tolerance)
     if stereo_schedule!='shared-census-sequential':raise ValueError('derived mode requires shared census schedule')
     validate_bounds(disparities,paths,p1,p2,frames,warmup,slots,wave_size,validation_only)
     manifest_path=Path(manifest_path).resolve();entry=base.sha256(manifest_path)
@@ -285,7 +298,7 @@ def run_comparison(manifest_path,rhi,native,compiler,output,reference,disparitie
     for eye,name in enumerate(('left','right')):
         for filename,data in ((name+'.u32',luma[eye]),('mirror-'+name+'.u32',mirror_rows(luma[eye],w,h)),(name+'-census-valid.u32',census_validity(w,h))):
             file=output/filename;file.write_bytes(data);file.chmod(0o444);inputs[filename]=base.sha256(file)
-    evidence=dict(schema='stereoforge.daxa_depth.derived.comparison.v1',passed=False,promoted=False,right_reference_mode=RIGHT_REFERENCE_MODE,profile=profile,children={},cpu_opencv=cv_identity,compound_cpu_float_reference_checked=False,frozen_gpu_output_bytes_checked=False,scope='Experimental correlated LR using shared Left aggregation; exact implementation bytes only; held-out quality constraints required before promotion.',performance_qualified_counts=not validation_only)
+    evidence=dict(schema='stereoforge.daxa_depth.derived.comparison.v1',passed=False,promoted=False,lr_tolerance=lr_tolerance,right_reference_mode=RIGHT_REFERENCE_MODE,profile=profile,children={},cpu_opencv=cv_identity,compound_cpu_float_reference_checked=False,frozen_gpu_output_bytes_checked=False,scope='Experimental correlated LR using shared Left aggregation; exact implementation bytes only; held-out quality constraints required before promotion.',performance_qualified_counts=not validation_only)
     try:
         identity=native_identities(rhi,native,compiler,manifest_path,reference);evidence['identities']=identity
         if entry!=identity['manifest_sha256']:raise ValueError('fixture manifest changed during CPU oracle setup')
@@ -300,10 +313,10 @@ def run_comparison(manifest_path,rhi,native,compiler,output,reference,disparitie
             for suffix,text in (('.stdout',result.stdout),('.stderr',result.stderr)):
                 file=output/(name+suffix);file.write_text(text);reports[file.name]=base.sha256(file)
             evidence['children'][name]=dict(command=cmd,returncode=result.returncode);return result
-        cmd=[str(native),'--manifest',str(manifest_path),'--output',str(output/'native.json'),'--dump-prefix',str(output/'gpu'),'--check-reference','--right-reference-mode',RIGHT_REFERENCE_MODE,'--stereo-schedule',stereo_schedule]
+        cmd=[str(native),'--manifest',str(manifest_path),'--output',str(output/'native.json'),'--dump-prefix',str(output/'gpu'),'--check-reference','--lr-tolerance',repr(lr_tolerance),'--right-reference-mode',RIGHT_REFERENCE_MODE,'--stereo-schedule',stereo_schedule]
         for key,value in dict(frames=frames,warmup=warmup,slots=slots,**{'wave-size':wave_size},disparities=disparities,paths=paths,p1=p1,p2=p2).items():cmd+=['--'+key,str(value)]
         if validation:cmd+=['--validation']
-        child('native',cmd);report=base.strict_json((output/'native.json').read_text());validate_report(report,manifest,metadata,metric,identity,profile,frames,warmup,slots,wave_size,validation,stereo_schedule);reports['native.json']=base.sha256(output/'native.json');evidence['native_report']=report
+        child('native',cmd);report=base.strict_json((output/'native.json').read_text());validate_report(report,manifest,metadata,metric,identity,profile,frames,warmup,slots,wave_size,validation,stereo_schedule,lr_tolerance);reports['native.json']=base.sha256(output/'native.json');evidence['native_report']=report
         args=[]
         for key,value in profile.items():args+=['--'+key,str(int(value)) if type(value) is bool else str(value)]
         metric_args=[]
@@ -333,7 +346,7 @@ def run_comparison(manifest_path,rhi,native,compiler,output,reference,disparitie
         evidence['reference_left_control_byteexact']=raw[0]==controls[0]
         if not evidence['reference_left_control_byteexact']:raise ValueError('new RHI raw Left differs from frozen native_stereo')
         evidence['quality_difference']=quality_difference(raw[1],controls[1],w,h)
-        expected=expected_observations(raw,supports,w,h,metadata['frame_id']);comparison={};raw_comparison={}
+        expected=expected_observations(raw,supports,w,h,metadata['frame_id'],lr_tolerance);comparison={};raw_comparison={}
         for plane,data in expected.items():
             file=Path(str(output/'gpu')+'.'+plane);actual=file.read_bytes()
             if len(actual)!=len(data):raise ValueError('missing/incomplete derived observation plane')
@@ -357,9 +370,10 @@ def main():
     for name,default in (('rhi-binary',base.ROOT/'build/standalone/native_stereo'),('reference-binary',base.ROOT/'build/standalone/native_derived_right'),('daxa-binary',base.ROOT/'build/daxa/daxa_depth_benchmark')):parser.add_argument('--'+name,type=Path,default=default)
     for name in ('manifest','compiler','output'):parser.add_argument('--'+name,type=Path,required=True)
     for name,default in (('disparities',128),('paths',4),('p1',8),('p2',32),('frames',30),('warmup',3),('slots',2),('wave-size',32)):parser.add_argument('--'+name,type=int,default=default)
+    parser.add_argument('--lr-tolerance',type=float,default=1.0)
     for name in ('validation','validation-only'):parser.add_argument('--'+name,action='store_true')
     parser.add_argument('--stereo-schedule',choices=['shared-census-sequential'],default='shared-census-sequential');parser.add_argument('--right-reference-mode',choices=[RIGHT_REFERENCE_MODE],default=RIGHT_REFERENCE_MODE)
-    a=parser.parse_args();result=run_comparison(a.manifest,a.rhi_binary,a.daxa_binary,a.compiler,a.output,a.reference_binary,a.disparities,a.paths,a.p1,a.p2,a.frames,a.warmup,a.slots,a.wave_size,a.validation,a.validation_only,a.stereo_schedule)
+    a=parser.parse_args();result=run_comparison(a.manifest,a.rhi_binary,a.daxa_binary,a.compiler,a.output,a.reference_binary,a.disparities,a.paths,a.p1,a.p2,a.frames,a.warmup,a.slots,a.wave_size,a.validation,a.validation_only,a.stereo_schedule,a.lr_tolerance)
     print(json.dumps(dict(passed=result['passed'],promoted=False,output=str(a.output))))
     if not result['passed']:raise SystemExit(1)
 

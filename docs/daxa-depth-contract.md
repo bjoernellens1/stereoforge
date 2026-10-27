@@ -240,3 +240,12 @@ for independent Right recurrence/winner and compound CPU float qualification.
 This option is not promoted: development geometry shows quality regressions.
 See the [derived estimator contract and evidence](daxa-depth-derived-evidence.md)
 for support rules, lifetime guarantees, exact-byte gates and measured limits.
+
+The diagnostic native benchmark and derived comparison expose the existing
+`DaxaDepthConfig::lr_tolerance` as `--lr-tolerance`, in disparity pixels.
+The default remains 1.0; requests must be finite and nonnegative, and the
+derived harness binds the normalized float32 value to native execution,
+reported metadata and its observation oracle. Acceptance includes equality
+at the threshold. Tightening this rejection gate changes output validity;
+it does not refine raw disparity. See
+[consistency threshold evidence](daxa-depth-consistency-evidence.md).

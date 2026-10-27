@@ -274,6 +274,12 @@ regressions around thin occluders. This remains experimental and is not promoted
 independent Right SGM remains the default. See
 [derived estimator evidence and limits](docs/daxa-depth-derived-evidence.md).
 
+The native depth benchmark and derived comparison accept `--lr-tolerance`
+(pixels, default **1.0**). An explicit **0.75** setting reduces false matches
+on fresh synthetic textures, with some coverage loss; it does not recover thin
+geometry. See [consistency threshold evidence](docs/daxa-depth-consistency-evidence.md)
+for native byte checks and the accuracy limits.
+
 ## Standalone C++ runtime
 
 Build without Python, SlangPy or SGL using `cmake --preset standalone` and

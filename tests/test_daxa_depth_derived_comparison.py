@@ -136,11 +136,13 @@ def test_derived_compiled_getter_identities_are_required(tmp_path):
 
 
 @pytest.mark.parametrize('mutation',[None,'derived_byte','left_control_byte','prov1','identity','source_tamper','manifest_setup','native_schema','raw_extent','reference_profile','fixture_tamper','input_tamper','report_tamper'])
-def test_mocked_independent_children_and_postbinding(tmp_path,monkeypatch,mutation):
+@pytest.mark.parametrize('lr_tolerance',[1.,.75,.1])
+def test_mocked_independent_children_and_postbinding(tmp_path,monkeypatch,mutation,lr_tolerance):
     from types import SimpleNamespace
     path,m,metadata,metric=fixture(tmp_path);ident=bound_identity();ident['manifest_sha256']=derived.base.sha256(path);ident['fixture_file_sha256']={str(path):derived.base.sha256(path)}
-    report=derived_report(m,metadata,metric);report['fixture_manifest_sha256']=ident['manifest_sha256']
-    raw=[raw_eye(),raw_eye()];supports=[np.ones(40,'<u4').tobytes()]*2
+    normalized=float(np.float32(lr_tolerance))
+    report=derived_report(m,metadata,metric);report['fixture_manifest_sha256']=ident['manifest_sha256'];report['lr_tolerance']=normalized
+    raw=[raw_eye(),raw_eye(disparity=1.875) if normalized!=1. else raw_eye()];supports=[np.ones(40,'<u4').tobytes()]*2
     monkeypatch.setattr(derived,'fixture_planes',lambda _: (m,metadata,(b'\0'*160,b'\0'*160),supports,metric,{}))
     identities=[]
     def identities_fn(*args):
@@ -158,16 +160,18 @@ def test_mocked_independent_children_and_postbinding(tmp_path,monkeypatch,mutati
         if name=='native':
             assert cmd[cmd.index('--right-reference-mode')+1]=='left-aggregated-selection'
             assert cmd[cmd.index('--stereo-schedule')+1]=='shared-census-sequential'
+            assert float(cmd[cmd.index('--lr-tolerance')+1])==normalized
             r=copy.deepcopy(report)
             if mutation=='native_schema':r['schema']='stereoforge.daxa_depth.v1'
             (out/'native.json').write_text(__import__('json').dumps(r))
             for eye,layer in zip(('left','right'),raw):write_raw(out/('gpu.'+eye),{k:v for k,v in layer.items() if k in derived.RAW_PLANES})
-            expected=derived.expected_observations(raw,supports,8,5,7)
+            expected=derived.expected_observations(raw,supports,8,5,7,normalized)
             if mutation=='prov1':expected['provenance.u32']=legacy.expected_observations(raw,supports,8,5,7)['provenance.u32']
             for plane,data in expected.items():(out/('gpu.'+plane)).write_bytes(data)
             if mutation=='fixture_tamper':path.write_text('changed')
             if mutation=='input_tamper':(out/'left.u32').chmod(0o644);(out/'left.u32').write_bytes(b'changed')
             return SimpleNamespace(returncode=0,stdout='',stderr='')
+        assert '--lr-tolerance' not in cmd
         if name=='reference':
             assert Path(cmd[cmd.index('--left-valid')+1]).read_bytes()==derived.census_validity(8,5)
             for eye,layer in zip(('left','right'),raw):write_raw(out/('reference.'+eye),layer)
@@ -185,7 +189,8 @@ def test_mocked_independent_children_and_postbinding(tmp_path,monkeypatch,mutati
             result=dict(width=8,height=5,disparities=16,paths=4,iterations=1,adapter='mock',metric_depth=True,vulkan_validation=False)
         return SimpleNamespace(returncode=0,stdout=__import__('json').dumps(result),stderr='')
     monkeypatch.setattr(derived.subprocess,'run',run)
-    result=derived.run_comparison(path,'rhi','native','compiler',out,'reference',disparities=16,frames=1,warmup=0,slots=1,validation_only=True)
+    result=derived.run_comparison(path,'rhi','native','compiler',out,'reference',disparities=16,frames=1,warmup=0,slots=1,validation_only=True,lr_tolerance=lr_tolerance)
+    assert result['lr_tolerance']==normalized
     assert result['passed'] is (mutation is None)
     assert result['promoted'] is False and result['compound_cpu_float_reference_checked'] is False
     if mutation is None:
@@ -218,3 +223,53 @@ def test_identity_preserves_all_33_old_spvs_and_binds_three_new_and_getters(tmp_
         assert all(actual['offline_spirv_sha256'][key]==value for key,value in old.items())
         assert actual['derived_compiled_shader_getters']==expected
         assert 'derived_reference' in actual['compiler_input_sha256']
+
+
+@pytest.mark.parametrize('reported,accepted',[(.75,True),(1.,False),(.750000000001,False),(True,False),('0.75',False)])
+def test_requested_lr_tolerance_is_bound_to_native_report(tmp_path,reported,accepted):
+    _,m,metadata,metric=fixture(tmp_path);r=derived_report(m,metadata,metric);r['lr_tolerance']=reported
+    if accepted:derived.validate_report(r,m,metadata,metric,bound_identity(),profile(),1,0,1,32,False,lr_tolerance=.75)
+    else:
+        with pytest.raises(ValueError,match='LR tolerance'):derived.validate_report(r,m,metadata,metric,bound_identity(),profile(),1,0,1,32,False,lr_tolerance=.75)
+
+
+def test_oracle_lr_tolerance_exact_boundary_and_next_float32():
+    supports=[np.ones(5,'<u4').tobytes()]*2
+    for difference,accepted in ((.75,True),(float(np.nextafter(np.float32(.75),np.float32(1))),False)):
+        # Right x0,d0 maps to Left x0,difference; subtraction is exactly the requested delta.
+        raw=[raw_eye(5,1,difference),raw_eye(5,1,0.)]
+        out=derived.expected_observations(raw,supports,5,1,7,lr_tolerance=.75)
+        assert bool(np.frombuffer(out['lr_validity.u32'],'<u4')[5]) is accepted
+
+
+@pytest.mark.parametrize('value',[True,False,'0.75',None,float('nan'),float('inf'),-float('inf'),-.01,1e100,10**1000])
+def test_invalid_lr_tolerance_rejected_before_any_work(tmp_path,monkeypatch,value):
+    def forbidden(*a,**k):raise AssertionError('invalid tolerance reached fixture/output/child')
+    monkeypatch.setattr(derived,'fixture_planes',forbidden);monkeypatch.setattr(derived.base,'create_output',forbidden);monkeypatch.setattr(derived.subprocess,'run',forbidden)
+    with pytest.raises(ValueError,match='LR tolerance'):
+        derived.run_comparison(tmp_path/'missing','rhi','native','compiler',tmp_path/'out','reference',lr_tolerance=value)
+    assert not (tmp_path/'out').exists()
+
+
+@pytest.mark.parametrize('value,expected',[(0,0.),(1,1.),(.1,float(np.float32(.1))),(3.4028234663852886e38,3.4028234663852886e38)])
+def test_lr_tolerance_binary32_normalization(value,expected):
+    assert derived.normalize_lr_tolerance(value)==expected
+
+
+@pytest.mark.parametrize('args,expected',[([],1.),(['--lr-tolerance','0.75'],.75),(['--lr-tolerance','0.1'],.1)])
+def test_cli_passes_float_lr_tolerance_to_comparison(monkeypatch,tmp_path,args,expected,capsys):
+    calls=[]
+    def comparison(*positional,**keyword):calls.append((positional,keyword));return {'passed':True}
+    monkeypatch.setattr(derived,'run_comparison',comparison)
+    monkeypatch.setattr(sys,'argv',['compare_daxa_depth_derived','--manifest','manifest','--compiler','compiler','--output',str(tmp_path/'out'),*args])
+    derived.main()
+    assert len(calls)==1 and calls[0][0][-1]==expected
+    assert __import__('json').loads(capsys.readouterr().out)['passed'] is True
+
+
+@pytest.mark.parametrize('reported,accepted',[(float(np.float32(.1)),True),(.1,False)])
+def test_report_compares_requested_point_one_normalized_but_not_actual_report(tmp_path,reported,accepted):
+    _,m,metadata,metric=fixture(tmp_path);r=derived_report(m,metadata,metric);r['lr_tolerance']=reported
+    if accepted:derived.validate_report(r,m,metadata,metric,bound_identity(),profile(),1,0,1,32,False,lr_tolerance=.1)
+    else:
+        with pytest.raises(ValueError,match='LR tolerance'):derived.validate_report(r,m,metadata,metric,bound_identity(),profile(),1,0,1,32,False,lr_tolerance=.1)

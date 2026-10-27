@@ -82,3 +82,31 @@ def test_right_mode_reaches_fixture_preflight(tmp_path, mode):
     result = invoke(tmp_path, '--right-reference-mode', mode,
                     '--stereo-schedule', 'shared-census-sequential')
     assert result.returncode == 1 and 'missing fixture file' in result.stderr
+
+
+@pytest.mark.parametrize('value', ['', 'abc', '0.75junk', '-.1', 'nan', 'inf', '1e100'])
+def test_invalid_lr_tolerance_rejected_before_fixture_or_device(tmp_path, value):
+    result = invoke(tmp_path, '--lr-tolerance', value)
+    assert result.returncode == 1
+    assert 'invalid LR tolerance' in result.stderr
+    assert 'missing fixture file' not in result.stderr
+    assert not (tmp_path / 'report.json').exists()
+
+
+@pytest.mark.parametrize('value', ['0', '.75', '1', '1.25'])
+def test_valid_lr_tolerance_reaches_fixture_preflight_without_device(tmp_path, value):
+    result = invoke(tmp_path, '--lr-tolerance', value)
+    assert result.returncode == 1 and 'missing fixture file' in result.stderr
+    assert not (tmp_path / 'report.json').exists()
+
+
+def test_lr_tolerance_requires_value(tmp_path):
+    result = invoke(tmp_path, '--lr-tolerance')
+    assert result.returncode == 1 and 'missing option value' in result.stderr
+    assert not (tmp_path / 'report.json').exists()
+
+
+def test_duplicate_lr_tolerance_rejected_before_fixture_or_device(tmp_path):
+    result = invoke(tmp_path, '--lr-tolerance', '.75', '--lr-tolerance', '1')
+    assert result.returncode == 1 and 'duplicate option' in result.stderr
+    assert not (tmp_path / 'report.json').exists()

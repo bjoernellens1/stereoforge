@@ -760,3 +760,50 @@ reduces aggregate Right false correspondences 162→82 while retaining correct
 correspondences 9621→9620. This is exploratory rejection analysis, not a
 production precision fix. No production threshold changed; held-out validation
 and an independently frozen quality gate remain pending.
+
+### Explicit consistency-threshold qualification
+
+The fixed 0.75-pixel rule was evaluated on new texture seeds 43, 44 and 45
+before any runtime change. Frozen RHI outputs on the same four 96x32 geometry
+families reduce derived Right false correspondences 456→237 while retaining
+28,858/28,865 correct correspondences. Thin Right correct correspondences
+fall 76→74; this does not recover thin geometry. These are unseen textures,
+not unseen geometry or physical/production qualification.
+
+Expose the already supported `DaxaDepthConfig::lr_tolerance` in diagnostic
+tools without changing its default of 1.0 or any shader/real-time resource
+path. Keep independent SGM default and the legacy comparison harness frozen.
+
+- [x] Native CLI (`apps/daxa_depth_benchmark.cpp`,
+  `tests/test_daxa_depth_pair_cli.py`): add `--lr-tolerance`, parse once as
+  finite nonnegative float32 before fixture/device access, reject malformed,
+  duplicate, negative, nonfinite and float32 overflow values, and assign the
+  existing configuration field. Tests first fail against the old binary.
+- [x] Derived comparison (`benchmarks/compare_daxa_depth_derived.py`,
+  `tests/test_daxa_depth_derived_comparison.py`): append an optional tolerance
+  argument defaulting to 1.0; validate and normalize it to float32 before
+  fixture/output/device work. Pass the same normalized value to native CLI,
+  exact report validation and independent observation-mask oracle. Record it
+  in evidence, reject mismatches, and test inclusion at the exact threshold
+  and exclusion immediately above it. Raw stereo RHI calls remain unchanged.
+- [x] Separate functional/performance review, CPU suite and offline build;
+  verify all prior SPVs remain identical and no frame-path code changed.
+- [x] Root runs exact nine observation plus six raw plane comparisons under
+  synchronization validation at 0.75 on small and 720p fixtures, plus the
+  unchanged default control. Retain immutable earlier artifacts and bind new
+  binary/harness identities. No accuracy claim follows from byte parity.
+- [x] Document fresh-texture results with coverage loss and independent-SGM
+  comparison, native qualification scope, commands and remaining thin-object,
+  physical accuracy, wide RGB-D and live 60 Hz gates; review and publish.
+
+Execution evidence is retained locally under
+`artifacts/daxa-depth-tolerance-20261027/`. Separate functional and performance
+reviews cleared the source; 1327 CPU tests (37 deselected) and seven native CPU
+contracts pass. The timed native loop, 59 runtime/header/shader/CMake files and
+all 49 existing SPVs remain unchanged. Five synchronization-validation runs pass
+all nine observation and six raw planes: small/720p at 0.75, small at normalized
+0.1, and derived/independent default controls. Both default controls also match
+their preceding fifteen output planes byte for byte. These checks qualify
+threshold plumbing and implementation agreement, not production quality on
+the fresh-texture geometry or physical accuracy. Results and reproduction are
+in [consistency evidence](../../daxa-depth-consistency-evidence.md).
