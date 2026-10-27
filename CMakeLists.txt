@@ -6,6 +6,7 @@ option(STEREOFORGE_RHI "Build the pinned Slang RHI Vulkan native stereo runtime"
 set(STEREOFORGE_RHI_PROVIDER "standalone" CACHE STRING "RHI provider: standalone production or slangpy research")
 set_property(CACHE STEREOFORGE_RHI_PROVIDER PROPERTY STRINGS standalone slangpy)
 option(STEREOFORGE_CAPTURE "Build ZED Open Capture adapter" OFF)
+option(STEREOFORGE_NATIVE_CAPTURE "Build independent C++ capture" OFF)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -147,4 +148,34 @@ if(STEREOFORGE_DAXA AND BUILD_TESTING)
   target_link_libraries(daxa_scheduler_contracts PRIVATE stereoforge_daxa_foundation)
   add_test(NAME daxa_view_scheduler_contracts COMMAND daxa_scheduler_contracts)
   set_tests_properties(daxa_view_scheduler_contracts PROPERTIES LABELS "vulkan;hardware;daxa;scheduler-only")
+endif()
+
+# Task 3: deliberately bounded local metadata variants; no runtime compiler/tuner.
+if(STEREOFORGE_DAXA)
+  set(sf_daxa_metadata_spirv)
+  foreach(entry metadata_fused metadata_ids metadata_ages)
+    set(output "${CMAKE_CURRENT_BINARY_DIR}/daxa-metadata-${entry}.spv")
+    add_custom_command(OUTPUT "${output}"
+      COMMAND "${SF_DAXA_SLANGC}" "${CMAKE_CURRENT_SOURCE_DIR}/shaders/daxa/metadata.slang"
+        -target spirv -profile spirv_1_5 -matrix-layout-row-major -fvk-use-scalar-layout
+        -entry "${entry}" -stage compute -o "${output}"
+      DEPENDS shaders/daxa/metadata.slang shaders/ops/stereo_output.slang VERBATIM)
+    list(APPEND sf_daxa_metadata_spirv "${output}")
+  endforeach()
+  add_custom_target(daxa_metadata_shaders DEPENDS ${sf_daxa_metadata_spirv})
+  add_executable(daxa_variant_benchmark apps/daxa_variant_benchmark.cpp)
+  target_link_libraries(daxa_variant_benchmark PRIVATE stereoforge_daxa_foundation GPUOpen::VulkanMemoryAllocator)
+  target_compile_definitions(daxa_variant_benchmark PRIVATE
+    SF_DAXA_METADATA_SPIRV_DIRECTORY="${CMAKE_CURRENT_BINARY_DIR}"
+    SF_DAXA_METADATA_DAXA_SOURCE_DIRECTORY="${SF_DAXA_SOURCE_DIR}")
+  add_dependencies(daxa_variant_benchmark daxa_metadata_shaders)
+  if(BUILD_TESTING)
+    add_executable(daxa_variant_contracts tests/daxa_variant_contracts.cpp)
+    target_link_libraries(daxa_variant_contracts PRIVATE stereoforge_contracts)
+    add_test(NAME daxa_variant_cpu_contracts COMMAND daxa_variant_contracts)
+  endif()
+endif()
+
+if(STEREOFORGE_NATIVE_CAPTURE)
+  include(cmake/NativeCapture.cmake)
 endif()
