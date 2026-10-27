@@ -1,4 +1,7 @@
 #include <stereoforge/daxa_stereo.hpp>
+#ifdef SF_DAXA_STEREO_TEST_PREPROCESS
+#include <stereoforge/daxa_preprocess.hpp>
+#endif
 #include <algorithm>
 #include <atomic>
 #include <thread>
@@ -10,11 +13,62 @@
 using namespace stereoforge;
 static void check(bool v,const char* m){if(!v)throw std::runtime_error(m);}
 template<class F> static void rejects(F f){bool ok=false;try{f();}catch(const std::exception&){ok=true;}check(ok,"expected invalid-input rejection");}
+template<class T> static std::vector<T> mirror_rows(const std::vector<T>& input,uint32_t width,uint32_t height,uint32_t components=1){
+    std::vector<T> out(input.size());for(uint32_t y=0;y<height;++y)for(uint32_t x=0;x<width;++x)for(uint32_t k=0;k<components;++k)out[(size_t(y)*width+x)*components+k]=input[(size_t(y)*width+width-1-x)*components+k];return out;
+}
+static void right_reference_oracle(){
+    for(auto width:{9u,37u})for(auto d:{1u,2u,3u,31u,32u,33u,63u,64u,65u,127u,128u,129u,255u,256u})for(auto paths:{4u,8u})for(auto p2:{31u,32u,64u,8191u}){
+        StereoConfig c{width,9,d,paths,8,p2,true};auto f=daxa_stereo_fixture(c);
+        auto mirrored=daxa_stereo_reference(c,mirror_rows(f[1],c.width,c.height),mirror_rows(f[0],c.width,c.height));
+        auto direct=daxa_stereo_reference(c,f[0],f[1],std::nullopt,DaxaStereoReference::Right);
+        check(direct.costs==mirror_rows(mirrored.costs,c.width,c.height,d),"direct right costs equal literal mirrored swapped-left oracle");
+        check(direct.sums==mirror_rows(mirrored.sums,c.width,c.height,d),"direct right sums equal literal mirrored swapped-left oracle");
+        auto canonical=daxa_stereo_reference(c,f[0],f[1]);
+        check(direct.reference==DaxaStereoReference::Right&&canonical.reference==DaxaStereoReference::Left,"scalar output reference labels and left default");
+        check(direct.census==canonical.census&&direct.census_valid==canonical.census_valid,"right Census stays canonical ordinary L/R bit order");
+        auto disparity=mirror_rows(mirrored.disparity,c.width,c.height),confidence=mirror_rows(mirrored.confidence,c.width,c.height);
+        check(direct.validity==mirror_rows(mirrored.validity,c.width,c.height),"mirrored right output mask");
+        for(size_t i=0;i<disparity.size();++i)check(std::bit_cast<uint32_t>(direct.disparity[i])==std::bit_cast<uint32_t>(disparity[i])&&std::bit_cast<uint32_t>(direct.confidence[i])==std::bit_cast<uint32_t>(confidence[i]),"right subpixel/confidence bits and canonical NaN");
+        auto bits=DaxaStereo::packed_bits(c),components=32/bits,words=(d+components-1)/components;
+        for(auto wave:{32u,64u}){auto packed=daxa_sgm_packed_model(c,direct.costs,wave),ref=mirror_rows(daxa_sgm_packed_model(c,mirrored.costs,wave),c.width,c.height,words);check(packed==ref,"right packed words equal mirrored left words P4/P8 W32/W64 8/16 bits including tails");}
+    }
+    {StereoConfig c{64,32,16,4,8,32,false};auto f=daxa_stereo_fixture(c);auto out=daxa_stereo_reference(c,f[0],f[1],std::nullopt,DaxaStereoReference::Right);size_t count=0,correct=0;for(uint32_t y=4;y+4<c.height;++y)for(uint32_t x=4;x+10<c.width;++x){auto i=y*c.width+x;if(out.validity[i]){++count;correct+=out.disparity[i]==4;}}check(count&&double(correct)/double(count)>.98,"right positive known shift four in ordinary coordinates");check(out.costs!=daxa_stereo_reference(c,f[1],f[0]).costs,"ordinary input swapping cannot implement right geometry");}
+    for(auto c:{StereoConfig{9,7,3,8,0,0,true},StereoConfig{5,5,256,4,8,32,true}}){std::vector<uint32_t> zero(c.width*c.height);auto out=daxa_stereo_reference(c,zero,zero,std::nullopt,DaxaStereoReference::Right);auto mirrored=daxa_stereo_reference(c,zero,zero);check(out.costs==mirror_rows(mirrored.costs,c.width,c.height,c.disparities)&&out.sums==mirror_rows(mirrored.sums,c.width,c.height,c.disparities),"right degenerate tied and unsupported borders");for(size_t i=0;i<out.validity.size();++i)check(!out.validity[i]&&std::bit_cast<uint32_t>(out.disparity[i])==0x7fc00000u&&out.confidence[i]==0,"right tied and unsupported outputs remain invalid");}
+    for(auto v:{DaxaSgmVariant::Baseline,DaxaSgmVariant::Wave,DaxaSgmVariant::Packed,DaxaSgmVariant::PackedD128,DaxaSgmVariant::PackedQuad,DaxaSgmVariant::PackedShuffle})rejects([&]{DaxaStereo::validate_shape(StereoConfig{9,7,128,4},1,std::nullopt,v,DaxaStereoReference::Right);});
+    for(auto paths:{4u,8u}){StereoConfig c{9,7,33,paths,8,std::min(10000u,65535/paths),true};DaxaStereo::validate_shape(c,1,std::nullopt,DaxaSgmVariant::PackedSpecialized,DaxaStereoReference::Right);++c.p2;rejects([&]{DaxaStereo::validate_shape(c,1,std::nullopt,DaxaSgmVariant::PackedSpecialized,DaxaStereoReference::Right);});}
+    rejects([]{DaxaStereo::validate_shape(StereoConfig{9,7,33,4},1,MetricCalibration{80,.12f,0},DaxaSgmVariant::PackedSpecialized,DaxaStereoReference::Right);});
+}
+static void check_right_gpu(const DaxaStereoReadback& actual,const DaxaStereoReadback& scalar,StereoConfig c,uint32_t wave){
+    check(actual.reference==DaxaStereoReference::Right&&actual.census==scalar.census&&actual.census_valid==scalar.census_valid&&actual.costs==scalar.costs&&actual.sums==scalar.sums&&actual.validity==scalar.validity,"right GPU canonical Census, direct costs, summed penalties and masks");
+    check(actual.packed_penalties==daxa_sgm_packed_model(c,scalar.costs,wave),"right GPU packed words exact scalar residuals");
+    // Compound float equality is checked against actual mirrored frozen-RHI
+    // bytes by the independent harness, never by a scalar CPU tolerance here.
+    for(size_t i=0;i<actual.disparity.size();++i){if(actual.validity[i])check(std::isfinite(actual.disparity[i])&&actual.disparity[i]>0&&actual.disparity[i]<float(c.disparities)&&std::isfinite(actual.confidence[i])&&actual.confidence[i]>0&&actual.confidence[i]<=1,"right GPU valid output finite/domain checks only");else check(std::bit_cast<uint32_t>(actual.disparity[i])==0x7fc00000u&&actual.confidence[i]==0,"right GPU invalid output canonical NaN and zero confidence");}
+}
+static void right_native_contracts(const std::shared_ptr<DaxaFoundation>& context,uint32_t wave){
+    for(auto d:{3u,33u,128u,256u})for(auto paths:{4u,8u})for(auto p2:{31u,64u,8191u}){
+        StereoConfig c{37,11,d,paths,8,p2,true};auto f=daxa_stereo_fixture(c);auto scalar=daxa_stereo_reference(c,f[0],f[1],std::nullopt,DaxaStereoReference::Right);
+        DaxaStereo engine(c,f[0],f[1],DaxaSgmVariant::PackedSpecialized,1,true,std::nullopt,context,wave,DaxaStereoReference::Right);auto frame=engine.process();frame.wait();check(frame.reference()==DaxaStereoReference::Right&&engine.reference()==DaxaStereoReference::Right,"right output lease and facade reference labels");check_right_gpu(engine.readback(frame,true),scalar,c,wave);
+    }
+#ifdef SF_DAXA_STEREO_TEST_PREPROCESS
+    DaxaStereo::Frame retained;CaptureLease last_source;
+    {DaxaRectification maps;maps.eye_width=10;maps.source_height=7;maps.stride_bytes=40;maps.width=9;maps.height=7;maps.original_identity="right-input-original";maps.rectified_identity="right-input-rectified";for(auto& map:maps.maps)map.resize(63);for(unsigned eye=0;eye<2;++eye)for(unsigned y=0;y<7;++y)for(unsigned x=0;x<9;++x){maps.maps[eye*2][y*9+x]=float(x);maps.maps[eye*2+1][y*9+x]=float(y);}
+        auto make_source=[&](uint64_t id,uint8_t seed){auto source=std::make_shared<CaptureFrame>();source->source_width=20;source->height=7;source->stride_bytes=40;source->calibration_identity=maps.original_identity;source->frame_id=id;source->camera_timestamp_ns=id;source->host_ingress_timestamp_ns=0;source->controls_json=" {\"gain\": 7} ";source->packed_yuyv.resize(280);uint32_t state=seed;for(auto& value:source->packed_yuyv){state^=state<<13;state^=state>>17;state^=state<<5;value=uint8_t(state);}return source;};
+        DaxaPreprocess pre(maps,2,context);auto prototype=pre.enqueue(make_source(0,3));StereoConfig c{9,7,33,8,8,64,true};DaxaStereo engine(c,prototype,DaxaSgmVariant::PackedSpecialized,2,std::nullopt,context,wave,DaxaStereoReference::Right);prototype.wait();prototype={};pre.collect_completed_sources();std::vector<uint32_t> first_costs;bool changed=false;
+        for(unsigned iteration=0;iteration<4;++iteration){auto source=make_source(iteration&1?uint64_t(INT64_MAX):0,uint8_t(iteration+1));std::weak_ptr<const CaptureFrame> weak=source;auto input=pre.enqueue(source);auto frame=engine.process(input);input={};frame.wait();check(engine.collect_completed_inputs()==1,"right output retires completed dynamic input while retained");pre.collect_completed_sources();auto prepared=daxa_preprocess_reference(*source,maps);auto scalar=daxa_stereo_reference(c,prepared.planes[4],prepared.planes[5],std::nullopt,DaxaStereoReference::Right);auto actual=engine.readback(frame,true);check_right_gpu(actual,scalar,c,wave);if(!iteration)first_costs=actual.costs;else changed|=first_costs!=actual.costs;
+            check(frame.source()==source&&frame.source()->frame_id==source->frame_id&&frame.source()->camera_timestamp_ns==source->camera_timestamp_ns&&frame.source()->controls_json==source->controls_json&&frame.calibration_identity()==maps.rectified_identity,"right retains source identity, signed64-range IDs, timestamps and controls without conversion");last_source=source;source.reset();check(!weak.expired(),"right output retains source lifetime after caller release");retained=frame;
+        }check(changed,"right dynamic sources change actual matching costs");}
+    retained.wait();check(retained.reference()==DaxaStereoReference::Right&&retained.source()==last_source&&retained.calibration_identity()=="right-input-rectified"&&!retained.buffer(DaxaStereoPlane::Disparity).is_empty(),"right retained output keeps geometry, source, calibration and device after producers destruct");
+#endif
+}
 int main(int argc,char** argv){try{
+    right_reference_oracle();
     bool cpu=argc>1&&std::string(argv[1])=="--cpu-only";
     auto variant=argc>2&&std::string(argv[2]).starts_with("wave")?DaxaSgmVariant::Wave:argc>2&&std::string(argv[2]).starts_with("packed-shuffle")?DaxaSgmVariant::PackedShuffle:argc>2&&std::string(argv[2]).starts_with("packed-quad")?DaxaSgmVariant::PackedQuad:argc>2&&std::string(argv[2]).starts_with("packed-d128")?DaxaSgmVariant::PackedD128:argc>2&&std::string(argv[2]).starts_with("packed-specialized")?DaxaSgmVariant::PackedSpecialized:argc>2&&std::string(argv[2]).starts_with("packed")?DaxaSgmVariant::Packed:DaxaSgmVariant::Baseline;
     uint32_t wave_size=argc>2&&(std::string(argv[2])=="wave32"||std::string(argv[2])=="packed32"||std::string(argv[2])=="packed-specialized32"||std::string(argv[2])=="packed-d12832"||std::string(argv[2])=="packed-quad32"||std::string(argv[2])=="packed-shuffle32")?32:argc>2&&(std::string(argv[2])=="wave64"||std::string(argv[2])=="packed64"||std::string(argv[2])=="packed-specialized64"||std::string(argv[2])=="packed-d12864"||std::string(argv[2])=="packed-quad64"||std::string(argv[2])=="packed-shuffle64")?64:0;
+    if(argc>2&&std::string(argv[2]).find("-right")!=std::string::npos)wave_size=std::string(argv[2]).ends_with("32")?32:64;
     auto context=cpu?std::shared_ptr<DaxaFoundation>{}:std::make_shared<DaxaFoundation>(true);
+    if(!cpu&&argc>2&&std::string(argv[2]).find("-right")!=std::string::npos){right_native_contracts(context,wave_size);context->close();check(context->validation_errors.load()==0&&context->validation_warnings.load()==0,"right Vulkan validation through teardown");std::cout<<"Daxa right integer/direct-packed/lifetime contracts passed; compound_float_reference_checked=false; independent mirrored frozen-RHI output byte gate required\n";return 0;}
     auto grid=DaxaStereo::dispatch_grid((1280ull*720*128+63)/64,{65535,65535,65535});check(grid[0]<=65535&&grid[1]<=65535&&uint64_t(grid[0])*grid[1]>=(1280ull*720*128+63)/64,"720p D128 dispatch covers volume within hardware limits");
     rejects([]{DaxaStereo::dispatch_grid(100,{2,2,1});});
     for(auto d:{1u,2u,3u,31u,32u,64u,127u,128u,255u,256u})for(auto paths:{4u,8u}){

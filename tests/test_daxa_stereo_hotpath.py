@@ -118,13 +118,41 @@ def check_specialized_address_arithmetic(shader):
     assert cost.index('if(supported)') < cost.index('right_valid[i-d]')
     assert 'packing_bits' not in summed and 'd/Components' in summed and 'd%Components' in summed, 'selection layout must use compile-time Components/Bits'
     assert 'word_base' in summed and 'specialized_cost(x,i,d,' in summed
-    assert aggregate.index('uint reference=left_desc[i]') < aggregate.index('uint c=specialized_cost(')
+    assert aggregate.index('uint reference=left_desc[i]') < aggregate.index('uint c=reference_cost<RightReference>(')
     assert 'x=uint(xy.x)' in aggregate and 'WaveGetWaveIndex()' in aggregate
     assert select.index('uint x=i%width,word_base=') < select.index('for(uint d=lane;')
     assert 'packed_sum(' not in select
     for name,layout in (('aggregate_specialized8','4,8'),('aggregate_specialized16','2,16'),('select_specialized8','4,8'),('select_specialized16','2,16')):
         entry = body(shader,'void '+name+'(')
-        assert '<'+layout+'>' in entry
+        assert '<'+layout+',false>' in entry
+
+
+def check_reference_direction_specialization(shader):
+    cost = body(shader, 'uint reference_cost<')
+    assert 'let RightReference:bool' in shader, 'direction must be a compile-time specialization'
+    assert not re.search(r'[%/]|\bp\.',cost), 'directional cost must not add per-disparity division or runtime parameters'
+    assert 'if(!RightReference)return specialized_cost(' in cost, 'left delegates to the frozen left lookup'
+    assert 'd<width-x&&reference_valid' in cost, 'right disparity must stay in the same image row'
+    assert 'target_valid[i+d]' in cost and cost.index('if(supported)') < cost.index('target_valid[i+d]'), 'right lookup must be guarded before memory access'
+    aggregate = body(shader, 'void aggregate_specialized_body<')
+    selection = body(shader, 'void select_specialized_body<')
+    assert 'reference_cost<RightReference>' in aggregate
+    assert 'reference_sum<Components,Bits,RightReference>' in selection
+    for stem in ('aggregate','select'):
+        for suffix,layout in (('8','4,8'),('16','2,16')):
+            assert '<'+layout+',true>' in body(shader,'void '+stem+'_right_specialized'+suffix+'(')
+            assert '<'+layout+',false>' in body(shader,'void '+stem+'_specialized'+suffix+'(')
+
+
+def test_right_cost_is_compile_time_bounded_and_left_remains_delegated():
+    check_reference_direction_specialization((ROOT/'python/stereoforge/shaders/daxa/stereo.slang').read_text())
+
+
+@pytest.mark.parametrize('old,new', [('d<width-x&&reference_valid','d<=width-x&&reference_valid'), ('target_valid[i+d]','target_valid[i-d]'), ('if(!RightReference)return specialized_cost(', 'if(p.paths==4)return specialized_cost(')])
+def test_direction_guard_rejects_row_crossing_wrong_sign_or_runtime_branch(old,new):
+    shader=(ROOT/'python/stereoforge/shaders/daxa/stereo.slang').read_text()
+    with pytest.raises(AssertionError):
+        check_reference_direction_specialization(shader.replace(old,new,1))
 
 
 def test_specialized_variant_hoists_pixel_inputs_and_selects_constant_layouts():
@@ -151,7 +179,7 @@ def test_specialized_guard_catches_runtime_packing_layout():
 def check_d128_state_and_admission(source,shader):
     admission=body(source,'void DaxaStereo::validate_shape(')
     assert 'variant!=DaxaSgmVariant::PackedD128||c.disparities==128' in admission, 'D128 must reject every other disparity count'
-    assert 'validate_shape(c,slots,metric,variant)' in body(source,'void DaxaStereo::validate('), 'full input validation must retain shape admission'
+    assert 'validate_shape(c,slots,metric,variant,reference)' in body(source,'void DaxaStereo::validate('), 'full input validation must retain shape admission'
     constructor=body(source,'DaxaStereo::DaxaStereo(')
     assert constructor.index('validate(')<constructor.index('std::make_shared<Impl>'), 'admission precedes device ownership'
     aggregate=body(shader,'void aggregate_d128_body<')
@@ -205,7 +233,7 @@ def test_cli_shape_preflight_stays_before_large_inputs_and_device():
 def test_cli_guard_catches_preflight_moved_after_input_allocation():
     source=(ROOT/'src/daxa_stereo.cpp').read_text()
     app=(ROOT/'apps/daxa_stereo_benchmark.cpp').read_text()
-    call='DaxaStereo::validate_shape(config,slots,metric,selected_variant);'
+    call='DaxaStereo::validate_shape(config,slots,metric,selected_variant,reference_geometry);'
     assert call in app
     app=app.replace(call,'').replace('std::array<std::vector<uint32_t>,2> luma;','std::array<std::vector<uint32_t>,2> luma;'+call)
     with pytest.raises(AssertionError,match='precede full luma'):
@@ -252,6 +280,12 @@ def test_quad_guard_catches_assumed_subgroup_identity():
 
 def check_shuffle_minimum_only(shader):
     original=body(shader,'void aggregate_specialized_body<')
+    # Compare shuffle to the left instantiation, folding only exact compile-time routing.
+    original=original.replace('RightReference?p.right_desc_address:p.left_desc_address','p.left_desc_address').replace('RightReference?p.left_desc_address:p.right_desc_address','p.right_desc_address')
+    original=original.replace('RightReference?p.right_valid_address:p.left_valid_address','p.left_valid_address').replace('RightReference?p.left_valid_address:p.right_valid_address','p.right_valid_address')
+    for address in ('left_desc_address','right_desc_address','left_valid_address','right_valid_address'):
+        original=original.replace('(uint*)(p.'+address+')','(uint*)p.'+address)
+    original=original.replace('reference_cost<RightReference>(width,x,i,d,','specialized_cost(x,i,d,')
     changed=body(shader,'void aggregate_shuffle_body<')
     primitive=(r'uint minimum=local_min;\s*\[unroll\]for\(uint offset=1;offset<32;offset\*=2\)'
                r'\{uint other=WaveReadLaneAt\(minimum,lane\^offset\);minimum=min\(minimum,other\);\}\s*'
@@ -314,13 +348,16 @@ void* operator new[](std::size_t n){return ::operator new(n);}
 void operator delete(void* p)noexcept{std::free(p);}void operator delete[](void* p)noexcept{std::free(p);}
 void operator delete(void* p,std::size_t)noexcept{std::free(p);}void operator delete[](void* p,std::size_t)noexcept{std::free(p);}
 namespace stereoforge {
+enum class DaxaStereoReference { Left,Right };
 enum class DaxaSgmVariant { Baseline,Wave,Packed,PackedSpecialized,PackedD128,PackedQuad,PackedShuffle };
-class DaxaStereo {public:static void validate_shape(StereoConfig,unsigned,std::optional<MetricCalibration>,DaxaSgmVariant variant=DaxaSgmVariant::Baseline);static void validate(StereoConfig,std::span<const uint32_t>,std::span<const uint32_t>,unsigned,std::optional<MetricCalibration>,DaxaSgmVariant variant=DaxaSgmVariant::Baseline);static uint32_t packed_bits(StereoConfig);};
+class DaxaStereo {public:static void validate_shape(StereoConfig,unsigned,std::optional<MetricCalibration>,DaxaSgmVariant variant=DaxaSgmVariant::Baseline,DaxaStereoReference reference=DaxaStereoReference::Left);static void validate(StereoConfig,std::span<const uint32_t>,std::span<const uint32_t>,unsigned,std::optional<MetricCalibration>,DaxaSgmVariant variant=DaxaSgmVariant::Baseline,DaxaStereoReference reference=DaxaStereoReference::Left);static uint32_t packed_bits(StereoConfig);};
 '''
     program += definition(header, 'struct DaxaStereoReadback') + ';\n'
+    program += 'DaxaStereoReadback daxa_stereo_reference(StereoConfig,std::span<const uint32_t>,std::span<const uint32_t>,std::optional<MetricCalibration>,DaxaStereoReference reference=DaxaStereoReference::Left);\n'
     program += definition(header, 'struct DaxaQuadSelection') + ';\n'
     program += 'using uint=uint32_t;static const uint SGM_INVALID_COST=10000;uint countbits(uint x){return std::popcount(x);}\n'
     program += definition(ops, 'uint sgm_cost(') + definition(shader, 'uint specialized_cost(')
+    program += 'template<bool RightReference>\n'+definition(shader,'uint reference_cost<').replace('reference_cost<let RightReference:bool>','reference_cost')
     directions = re.search(r'constexpr std::array<std::array<int,2>,8> directions.*?;', source)
     assert directions is not None
     program += 'namespace {\n' + directions.group() + '\n'
@@ -334,6 +371,20 @@ class DaxaStereo {public:static void validate_shape(StereoConfig,unsigned,std::o
 }
 using namespace stereoforge;
 int main(int argc,char** argv){
+  if(argc==2&&std::string(argv[1])=="--cost-direction"){
+    const uint width=64,height=32,n=width*height,D=128;
+    std::vector<uint> desc(n),valid(n);for(uint i=0;i<n;++i){desc[i]=(i*1664525u+1013904223u)&0xffffffu;valid[i]=i%7!=0;}
+    for(uint i=0;i<n;++i)for(uint d=0;d<D;++d){uint x=i%width;
+      bool lok=x>=d&&valid[i]&&valid[i-d],rok=d<width-x&&valid[i]&&valid[i+d];
+      uint l=lok?uint(std::popcount(desc[i]^desc[i-d])):10000u,r=rok?uint(std::popcount(desc[i]^desc[i+d])):10000u;
+      if(reference_cost<false>(width,x,i,d,desc[i],valid[i],valid.data(),desc.data())!=l||reference_cost<true>(width,x,i,d,desc[i],valid[i],valid.data(),desc.data())!=r)return 15;
+    }
+    auto measure=[&]<bool Right>(){allocations=0;tracking=true;auto start=std::chrono::steady_clock::now();uint64_t sum=0;
+      for(uint repetition=0;repetition<32;++repetition)for(uint i=0;i<n;++i){uint x=i%width;for(uint d=0;d<D;++d)sum+=reference_cost<Right>(width,x,i,d,desc[i],valid[i],valid.data(),desc.data());}
+      auto ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();tracking=false;return std::array<double,3>{ms,double(allocations.load()),double(sum)};};
+    auto left=measure.operator()<false>(),right=measure.operator()<true>();
+    std::cout<<"{\"scope\":\"extracted_actual_cost_lookup_cpu_only_not_gpu\",\"calls_per_direction\":"<<32ull*n*D<<",\"left_ms\":"<<left[0]<<",\"right_ms\":"<<right[0]<<",\"left_allocations\":"<<left[1]<<",\"right_allocations\":"<<right[1]<<",\"left_checksum\":"<<left[2]<<",\"right_checksum\":"<<right[2]<<"}\n";return 0;
+  }
   if(argc==3&&std::string(argv[1])=="--wave-min"){std::ifstream input(argv[2],std::ios::binary);uint count;input.read(reinterpret_cast<char*>(&count),4);std::vector<uint> values(count);input.read(reinterpret_cast<char*>(values.data()),count*4);if(!input)return 13;
     try{auto result=daxa_wave_min_model(values);std::cout.write(reinterpret_cast<const char*>(result.data()),result.size()*4);return std::cout?0:14;}catch(const std::invalid_argument&){return 12;}}
   if(argc==2&&std::string(argv[1])=="--d128-admission"){
@@ -516,3 +567,15 @@ def check_packed_penalty_numpy(scalar_cpu_probe,disparities,paths,p2,model):
         assert np.all(expected <= paths*p2)
         np.testing.assert_array_equal(fields[...,:disparities],expected)
         assert not np.any(fields[...,disparities:]), 'unused fields must remain zero'
+
+
+def test_actual_directional_lookup_cpu_cost_and_allocation_probe(scalar_cpu_probe):
+    binary,_=scalar_cpu_probe
+    result=subprocess.run([str(binary),'--cost-direction'],capture_output=True,text=True,timeout=30)
+    assert result.returncode==0,result.stderr
+    row=json.loads(result.stdout)
+    print('Directional lookup CPU-only probe:',json.dumps(row,sort_keys=True))
+    assert row['left_allocations']==row['right_allocations']==0
+    assert row['left_checksum']==row['right_checksum']
+    assert row['calls_per_direction']==32*64*32*128
+    assert row['left_ms']>0 and row['right_ms']>0

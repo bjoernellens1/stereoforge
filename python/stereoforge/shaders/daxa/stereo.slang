@@ -177,10 +177,20 @@ uint specialized_sum<let Components:uint,let Bits:uint>(uint x,uint i,uint d,uin
     uint field=(words[word_base+d/Components]>>((d%Components)*Bits))&((1u<<Bits)-1);
     return paths*specialized_cost(x,i,d,reference,reference_valid,right_valid,right_desc)+field;
 }
-void aggregate_specialized_body<let Components:uint,let Bits:uint>(uint3 gid){
+// Compile-time geometry leaves the recurrence and packed/selection math shared.
+uint reference_cost<let RightReference:bool>(uint width,uint x,uint i,uint d,uint reference,bool reference_valid,uint* target_valid,uint* target_desc){
+    if(!RightReference)return specialized_cost(x,i,d,reference,reference_valid,target_valid,target_desc);
+    bool supported=d<width-x&&reference_valid;if(supported)supported=target_valid[i+d]!=0;
+    uint cost=SGM_INVALID_COST;if(supported)cost=sgm_cost(reference,target_desc[i+d],true);return cost;
+}
+uint reference_sum<let Components:uint,let Bits:uint,let RightReference:bool>(uint width,uint x,uint i,uint d,uint word_base,uint paths,uint reference,bool reference_valid,uint* target_valid,uint* target_desc,uint* words){
+    uint field=(words[word_base+d/Components]>>((d%Components)*Bits))&((1u<<Bits)-1);
+    return paths*reference_cost<RightReference>(width,x,i,d,reference,reference_valid,target_valid,target_desc)+field;
+}
+void aggregate_specialized_body<let Components:uint,let Bits:uint,let RightReference:bool>(uint3 gid){
     uint width=p.width,height=p.height,disparities=p.disparities,p1=p.p1,p2=p.p2;
-    uint* left_desc=(uint*)p.left_desc_address;uint* right_desc=(uint*)p.right_desc_address;
-    uint* left_valid=(uint*)p.left_valid_address;uint* right_valid=(uint*)p.right_valid_address;
+    uint* left_desc=(uint*)(RightReference?p.right_desc_address:p.left_desc_address);uint* right_desc=(uint*)(RightReference?p.left_desc_address:p.right_desc_address);
+    uint* left_valid=(uint*)(RightReference?p.right_valid_address:p.left_valid_address);uint* right_valid=(uint*)(RightReference?p.left_valid_address:p.right_valid_address);
     uint* words=(uint*)p.penalties_address;
     uint lanes=WaveGetLaneCount(),lane=WaveGetLaneIndex();int2 dir=sgm_direction(pc.pass);
     uint line=linear_group(gid)*(64/lanes)+WaveGetWaveIndex();if(line>=sgm_line_count(width,height,dir))return;
@@ -203,7 +213,7 @@ void aggregate_specialized_body<let Components:uint,let Bits:uint>(uint3 gid){
                 uint lo=component>0?prev[r>0?r-1:0]:(lane>0?lo_same:lo_cross);
                 uint hi=component+1<Components?prev[min(r+1,7u)]:(lane+1<lanes?hi_same:hi_cross);
                 if(d==0)lo=SGM_REDUCTION_INF;if(d+1>=disparities)hi=SGM_REDUCTION_INF;
-                if(d<disparities){uint c=specialized_cost(x,i,d,reference,reference_valid,right_valid,right_desc);next[r]=sgm_step(c,prev[r],lo,hi,minimum,p1,p2,first);addition|=(next[r]-c)<<(component*Bits);}else next[r]=0;
+                if(d<disparities){uint c=reference_cost<RightReference>(width,x,i,d,reference,reference_valid,right_valid,right_desc);next[r]=sgm_step(c,prev[r],lo,hi,minimum,p1,p2,first);addition|=(next[r]-c)<<(component*Bits);}else next[r]=0;
             }
             if(word<row_words)words[i*row_words+word]+=addition;
         }
@@ -211,20 +221,20 @@ void aggregate_specialized_body<let Components:uint,let Bits:uint>(uint3 gid){
     }
 }
 [shader("compute")][numthreads(64,1,1)]
-void aggregate_specialized8(uint3 gid:SV_GroupID){aggregate_specialized_body<4,8>(gid);}
+void aggregate_specialized8(uint3 gid:SV_GroupID){aggregate_specialized_body<4,8,false>(gid);}
 [shader("compute")][numthreads(64,1,1)]
-void aggregate_specialized16(uint3 gid:SV_GroupID){aggregate_specialized_body<2,16>(gid);}
-void select_specialized_body<let Components:uint,let Bits:uint>(uint3 gid,uint3 tid){
+void aggregate_specialized16(uint3 gid:SV_GroupID){aggregate_specialized_body<2,16,false>(gid);}
+void select_specialized_body<let Components:uint,let Bits:uint,let RightReference:bool>(uint3 gid,uint3 tid){
     uint i=linear_group(gid)*64+tid.x/4,lane=tid.x%4,t=tid.x;
     uint width=p.width,disparities=p.disparities,paths=p.paths,subpixel=p.subpixel;
     uint x=i%width,word_base=i*((disparities+Components-1)/Components);
-    uint* left_desc=(uint*)p.left_desc_address;uint* right_desc=(uint*)p.right_desc_address;
-    uint* left_valid=(uint*)p.left_valid_address;uint* right_valid=(uint*)p.right_valid_address;
+    uint* left_desc=(uint*)(RightReference?p.right_desc_address:p.left_desc_address);uint* right_desc=(uint*)(RightReference?p.left_desc_address:p.right_desc_address);
+    uint* left_valid=(uint*)(RightReference?p.right_valid_address:p.left_valid_address);uint* right_valid=(uint*)(RightReference?p.left_valid_address:p.right_valid_address);
     uint* words=(uint*)p.penalties_address;
     uint reference=0;bool reference_valid=false;
     if(i<width*p.height){reference=left_desc[i];reference_valid=left_valid[i]!=0;}
     uint best=0xffffffff,best_cost=0xffffffff,second=0xffffffff;
-    if(i<width*p.height)for(uint d=lane;d<disparities;d+=4){uint c=specialized_sum<Components,Bits>(x,i,d,word_base,paths,reference,reference_valid,right_valid,right_desc,words);if(c<best_cost||(c==best_cost&&d<best)){second=best_cost;best_cost=c;best=d;}else second=min(second,c);}
+    if(i<width*p.height)for(uint d=lane;d<disparities;d+=4){uint c=reference_sum<Components,Bits,RightReference>(width,x,i,d,word_base,paths,reference,reference_valid,right_valid,right_desc,words);if(c<best_cost||(c==best_cost&&d<best)){second=best_cost;best_cost=c;best=d;}else second=min(second,c);}
     select_best_cost[t]=best_cost;select_second_cost[t]=second;select_best_index[t]=best;GroupMemoryBarrierWithGroupSync();
     for(uint stride=2;stride>0;stride/=2){if(lane<stride){uint other=t+stride;uint oc=select_best_cost[other],oi=select_best_index[other],own=select_best_cost[t],index=select_best_index[t];
         if(oc<own||(oc==own&&oi<index)){select_second_cost[t]=min(select_second_cost[other],own);select_best_cost[t]=oc;select_best_index[t]=oi;}else select_second_cost[t]=min(select_second_cost[t],oc);}
@@ -232,14 +242,23 @@ void select_specialized_body<let Components:uint,let Bits:uint>(uint3 gid,uint3 
     if(lane!=0||i>=width*p.height)return;
     best=select_best_index[t];best_cost=select_best_cost[t];second=select_second_cost[t];if(disparities==1)second=best_cost;
     bool valid=sgm_selection_valid(best,best_cost,second);float value=float(best);
-    if(subpixel!=0&&best>0&&best+1<disparities)value=sgm_subpixel(best,best_cost,specialized_sum<Components,Bits>(x,i,best-1,word_base,paths,reference,reference_valid,right_valid,right_desc,words),specialized_sum<Components,Bits>(x,i,best+1,word_base,paths,reference,reference_valid,right_valid,right_desc,words));
+    if(subpixel!=0&&best>0&&best+1<disparities)value=sgm_subpixel(best,best_cost,reference_sum<Components,Bits,RightReference>(width,x,i,best-1,word_base,paths,reference,reference_valid,right_valid,right_desc,words),reference_sum<Components,Bits,RightReference>(width,x,i,best+1,word_base,paths,reference,reference_valid,right_valid,right_desc,words));
     disparity[i]=valid?value:asfloat(0x7fc00000);confidence[i]=valid?float(second-best_cost)/float(max(second,1u)):0;validity[i]=valid?1:0;
 }
 
 [shader("compute")][numthreads(256,1,1)]
-void select_specialized8(uint3 gid:SV_GroupID,uint3 tid:SV_GroupThreadID){select_specialized_body<4,8>(gid,tid);}
+void select_specialized8(uint3 gid:SV_GroupID,uint3 tid:SV_GroupThreadID){select_specialized_body<4,8,false>(gid,tid);}
 [shader("compute")][numthreads(256,1,1)]
-void select_specialized16(uint3 gid:SV_GroupID,uint3 tid:SV_GroupThreadID){select_specialized_body<2,16>(gid,tid);}
+void select_specialized16(uint3 gid:SV_GroupID,uint3 tid:SV_GroupThreadID){select_specialized_body<2,16,false>(gid,tid);}
+
+[shader("compute")][numthreads(64,1,1)]
+void aggregate_right_specialized8(uint3 gid:SV_GroupID){aggregate_specialized_body<4,8,true>(gid);}
+[shader("compute")][numthreads(64,1,1)]
+void aggregate_right_specialized16(uint3 gid:SV_GroupID){aggregate_specialized_body<2,16,true>(gid);}
+[shader("compute")][numthreads(256,1,1)]
+void select_right_specialized8(uint3 gid:SV_GroupID,uint3 tid:SV_GroupThreadID){select_specialized_body<4,8,true>(gid,tid);}
+[shader("compute")][numthreads(256,1,1)]
+void select_right_specialized16(uint3 gid:SV_GroupID,uint3 tid:SV_GroupThreadID){select_specialized_body<2,16,true>(gid,tid);}
 
 // Candidate D specializes only aggregation state/stride for exactly D128.
 void aggregate_d128_body<let Components:uint,let Bits:uint>(uint3 gid){

@@ -9,9 +9,13 @@
 #include <string>
 #include <vector>
 namespace stereoforge {
+// Positive disparity is x_left-x_right. Left compares L(x) with R(x-d);
+// Right compares R(x) with L(x+d). Census planes always retain ordinary L/R order.
+enum class DaxaStereoReference { Left,Right };
 enum class DaxaSgmVariant { Baseline,Wave,Packed,PackedSpecialized,PackedD128,PackedQuad,PackedShuffle };
 enum class DaxaStereoPlane : unsigned { Disparity,Confidence,Validity,Depth,DepthValidity,Costs,Sums,LeftCensus,RightCensus,LeftCensusValid,RightCensusValid,PackedPenalties };
 struct DaxaStereoReadback {
+    DaxaStereoReference reference=DaxaStereoReference::Left;
     std::vector<float> disparity,confidence,depth;
     std::vector<uint32_t> validity,depth_validity,costs,sums;
     std::array<std::vector<uint32_t>,2> census,census_valid;
@@ -27,7 +31,7 @@ struct DaxaStereoTiming {
 };
 // Scalar diagnostic oracle and independent lane-chunk CPU model. No device use.
 std::array<std::vector<uint32_t>,2> daxa_stereo_fixture(StereoConfig);
-DaxaStereoReadback daxa_stereo_reference(StereoConfig,std::span<const uint32_t> left,std::span<const uint32_t> right,std::optional<MetricCalibration> metric=std::nullopt);
+DaxaStereoReadback daxa_stereo_reference(StereoConfig,std::span<const uint32_t> left,std::span<const uint32_t> right,std::optional<MetricCalibration> metric=std::nullopt,DaxaStereoReference reference=DaxaStereoReference::Left);
 std::vector<uint32_t> daxa_sgm_packed_model(StereoConfig,std::span<const uint32_t> costs,unsigned wave_size);
 std::vector<uint32_t> daxa_wave_min_model(std::span<const uint32_t> lane_values);
 struct DaxaQuadSelection {std::vector<uint32_t> best,best_cost,second;};
@@ -36,7 +40,8 @@ std::vector<uint32_t> daxa_sgm_d128_model(StereoConfig,std::span<const uint32_t>
 std::vector<uint32_t> daxa_sgm_wave_model(StereoConfig,std::span<const uint32_t> costs,unsigned wave_size);
 // Single host submission thread only; callers serialize all uses of a shared
 // DaxaFoundation, including process/inspect/readback. No concurrent producer API.
-// Single reference only: retained immutable uint32 luma uploaded once at setup.
+// One explicit reference per engine, Left by default; Right requires PackedSpecialized.
+// Retained immutable uint32 luma uploaded once at setup, or leased dynamic DaxaFrames.
 // No LR consistency, rectification, source capture or production 60 Hz claim.
 class DaxaStereo {
     struct Impl;
@@ -62,13 +67,14 @@ public:
         uint64_t generation()const;
         uint64_t context_id()const;
         uint32_t packing_bits()const;
+        DaxaStereoReference reference()const;
         CaptureLease source()const;const std::string& calibration_identity()const;
     };
     static std::array<uint32_t,3> dispatch_grid(uint64_t groups,std::array<uint32_t,3> limits);
-    static void validate_shape(StereoConfig,unsigned slots,std::optional<MetricCalibration>,DaxaSgmVariant variant=DaxaSgmVariant::Baseline); // CPU-only before input allocation.
-    static void validate(StereoConfig,std::span<const uint32_t>,std::span<const uint32_t>,unsigned slots,std::optional<MetricCalibration>,DaxaSgmVariant variant=DaxaSgmVariant::Baseline);
-    DaxaStereo(StereoConfig,std::span<const uint32_t> left,std::span<const uint32_t> right,DaxaSgmVariant,unsigned slots=1,bool validation=false,std::optional<MetricCalibration> metric=std::nullopt,std::shared_ptr<DaxaFoundation> owner={},uint32_t required_wave_size=0);
-    DaxaStereo(StereoConfig,const DaxaFrame& prototype,DaxaSgmVariant,unsigned slots,std::optional<MetricCalibration>,std::shared_ptr<DaxaFoundation>,uint32_t required_wave_size=0);
+    static void validate_shape(StereoConfig,unsigned slots,std::optional<MetricCalibration>,DaxaSgmVariant variant=DaxaSgmVariant::Baseline,DaxaStereoReference reference=DaxaStereoReference::Left); // CPU-only before input allocation.
+    static void validate(StereoConfig,std::span<const uint32_t>,std::span<const uint32_t>,unsigned slots,std::optional<MetricCalibration>,DaxaSgmVariant variant=DaxaSgmVariant::Baseline,DaxaStereoReference reference=DaxaStereoReference::Left);
+    DaxaStereo(StereoConfig,std::span<const uint32_t> left,std::span<const uint32_t> right,DaxaSgmVariant,unsigned slots=1,bool validation=false,std::optional<MetricCalibration> metric=std::nullopt,std::shared_ptr<DaxaFoundation> owner={},uint32_t required_wave_size=0,DaxaStereoReference reference=DaxaStereoReference::Left);
+    DaxaStereo(StereoConfig,const DaxaFrame& prototype,DaxaSgmVariant,unsigned slots,std::optional<MetricCalibration>,std::shared_ptr<DaxaFoundation>,uint32_t required_wave_size=0,DaxaStereoReference reference=DaxaStereoReference::Left);
     Frame process(const DaxaFrame&);size_t collect_completed_inputs();
     Frame process(); // No wait/full readback/own allocations; rejects retained/in-flight slots.
     DaxaStereoReadback readback(Frame const&,bool include_costs_and_sums=false)const;
@@ -78,6 +84,7 @@ public:
     uint64_t allocated_bytes()const;
     uint32_t required_wave_size()const;
     uint32_t packing_bits()const;
+    DaxaStereoReference reference()const;
     static uint32_t packed_bits(StereoConfig);
     unsigned validation_errors()const;
     static const char* variant_name(DaxaSgmVariant);

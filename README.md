@@ -210,6 +210,12 @@ run after timing. `--check-integer-reference` verifies integer stages and packed
 words; it does not certify the unresolved scalar compound-float gate. The
 full GPU stereo CTests retain that stricter gate and are currently unqualified.
 
+True right-reference disparity is also available for `packed-specialized` via
+`--reference right`. It matches an independent mirrored frozen-RHI oracle
+exactly and measures about **15.1 ms GPU** separately at 720p/D128/four paths.
+LR consistency and metric right-depth integration remain open. See
+[right-reference evidence](docs/daxa-stereo-right-evidence.md).
+
 ## Experimental native preprocessing
 
 The optional C++/Daxa path now connects packed YUYV capture leases to original
