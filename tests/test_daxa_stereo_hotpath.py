@@ -363,6 +363,8 @@ enum class DaxaStereoReference { Left,Right };
 enum class DaxaSgmVariant { Baseline,Wave,Packed,PackedSpecialized,PackedD128,PackedQuad,PackedShuffle };
 class DaxaStereo {public:static void validate_shape(StereoConfig,unsigned,std::optional<MetricCalibration>,DaxaSgmVariant variant=DaxaSgmVariant::Baseline,DaxaStereoReference reference=DaxaStereoReference::Left);static void validate(StereoConfig,std::span<const uint32_t>,std::span<const uint32_t>,unsigned,std::optional<MetricCalibration>,DaxaSgmVariant variant=DaxaSgmVariant::Baseline,DaxaStereoReference reference=DaxaStereoReference::Left);static uint32_t packed_bits(StereoConfig);};
 '''
+    for enum in ('DaxaRightReferenceMode', 'DaxaStereoEstimator'):
+        program += definition(header, 'enum class '+enum) + ';\n'
     program += definition(header, 'struct DaxaStereoReadback') + ';\n'
     program += 'DaxaStereoReadback daxa_stereo_reference(StereoConfig,std::span<const uint32_t>,std::span<const uint32_t>,std::optional<MetricCalibration>,DaxaStereoReference reference=DaxaStereoReference::Left);\n'
     program += definition(header, 'struct DaxaQuadSelection') + ';\n'

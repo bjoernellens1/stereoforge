@@ -8,6 +8,7 @@ struct DaxaDepthConfig {
     unsigned slots=1;
     uint32_t required_wave_size=32;
     DaxaDepthStereoSchedule stereo_schedule=DaxaDepthStereoSchedule::Sequential;
+    DaxaRightReferenceMode right_reference_mode=DaxaRightReferenceMode::IndependentSGM;
     void validate()const;
     uint64_t requested_buffer_bytes(const DaxaRectification&)const;
 };
@@ -17,6 +18,8 @@ struct DaxaDepthStereoInput {
     std::array<std::vector<uint32_t>,2> validity,support;
 };
 struct DaxaDepthReadback {
+    DaxaRightReferenceMode right_reference_mode=DaxaRightReferenceMode::IndependentSGM;
+    DaxaLRDependency lr_dependency=DaxaLRDependency::IndependentReferences;
     std::vector<float> lr_disparity,lr_confidence,depth,metric_confidence;
     std::vector<uint32_t> lr_validity,metric_validity,provenance;
     std::vector<int64_t> source_ids,age_ns;
@@ -49,6 +52,8 @@ public:
         daxa::BufferId buffer(DaxaDepthPlane)const;size_t size_bytes(DaxaDepthPlane)const;
         DaxaImageView image(DaxaPreprocessPlane)const; // Independently retained RGB views consume preprocessing capacity.
         CaptureLease source()const;std::shared_ptr<const DaxaRectification> calibration()const;
+        DaxaRightReferenceMode right_reference_mode()const;
+        DaxaLRDependency lr_dependency()const;
         MetricCalibration metric_calibration()const;DaxaDepthTiming timings()const;
         DaxaStereo::Frame stereo_frame(DaxaStereoReference)const; // SharedCensusSequential GPU producer lease; independently consumes aligned stereo capacity.
     };
@@ -59,10 +64,11 @@ public:
     DaxaPreprocessReadback readback_images(const Frame&)const;
     DaxaDepthStereoInput readback_stereo(const Frame&)const;
     DaxaStereoReadback readback_stereo(const Frame&,DaxaStereoReference,bool include_intermediates=true)const;
+    void check_derived_stereo_integer(const Frame&,const DaxaPreprocessReadback& expected_images)const;
     void check_stereo_integer(const Frame&,const DaxaPreprocessReadback& expected_images)const;
     uint64_t completed_output_retirements()const;uint64_t requested_observation_bytes()const;uint64_t requested_combined_buffer_bytes()const;
     double last_upload_cpu_ms()const;
     static void validate_pair(const DaxaFrame&,const DaxaStereo::Frame&,const DaxaStereo::Frame&);
-    static std::string shader_directory();static std::string shader_identity();
+    static std::string shader_directory();static std::string shader_identity();static std::string derived_shader_identity();
 };
 }

@@ -65,3 +65,20 @@ def test_compiled_shared_and_layered_source_hash_getter_is_cpu_only(tmp_path):
         'stereo_shared_shader_source_sha256_pair': sha('daxa/stereo_parameters.slang') + ':' + sha('ops/sgm_specialized.slang'),
         'stereo_layered_shader_source_sha256': sha('daxa/stereo_layered.slang'),
     }
+
+@pytest.mark.parametrize('mode', ['', 'derived', 'IndependentSGM', 'unknown'])
+def test_unknown_right_mode_rejected_before_fixture(tmp_path, mode):
+    result = invoke(tmp_path, '--right-reference-mode', mode)
+    assert result.returncode == 1 and 'unknown Right reference mode' in result.stderr
+
+@pytest.mark.parametrize('schedule', ['sequential', 'paired-per-path', 'layered-per-path'])
+def test_derived_requires_shared_schedule_before_fixture(tmp_path, schedule):
+    result = invoke(tmp_path, '--right-reference-mode', 'left-aggregated-selection',
+                    '--stereo-schedule', schedule)
+    assert result.returncode == 1 and 'derived Right requires shared-census-sequential' in result.stderr
+
+@pytest.mark.parametrize('mode', ['independent-sgm', 'left-aggregated-selection'])
+def test_right_mode_reaches_fixture_preflight(tmp_path, mode):
+    result = invoke(tmp_path, '--right-reference-mode', mode,
+                    '--stereo-schedule', 'shared-census-sequential')
+    assert result.returncode == 1 and 'missing fixture file' in result.stderr

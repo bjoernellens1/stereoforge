@@ -98,6 +98,19 @@ DaxaStereoReadback daxa_stereo_reference(StereoConfig c,std::span<const uint32_t
         if(metric&&ok){float corrected=disparity-metric->cx_offset,z=metric->fx*metric->baseline_m/corrected;if(std::isfinite(corrected)&&corrected>0&&std::isfinite(z)&&z>0){out.depth[i]=z;out.depth_validity[i]=1;}}
     }return out;
 }
+DaxaStereoReadback daxa_left_aggregated_selection_reference(StereoConfig c,const DaxaStereoReadback& left){
+    c.validate();size_t n=size_t(c.width)*c.height;require(left.reference==DaxaStereoReference::Left&&left.sums.size()==n*c.disparities,"derived diagnostic requires scalar Left sums");
+    for(unsigned eye=0;eye<2;++eye)require(left.census_valid[eye].size()==n,"derived diagnostic Census mask shape");
+    DaxaStereoReadback out;out.reference=DaxaStereoReference::Right;out.right_reference_mode=DaxaRightReferenceMode::LeftAggregatedSelection;out.estimator=DaxaStereoEstimator::LeftAggregatedSelection;
+    out.disparity.assign(n,invalid_float());out.confidence.assign(n,0);out.validity.assign(n,0);
+    for(size_t i=0;i<n;++i){auto supported=[&](uint32_t d){return d<c.disparities&&d<c.width-i%c.width&&left.census_valid[1][i]&&left.census_valid[0][i+d];};
+        uint32_t best=UINT32_MAX,cost=UINT32_MAX,second=UINT32_MAX,count=0;
+        for(uint32_t d=0;d<c.disparities;++d)if(supported(d)){++count;auto value=left.sums[(i+d)*c.disparities+d];if(value<cost){second=cost;cost=value;best=d;}else second=std::min(second,value);}
+        bool valid=count>=2&&best>0&&cost<10000&&second>cost;float value=float(best);
+        if(c.subpixel&&best>0&&best+1<c.disparities&&supported(best-1)&&supported(best+1)){float lo=float(left.sums[(i+best-1)*c.disparities+best-1]),hi=float(left.sums[(i+best+1)*c.disparities+best+1]),denominator=lo+hi-2*float(cost);if(denominator>0)value+=.5f*(lo-hi)/denominator;}
+        if(valid){out.disparity[i]=value;out.validity[i]=1;out.confidence[i]=float(second-cost)/float(std::max(second,1u));}
+    }return out;
+}
 std::vector<uint32_t> daxa_sgm_wave_model(StereoConfig c,std::span<const uint32_t> costs,unsigned lanes){
     c.validate();require(lanes==32||lanes==64,"wave CPU model requires 32 or 64 lanes");require(costs.size()==size_t(c.width)*c.height*c.disparities,"cost volume dimensions mismatch");require(std::all_of(costs.begin(),costs.end(),[](auto x){return x<=10000;}),"SGM costs exceed fixed integer contract");
     std::vector<uint32_t> sums(costs.size());unsigned chunks=(c.disparities+lanes-1)/lanes;
@@ -111,7 +124,7 @@ std::vector<uint32_t> daxa_sgm_wave_model(StereoConfig c,std::span<const uint32_
 namespace {
 enum B:unsigned { Left,Right,LeftDesc,RightDesc,LeftValid,RightValid,Costs,Sums,Disparity,Confidence,Validity,Depth,DepthValid,Counters,Penalties,Params,BufferCount };
 constexpr const char* resource_names[BufferCount]={"left_luma","right_luma","left_census","right_census","left_census_valid","right_census_valid","dense_costs","dense_sums","disparity","confidence","validity","metric_depth","metric_validity","inspect_counters","packed_penalties","immutable_parameters"};
-constexpr const char* entries[]={"census","cost","aggregate_baseline","aggregate_wave","select_output","depth_convert","inspect","clear_packed","aggregate_packed8","aggregate_packed16","select_packed","aggregate_specialized8","aggregate_specialized16","select_specialized8","select_specialized16","aggregate_d1288","aggregate_d12816","select_quad8","select_quad16","aggregate_shuffle8","aggregate_shuffle16","aggregate_right_specialized8","aggregate_right_specialized16","select_right_specialized8","select_right_specialized16"};
+constexpr const char* entries[]={"census","cost","aggregate_baseline","aggregate_wave","select_output","depth_convert","inspect","clear_packed","aggregate_packed8","aggregate_packed16","select_packed","aggregate_specialized8","aggregate_specialized16","select_specialized8","select_specialized16","aggregate_d1288","aggregate_d12816","select_quad8","select_quad16","aggregate_shuffle8","aggregate_shuffle16","aggregate_right_specialized8","aggregate_right_specialized16","select_right_specialized8","select_right_specialized16","select_right_derived8","select_right_derived16"};
 struct Parameters {std::array<uint64_t,14> address{};uint32_t width,height,disparities,paths,p1,p2,subpixel,metric;float fx,baseline_m,cx_offset;uint32_t packing_bits=0;uint64_t penalties_address=0;};
 static_assert(sizeof(Parameters)==168&&offsetof(Parameters,width)==112&&offsetof(Parameters,fx)==144);
 struct Push {uint64_t parameters;uint32_t pass=0,groups_x=1;};static_assert(sizeof(Push)==16);
@@ -124,7 +137,8 @@ unsigned buffer_index(DaxaStereoPlane plane){switch(plane){case DaxaStereoPlane:
 struct CensusStorage {
     std::shared_ptr<DaxaFoundation> context;
     std::array<daxa::BufferId,4> buffers{};
-    ~CensusStorage(){auto& d=context->device;for(auto b:buffers)if(!b.is_empty()&&d.is_id_valid(b))d.destroy_buffer(b);d.collect_garbage();}
+    daxa::BufferId penalties{};
+    ~CensusStorage(){auto& d=context->device;if(!penalties.is_empty()&&d.is_id_valid(penalties))d.destroy_buffer(penalties);for(auto b:buffers)if(!b.is_empty()&&d.is_id_valid(b))d.destroy_buffer(b);d.collect_garbage();}
 };
 struct DaxaStereo::Slot {
     std::shared_ptr<CensusStorage> census_storage;
@@ -157,9 +171,10 @@ struct DaxaStereo::Impl {
     StereoConfig config;
     DaxaSgmVariant variant;
     DaxaStereoReference reference;
+    DaxaRightReferenceMode right_mode=DaxaRightReferenceMode::IndependentSGM;
     std::shared_ptr<const DaxaRectification> calibration;
     std::optional<MetricCalibration> metric;
-    std::array<daxa::ComputePipeline,25> pipelines;
+    std::array<daxa::ComputePipeline,27> pipelines;
     std::vector<daxa::BufferId> owned;
     std::vector<daxa::MemoryBlock> memory;
     std::vector<std::shared_ptr<Slot>> slots;
@@ -186,6 +201,7 @@ struct DaxaStereo::Impl {
     void completed(Frame const& f)const{f.validate();require(f.slot_->submit<context->device.oldest_pending_submit_index(),"GPU completion required before query access");}
 };
 void DaxaStereo::Impl::setup(std::span<const uint32_t> left,std::span<const uint32_t> right,unsigned count,const DaxaFrame* prototype,bool shared_census,const Impl* descriptor_owner){
+    bool derived=right_mode==DaxaRightReferenceMode::LeftAggregatedSelection;bool selector_only=derived&&reference==DaxaStereoReference::Right;if(selector_only){stages=1;query_count=4;}
     auto& d=context->device;size_t n=size_t(config.width)*config.height,volume=n*config.disparities;std::array<daxa::BufferId,2> inputs;
     if(prototype){inputs[0]=prototype->plane(DaxaPreprocessPlane::LeftLuma).buffer();inputs[1]=prototype->plane(DaxaPreprocessPlane::RightLuma).buffer();}else{auto recorder=d.create_command_recorder({.name="one-time retained stereo luma upload"});
     for(unsigned eye=0;eye<2;++eye){auto image=eye?right:left;inputs[eye]=allocate(n*4,resource_names[eye]);auto staging=allocate(n*4,std::string("setup_staging_")+resource_names[eye],true);std::memcpy(d.buffer_host_address(staging).value(),image.data(),n*4);recorder.copy_buffer_to_buffer({.src_buffer=staging,.dst_buffer=inputs[eye],.size=n*4});}
@@ -193,7 +209,9 @@ void DaxaStereo::Impl::setup(std::span<const uint32_t> left,std::span<const uint
     }
     for(unsigned i=0;i<pipelines.size();++i){
         bool specialized=variant==DaxaSgmVariant::PackedSpecialized,d128=variant==DaxaSgmVariant::PackedD128,quad=variant==DaxaSgmVariant::PackedQuad,shuffle=variant==DaxaSgmVariant::PackedShuffle;
-        if(i>=21){if(reference!=DaxaStereoReference::Right||((i==21||i==23)&&packing!=8)||((i==22||i==24)&&packing!=16))continue;}
+        if(selector_only){if(i!=(packing==8?25u:26u))continue;}
+        else if(i>=25)continue;
+        else if(i>=21){if(reference!=DaxaStereoReference::Right||((i==21||i==23)&&packing!=8)||((i==22||i==24)&&packing!=16))continue;}
         else if((reference==DaxaStereoReference::Right&&i>=11&&i<=14)||(i==2&&variant!=DaxaSgmVariant::Baseline)||(i==3&&variant!=DaxaSgmVariant::Wave)||(i==7&&!packing)||(i>=8&&i<=10&&variant!=DaxaSgmVariant::Packed)||(i>=11&&i<=12&&!specialized&&!quad)||(i>=13&&i<=14&&!specialized&&!d128&&!shuffle)||(i>=15&&i<=16&&!d128)||(i>=17&&i<=18&&!quad)||(i>=19&&i<=20&&!shuffle)||((i==8||i==11||i==13||i==15||i==17||i==19)&&packing!=8)||((i==9||i==12||i==14||i==16||i==18||i==20)&&packing!=16))continue;
         auto words=load_shader(entries[i]);daxa::ShaderInfo shader{.byte_code=words.data(),.byte_code_size=uint32_t(words.size())};if(i==3||i==8||i==9||i==11||i==12||i==15||i==16||i==17||i==18||i==19||i==20||i==21||i==22){shader.create_flags=daxa::ShaderCreateFlagBits::REQUIRE_FULL_SUBGROUPS;shader.required_subgroup_size=wave_size;}pipelines[i]=d.create_compute_pipeline({.shader_info=shader,.push_constant_size=sizeof(Push),.name=entries[i]});}
 
@@ -206,7 +224,12 @@ void DaxaStereo::Impl::setup(std::span<const uint32_t> left,std::span<const uint
             for(unsigned b=LeftDesc;b<=RightValid;++b)s->buffers[b]=s->census_storage->buffers[b-LeftDesc];
         }
         for(unsigned b=LeftDesc;b<=Counters;++b){if(shared_census&&b<=RightValid)continue;if((b==Depth||b==DepthValid)&&!metric)continue;if(packing&&(b==Costs||b==Sums))continue;size_t bytes=b==Costs||b==Sums?volume*4:b==Counters?16:n*4;s->buffers[b]=allocate(bytes,prefix+resource_names[b]);}
-        if(packing)s->buffers[Penalties]=allocate(n*((config.disparities+32/packing-1)/(32/packing))*4,prefix+resource_names[Penalties]);
+        if(packing){size_t bytes=n*((config.disparities+32/packing-1)/(32/packing))*4;
+            if(derived){require(bool(s->census_storage),"derived penalties require bounded shared Census storage");
+                if(!selector_only){s->census_storage->penalties=d.create_buffer({.size=bytes,.name=prefix+resource_names[Penalties]});allocated+=bytes;}
+                s->buffers[Penalties]=s->census_storage->penalties;require(!s->buffers[Penalties].is_empty(),"derived selector requires Left penalties");
+            }else s->buffers[Penalties]=allocate(bytes,prefix+resource_names[Penalties]);
+        }
         Parameters p{};for(unsigned b=0;b<14;++b)if(!s->buffers[b].is_empty())p.address[b]=d.device_address(s->buffers[b]).value();p.packing_bits=packing;if(packing)p.penalties_address=d.device_address(s->buffers[Penalties]).value();p.width=config.width;p.height=config.height;p.disparities=config.disparities;p.paths=config.paths;p.p1=config.p1;p.p2=config.p2;p.subpixel=config.subpixel;p.metric=bool(metric);if(metric){p.fx=metric->fx;p.baseline_m=metric->baseline_m;p.cx_offset=metric->cx_offset;}
         s->buffers[Params]=allocate(sizeof(p),prefix+resource_names[Params],true);std::memcpy(d.buffer_host_address(s->buffers[Params]).value(),&p,sizeof(p));auto address=d.device_address(s->buffers[Params]).value();s->queries=d.create_timeline_query_pool({.query_count=query_count,.name=prefix+"stage_queries"});auto* slot=s.get();
         s->graph=std::make_unique<daxa::TaskGraph>(daxa::TaskGraphInfo{.device=d,
@@ -216,11 +239,13 @@ void DaxaStereo::Impl::setup(std::span<const uint32_t> left,std::span<const uint
         for(unsigned b=0;b<BufferCount;++b)if(!s->buffers[b].is_empty()){s->external[b]=daxa::ExternalTaskBuffer({.buffer=s->buffers[b],.name=prefix+resource_names[b]});views[b]=graph.register_buffer(s->external[b]);}
         auto add=[&](unsigned stage,unsigned pipeline,unsigned pass,uint32_t groups,std::initializer_list<unsigned> reads,std::initializer_list<unsigned> writes,std::initializer_list<unsigned> readwrites){auto grid=DaxaStereo::dispatch_grid(groups,group_limits);auto task=daxa::InlineTask::Compute(std::string("stage_")+std::to_string(stage));task.reads(views[Params]);for(auto b:reads)task.reads(views[b]);for(auto b:writes)task.writes(views[b]);for(auto b:readwrites)task.reads_writes(views[b]);
             graph.add_task(task.executes([this,slot,address,stage,pipeline,pass,grid](daxa::TaskInterface ti){if(calibration&&stage<2){ti.recorder.pipeline_barrier({.src_access=daxa::AccessConsts::COMPUTE_SHADER_WRITE,.dst_access=daxa::AccessConsts::COMPUTE_SHADER_READ});}ti.recorder.write_timestamp({.query_pool=slot->queries,.pipeline_stage=daxa::PipelineStageFlagBits::COMPUTE_SHADER,.query_index=2+stage*2});ti.recorder.set_pipeline(pipelines[pipeline]);ti.recorder.push_constant(Push{address,pass,grid[0]});ti.recorder.dispatch({grid[0],grid[1],1});ti.recorder.write_timestamp({.query_pool=slot->queries,.pipeline_stage=daxa::PipelineStageFlagBits::COMPUTE_SHADER,.query_index=3+stage*2});}));};
+        if(selector_only){add(0,packing==8?25:26,0,uint32_t((n+63)/64),{LeftDesc,RightDesc,LeftValid,RightValid,Penalties},{Disparity,Confidence,Validity},{});}else{
         add(0,0,0,uint32_t((n+63)/64),{Left},{LeftDesc,LeftValid},{});add(1,0,1,uint32_t((n+63)/64),{Right},{RightDesc,RightValid},{});
         if(packing)add(2,7,0,uint32_t((n*((config.disparities+32/packing-1)/(32/packing))+63)/64),{},{Penalties},{});
         else add(2,1,0,uint32_t((volume+63)/64),{LeftDesc,RightDesc,LeftValid,RightValid},{Costs,Sums},{});
         for(unsigned path=0;path<config.paths;++path){auto [dx,dy]=directions[path];if(packing)add(3+path,reference==DaxaStereoReference::Right?(packing==8?21:22):variant==DaxaSgmVariant::PackedShuffle?(packing==8?19:20):variant==DaxaSgmVariant::PackedD128?(packing==8?15:16):(variant==DaxaSgmVariant::PackedSpecialized||variant==DaxaSgmVariant::PackedQuad||variant==DaxaSgmVariant::PackedShuffle)?(packing==8?11:12):(packing==8?8:9),path,line_count(config,dx,dy),{LeftDesc,RightDesc,LeftValid,RightValid},{},{Penalties});else add(3+path,variant==DaxaSgmVariant::Baseline?2:3,path,line_count(config,dx,dy),{Costs},{},{Sums});}
         if(packing)add(3+config.paths,reference==DaxaStereoReference::Right?(packing==8?23:24):variant==DaxaSgmVariant::PackedQuad?(packing==8?17:18):(variant==DaxaSgmVariant::PackedSpecialized||variant==DaxaSgmVariant::PackedD128||variant==DaxaSgmVariant::PackedQuad||variant==DaxaSgmVariant::PackedShuffle)?(packing==8?13:14):10,0,uint32_t((n+(variant==DaxaSgmVariant::PackedQuad?15:63))/(variant==DaxaSgmVariant::PackedQuad?16:64)),{LeftDesc,RightDesc,LeftValid,RightValid,Penalties},{Disparity,Confidence,Validity},{});else add(3+config.paths,4,0,uint32_t((n+63)/64),{Sums},{Disparity,Confidence,Validity},{});if(metric)add(4+config.paths,5,0,uint32_t((n+63)/64),{Disparity,Validity},{Depth,DepthValid},{});
+        }
         graph.submit({});graph.complete({});slots.push_back(std::move(s));
     }
 }
@@ -229,8 +254,8 @@ DaxaStereo::Frame::Frame(std::shared_ptr<Impl> owner,std::shared_ptr<Slot> slot)
 DaxaStereo::Frame& DaxaStereo::Frame::operator=(Frame other) noexcept{slot_.swap(other.slot_);owner_.swap(other.owner_);std::swap(generation_,other.generation_);return *this;}
 void DaxaStereo::Frame::validate()const{require(owner_&&slot_&&generation_==slot_->generation,"empty or stale Daxa stereo frame");}
 DaxaStereo::DaxaStereo(StereoConfig c,const DaxaFrame& prototype,DaxaSgmVariant variant,unsigned slots,std::optional<MetricCalibration> metric,std::shared_ptr<DaxaFoundation> context,uint32_t wave,DaxaStereoReference reference):DaxaStereo(c,prototype,variant,slots,metric,std::move(context),wave,reference,false,nullptr){}
-DaxaStereo::DaxaStereo(StereoConfig c,const DaxaFrame& prototype,DaxaSgmVariant variant,unsigned slots,std::optional<MetricCalibration> metric,std::shared_ptr<DaxaFoundation> context,uint32_t wave,DaxaStereoReference reference,bool shared_census,const DaxaStereo* descriptor_owner){
-    validate_shape(c,slots,metric,variant,reference);prototype.validate();require(context&&prototype.owner_->context==context,"foreign Daxa GPU input context");auto maps=prototype.calibration();require(maps->width==c.width&&maps->height==c.height,"GPU luma shape mismatch");impl_=std::make_shared<Impl>(c,variant,metric,std::move(context),false,wave,reference);impl_->calibration=std::move(maps);if(descriptor_owner){auto& donor=*descriptor_owner->impl_;require(shared_census&&donor.context==impl_->context&&donor.calibration==impl_->calibration&&donor.slots.size()==slots&&donor.config.width==c.width&&donor.config.height==c.height,"shared Census owner mismatch");}
+DaxaStereo::DaxaStereo(StereoConfig c,const DaxaFrame& prototype,DaxaSgmVariant variant,unsigned slots,std::optional<MetricCalibration> metric,std::shared_ptr<DaxaFoundation> context,uint32_t wave,DaxaStereoReference reference,bool shared_census,const DaxaStereo* descriptor_owner,DaxaRightReferenceMode mode){
+    validate_shape(c,slots,metric,variant,reference);prototype.validate();require(context&&prototype.owner_->context==context,"foreign Daxa GPU input context");auto maps=prototype.calibration();require(maps->width==c.width&&maps->height==c.height,"GPU luma shape mismatch");impl_=std::make_shared<Impl>(c,variant,metric,std::move(context),false,wave,reference);impl_->calibration=std::move(maps);impl_->right_mode=mode;require(mode==DaxaRightReferenceMode::IndependentSGM||(shared_census&&variant==DaxaSgmVariant::PackedSpecialized),"derived selector requires shared Census specialized pair");if(descriptor_owner){auto& donor=*descriptor_owner->impl_;require(shared_census&&donor.context==impl_->context&&donor.calibration==impl_->calibration&&donor.slots.size()==slots&&donor.config.width==c.width&&donor.config.height==c.height,"shared Census owner mismatch");}
     impl_->setup({}, {},slots,&prototype,shared_census,descriptor_owner?descriptor_owner->impl_.get():nullptr); // No initial Frame/slot marker retained.
 }
 size_t DaxaStereo::collect_completed_inputs_at(uint64_t oldest){auto& e=*impl_;e.require_thread();size_t retired=0;for(auto& slot:e.slots)if(slot->input&&detail::completed_submission(slot->submit,oldest)){slot->input={};++retired;}for(auto& slot:e.slots)if(slot->source&&detail::available_slot(slot.use_count(),slot->submit,oldest))slot->source.reset();return retired;}
@@ -249,7 +274,7 @@ void DaxaStereo::setup_pair(DaxaStereo& other,bool layered,bool shared_census){
     require(!l.paired&&!r.paired&&l.context==r.context&&l.calibration&&l.calibration==r.calibration,"pair requires one shared context and exact calibrated owner");
     require(l.reference==DaxaStereoReference::Left&&r.reference==DaxaStereoReference::Right&&l.variant==DaxaSgmVariant::PackedSpecialized&&r.variant==l.variant&&!l.metric&&!r.metric,"pair requires Left/Right packed-specialized without standalone metric");
     auto a=l.config,b=r.config;require(a.width==b.width&&a.height==b.height&&a.disparities==b.disparities&&a.paths==b.paths&&a.p1==b.p1&&a.p2==b.p2&&a.subpixel==b.subpixel&&l.wave_size==r.wave_size&&l.packing==r.packing&&l.slots.size()==r.slots.size(),"pair stereo profile mismatch");
-    l.paired=std::make_unique<Pair>();auto& pair=*l.paired;pair.right=other.impl_;pair.layered=layered;pair.shared_census=shared_census;pair.stages=shared_census?6+2*a.paths:l.stages;pair.query_count=2+2*pair.stages;require(!shared_census||!layered,"shared Census uses sequential references");auto& d=l.context->device;size_t n=size_t(a.width)*a.height;
+    l.paired=std::make_unique<Pair>();auto& pair=*l.paired;pair.right=other.impl_;pair.layered=layered;pair.shared_census=shared_census;pair.stages=shared_census?6+2*a.paths:l.stages;bool derived=r.right_mode==DaxaRightReferenceMode::LeftAggregatedSelection;if(derived){require(shared_census&&!layered&&l.right_mode==r.right_mode,"derived requires shared sequential coordinator");pair.stages=a.paths+5;}pair.query_count=2+2*pair.stages;require(!shared_census||!layered,"shared Census uses sequential references");auto& d=l.context->device;size_t n=size_t(a.width)*a.height;
     if(layered){
         VkPhysicalDeviceProperties properties{};vkGetPhysicalDeviceProperties(daxa_dvc_get_vk_physical_device(d.get()),&properties);require(l.group_limits[2]>=2&&properties.limits.maxPushConstantsSize>=sizeof(LayeredPush),"layered stereo requires groupCountZ>=2 and24-byte push constants");
         constexpr const char* names[]={"aggregate_layered8","aggregate_layered16","select_layered8","select_layered16"};
@@ -264,7 +289,7 @@ void DaxaStereo::setup_pair(DaxaStereo& other,bool layered,bool shared_census){
         for(unsigned eye=0;eye<2;++eye){auto& engine=eye?r:l;auto& slot=*engine.slots[index];addresses[eye]=d.device_address(slot.buffers[Params]).value();
             for(unsigned resource=0;resource<BufferCount;++resource){if(slot.buffers[resource].is_empty())continue;
                 // Both engines alias the SAME physical luma. Register it only once.
-                if(eye&&(resource<2||(shared_census&&resource>=LeftDesc&&resource<=RightValid))){views[eye][resource]=views[0][resource];continue;}
+                if(eye&&(resource<2||(shared_census&&resource>=LeftDesc&&resource<=RightValid)||(derived&&resource==Penalties))){views[eye][resource]=views[0][resource];continue;}
                 s->external[eye][resource]=daxa::ExternalTaskBuffer({.buffer=slot.buffers[resource],.name=prefix+std::to_string(eye)+"_"+resource_names[resource]});views[eye][resource]=graph.register_buffer(s->external[eye][resource]);
             }
         }
@@ -301,7 +326,13 @@ void DaxaStereo::setup_pair(DaxaStereo& other,bool layered,bool shared_census){
             };
             single(0,0,0,0,uint32_t((n+63)/64),{Left},{LeftDesc,LeftValid},{});
             single(1,0,0,1,uint32_t((n+63)/64),{Right},{RightDesc,RightValid},{});
-            for(unsigned eye=0;eye<2;++eye){unsigned base=2+eye*(a.paths+2);
+            if(derived){
+                require(l.slots[index]->buffers[Penalties]==r.slots[index]->buffers[Penalties],"derived reads the sole Left recurrence buffer");
+                single(2,0,7,0,uint32_t((n*((a.disparities+32/l.packing-1)/(32/l.packing))+63)/64),{},{Penalties},{});
+                for(unsigned path=0;path<a.paths;++path){auto [dx,dy]=directions[path];single(3+path,0,l.packing==8?11u:12u,path,line_count(a,dx,dy),{LeftDesc,RightDesc,LeftValid,RightValid},{},{Penalties});}
+                single(3+a.paths,0,l.packing==8?13u:14u,0,uint32_t((n+63)/64),{LeftDesc,RightDesc,LeftValid,RightValid,Penalties},{Disparity,Confidence,Validity},{});
+                single(4+a.paths,1,l.packing==8?25u:26u,0,uint32_t((n+63)/64),{LeftDesc,RightDesc,LeftValid,RightValid,Penalties},{Disparity,Confidence,Validity},{});
+            }else for(unsigned eye=0;eye<2;++eye){unsigned base=2+eye*(a.paths+2);
                 single(base,eye,7,0,uint32_t((n*((a.disparities+32/l.packing-1)/(32/l.packing))+63)/64),{},{Penalties},{});
                 for(unsigned path=0;path<a.paths;++path){auto [dx,dy]=directions[path];single(base+1+path,eye,eye?(l.packing==8?21u:22u):(l.packing==8?11u:12u),path,line_count(a,dx,dy),{LeftDesc,RightDesc,LeftValid,RightValid},{},{Penalties});}
                 single(base+1+a.paths,eye,eye?(l.packing==8?23u:24u):(l.packing==8?13u:14u),0,uint32_t((n+63)/64),{LeftDesc,RightDesc,LeftValid,RightValid,Penalties},{Disparity,Confidence,Validity},{});
@@ -342,19 +373,22 @@ CaptureLease DaxaStereo::Frame::source()const{validate();return slot_->source;}c
 
 void DaxaStereo::Frame::wait()const{validate();auto& d=owner_->context->device;d.wait_on_submit({.queue=daxa::QUEUE_MAIN,.queue_submit_index=slot_->submit,.timeout=30'000'000'000ull});}
 DaxaStereoTiming DaxaStereo::Frame::timings()const{validate();require(slot_->per_reference_timings_available,"isolated stereo timings unavailable for paired submission");owner_->completed(*this);constexpr size_t max_queries=2+DaxaStereoTiming::max_stages*2;std::array<uint64_t,max_queries*2> results{};auto status=daxa_timeline_query_pool_query_results(slot_->queries.get(),0,owner_->query_count,results.data());require(status==DAXA_RESULT_SUCCESS,"stereo timestamp query failed");for(unsigned i=0;i<owner_->query_count;++i)require(results[i*2+1]!=0,"stereo timestamp unavailable");uint64_t mask=owner_->timestamp_bits==64?UINT64_MAX:(uint64_t{1}<<owner_->timestamp_bits)-1;auto elapsed=[&](unsigned first,unsigned last){return double((results[last*2]-results[first*2])&mask)*double(owner_->timestamp_period)/1e6;};DaxaStereoTiming out;out.stage_count=owner_->stages;out.total_gpu_ms=elapsed(0,1);for(unsigned i=0;i<out.stage_count;++i)out.stage_gpu_ms[i]=elapsed(2+i*2,3+i*2);return out;}
-daxa::BufferId DaxaStereo::Frame::buffer(DaxaStereoPlane plane)const{validate();auto id=slot_->buffers[buffer_index(plane)];require(!id.is_empty(),"plane unavailable for this variant/calibration; packed penalties are not dense costs or sums");return id;}
+daxa::BufferId DaxaStereo::Frame::buffer(DaxaStereoPlane plane)const{validate();require(!(plane==DaxaStereoPlane::PackedPenalties&&estimator()==DaxaStereoEstimator::LeftAggregatedSelection),"derived Right has no Right recurrence penalties");auto id=slot_->buffers[buffer_index(plane)];require(!id.is_empty(),"plane unavailable for this variant/calibration; packed penalties are not dense costs or sums");return id;}
 uint64_t DaxaStereo::Frame::generation()const{validate();return generation_;}
 uint64_t DaxaStereo::Frame::context_id()const{validate();return reinterpret_cast<uintptr_t>(owner_->context->device.get());}
-const char* DaxaStereo::stage_name(unsigned i)const{require(i<impl_->stages,"invalid stereo stage");if(i==0)return "census_left";if(i==1)return "census_right";if(i==2)return impl_->packing?"zero_packed_penalties":"cost_and_zero_sums";constexpr const char* names[]={"aggregate_pos_x","aggregate_neg_x","aggregate_pos_y","aggregate_neg_y","aggregate_pos_x_pos_y","aggregate_neg_x_neg_y","aggregate_pos_x_neg_y","aggregate_neg_x_pos_y"};if(i<3+impl_->config.paths)return names[i-3];return i==3+impl_->config.paths?"select":"depth_convert";}
+const char* DaxaStereo::stage_name(unsigned i)const{require(i<impl_->stages,"invalid stereo stage");if(impl_->right_mode==DaxaRightReferenceMode::LeftAggregatedSelection&&impl_->reference==DaxaStereoReference::Right)return "derived_right_select";if(i==0)return "census_left";if(i==1)return "census_right";if(i==2)return impl_->packing?"zero_packed_penalties":"cost_and_zero_sums";constexpr const char* names[]={"aggregate_pos_x","aggregate_neg_x","aggregate_pos_y","aggregate_neg_y","aggregate_pos_x_pos_y","aggregate_neg_x_neg_y","aggregate_pos_x_neg_y","aggregate_neg_x_pos_y"};if(i<3+impl_->config.paths)return names[i-3];return i==3+impl_->config.paths?"select":"depth_convert";}
 std::string DaxaStereo::device_report()const{return impl_->context->report();}
 DaxaStereoReference DaxaStereo::reference()const{return impl_->reference;}
 DaxaStereoReference DaxaStereo::Frame::reference()const{validate();return owner_->reference;}
+DaxaRightReferenceMode DaxaStereo::Frame::right_reference_mode()const{validate();return owner_->right_mode;}
+DaxaStereoEstimator DaxaStereo::Frame::estimator()const{validate();return owner_->reference==DaxaStereoReference::Right&&owner_->right_mode==DaxaRightReferenceMode::LeftAggregatedSelection?DaxaStereoEstimator::LeftAggregatedSelection:DaxaStereoEstimator::IndependentSGM;}
 uint32_t DaxaStereo::packing_bits()const{return impl_->packing;}
 uint32_t DaxaStereo::Frame::packing_bits()const{validate();return owner_->packing;}
 uint32_t DaxaStereo::required_wave_size()const{return impl_->wave_size;}
 uint64_t DaxaStereo::allocated_bytes()const{return impl_->allocated;}
 unsigned DaxaStereo::validation_errors()const{return impl_->context->validation_errors.load();}
 const char* DaxaStereo::variant_name(DaxaSgmVariant v){if(v==DaxaSgmVariant::Baseline)return "baseline";if(v==DaxaSgmVariant::Wave)return "wave";if(v==DaxaSgmVariant::Packed)return "packed";if(v==DaxaSgmVariant::PackedSpecialized)return "packed-specialized";if(v==DaxaSgmVariant::PackedD128)return "packed-d128";if(v==DaxaSgmVariant::PackedQuad)return "packed-quad";if(v==DaxaSgmVariant::PackedShuffle)return "packed-shuffle";throw std::invalid_argument("unknown stereo variant");}
+std::string DaxaStereo::derived_shader_identity(){return std::string(SF_DAXA_STEREO_DERIVED_SHA256)+":"+SF_DAXA_STEREO_PARAMETERS_SHA256+":"+SF_DAXA_STEREO_OPS_SHA256;}
 std::string DaxaStereo::specialized_shader_identity(){return std::string(SF_DAXA_STEREO_PARAMETERS_SHA256)+":"+SF_DAXA_STEREO_SPECIALIZED_SHA256;}
 std::string DaxaStereo::layered_shader_identity(){return SF_DAXA_STEREO_LAYERED_SHA256;}
 std::string DaxaStereo::shader_directory(){return SF_DAXA_STEREO_SPIRV_DIRECTORY;}
@@ -368,7 +402,7 @@ daxa::MemoryRequirements cached_coherent(DaxaFoundation& context,daxa::BufferInf
 }
 }
 DaxaStereoReadback DaxaStereo::readback(Frame const& frame,bool intermediate)const{
-    impl_->require_thread();require(frame.owner_==impl_,"foreign Daxa stereo readback context");frame.wait();auto& e=*impl_;auto& d=e.context->device;auto& slot=*frame.slot_;size_t n=size_t(e.config.width)*e.config.height,volume=n*e.config.disparities;
+    impl_->require_thread();require(frame.owner_==impl_,"foreign Daxa stereo readback context");require(!intermediate||frame.estimator()!=DaxaStereoEstimator::LeftAggregatedSelection,"derived Right intermediates unavailable: no independent Right recurrence");frame.wait();auto& e=*impl_;auto& d=e.context->device;auto& slot=*frame.slot_;size_t n=size_t(e.config.width)*e.config.height,volume=n*e.config.disparities;
     std::array<unsigned,12> planes{Disparity,Confidence,Validity,Depth,DepthValid,Costs,Sums,LeftDesc,RightDesc,LeftValid,RightValid,Penalties};std::array<size_t,12> offsets{},sizes{};size_t total=0;
     for(size_t i=0;i<planes.size();++i){if(slot.buffers[planes[i]].is_empty())continue;if((i==3||i==4)&&!e.metric)continue;if(i>=5&&!intermediate)continue;offsets[i]=total;sizes[i]=4*(i==5||i==6?volume:i==11?n*((e.config.disparities+32/e.packing-1)/(32/e.packing)):n);total+=sizes[i];}
     require(total<=e.storage_range_limit,"combined diagnostic export exceeds maxStorageBufferRange; use output-only readback");
@@ -379,7 +413,7 @@ DaxaStereoReadback DaxaStereo::readback(Frame const& frame,bool intermediate)con
     task.writes(destination);
     graph.add_task(task.executes([views,destination,sizes,offsets](daxa::TaskInterface ti){for(size_t i=0;i<sizes.size();++i)if(sizes[i])ti.recorder.copy_buffer_to_buffer({.src_buffer=ti.get(views[i]).id,.dst_buffer=ti.get(destination).id,.dst_offset=offsets[i],.size=sizes[i]});}));
     graph.add_task(daxa::InlineTask::Transfer("diagnostic host visibility").host.reads(destination).executes([](daxa::TaskInterface){}));graph.submit({});graph.complete({});graph.execute({});d.wait_on_submit({.queue=daxa::QUEUE_MAIN,.queue_submit_index=d.latest_queue_submit_index(daxa::QUEUE_MAIN),.timeout=30'000'000'000ull});
-    auto* data=static_cast<const std::byte*>(d.buffer_host_address(host).value());DaxaStereoReadback out;out.reference=e.reference;auto copy=[&](auto& values,size_t i){if(sizes[i]){values.resize(sizes[i]/4);std::memcpy(values.data(),data+offsets[i],sizes[i]);}};copy(out.disparity,0);copy(out.confidence,1);copy(out.validity,2);copy(out.depth,3);copy(out.depth_validity,4);copy(out.costs,5);copy(out.sums,6);for(unsigned eye=0;eye<2;++eye){copy(out.census[eye],7+eye);copy(out.census_valid[eye],9+eye);}out.packing_bits=e.packing;copy(out.packed_penalties,11);
+    auto* data=static_cast<const std::byte*>(d.buffer_host_address(host).value());DaxaStereoReadback out;out.reference=e.reference;out.right_reference_mode=e.right_mode;out.estimator=frame.estimator();auto copy=[&](auto& values,size_t i){if(sizes[i]){values.resize(sizes[i]/4);std::memcpy(values.data(),data+offsets[i],sizes[i]);}};copy(out.disparity,0);copy(out.confidence,1);copy(out.validity,2);copy(out.depth,3);copy(out.depth_validity,4);copy(out.costs,5);copy(out.sums,6);for(unsigned eye=0;eye<2;++eye){copy(out.census[eye],7+eye);copy(out.census_valid[eye],9+eye);}out.packing_bits=e.packing;copy(out.packed_penalties,11);
     if(e.packing&&intermediate){out.intermediates_reconstructed=true;out.costs.resize(volume);out.sums.resize(volume);auto components=32/e.packing,words=(e.config.disparities+components-1)/components,mask=(1u<<e.packing)-1;
         // Explicit diagnostic reconstruction from ACTUAL GPU Census/masks/words.
         // These are not claimed to be dense GPU buffers in the packed variant.

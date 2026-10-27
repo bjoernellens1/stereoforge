@@ -135,7 +135,7 @@ struct PreImpl {std::shared_ptr<Context> context;std::shared_ptr<const Maps> cal
 std::shared_ptr<const Maps> DaxaFrame::calibration()const{return owner_->calibration;}uint64_t DaxaFrame::context_id()const{return reinterpret_cast<uintptr_t>(owner_->context.get());}
 class DaxaPreprocess {public:std::shared_ptr<PreImpl> impl_;static constexpr unsigned Staging=0;DaxaFrame enqueue_at(CaptureLease,uint64_t);size_t collect_completed_sources_at(uint64_t);};
 enum B:unsigned {Left,Right,LeftDesc,RightDesc,LeftValid,RightValid,Costs,Sums,Disparity,Confidence,Validity,Depth,DepthValid,Counters,Penalties,Params,BufferCount};
-enum class DaxaDepthStereoSchedule{Sequential,PairedPerPath,LayeredPerPath,SharedCensusSequential};struct DaxaDepthConfig {DaxaDepthStereoSchedule stereo_schedule=DaxaDepthStereoSchedule::PairedPerPath;};
+enum class DaxaDepthStereoSchedule{Sequential,PairedPerPath,LayeredPerPath,SharedCensusSequential};enum class DaxaRightReferenceMode{IndependentSGM,LeftAggregatedSelection};struct DaxaDepthConfig {DaxaDepthStereoSchedule stereo_schedule=DaxaDepthStereoSchedule::PairedPerPath;DaxaRightReferenceMode right_reference_mode=DaxaRightReferenceMode::IndependentSGM;};
 enum class DaxaStereoReference{Left,Right};enum class DaxaStereoPlane{Disparity,Confidence,Validity};enum class DaxaPreprocessPlane{LeftSupport,RightSupport,LeftLuma,RightLuma};
 struct StereoSlot{std::array<uint64_t,BufferCount> buffers{};std::array<External,BufferCount> external{};bool per_reference_timings_available=true;Parameters parameters;DaxaFrame input;CaptureLease source;uint64_t submit=0,generation=0;};
 struct StereoImpl;struct PairSlot {std::array<std::array<External,BufferCount>,2> external;std::unique_ptr<Graph> graph;unsigned started=0,finished=0;};struct Pair {unsigned stages=8;std::shared_ptr<StereoImpl> right;std::vector<std::unique_ptr<PairSlot>> slots;};
@@ -166,7 +166,8 @@ class DaxaDepthPipeline {public:struct Slot {DaxaFrame preprocessing;DaxaStereo:
 using namespace stereoforge;
 void check(bool x,const char* msg){if(!x)throw std::runtime_error(msg);}
 int main(int argc,char** argv){try{
- auto context=std::make_shared<Context>();auto e=std::make_shared<DaxaDepthPipeline::Impl>();e->context=context;if(argc>1)e->config.stereo_schedule=std::string(argv[1])=="shared"?DaxaDepthStereoSchedule::SharedCensusSequential:DaxaDepthStereoSchedule::LayeredPerPath;
+ auto context=std::make_shared<Context>();auto e=std::make_shared<DaxaDepthPipeline::Impl>();e->context=context;if(argc>1)e->config.stereo_schedule=(std::string(argv[1])=="shared"||std::string(argv[1])=="derived")?DaxaDepthStereoSchedule::SharedCensusSequential:DaxaDepthStereoSchedule::LayeredPerPath;
+ if(argc>1&&std::string(argv[1])=="derived")e->config.right_reference_mode=DaxaRightReferenceMode::LeftAggregatedSelection;
  e->preprocessing=std::make_unique<DaxaPreprocess>();e->preprocessing->impl_=std::make_shared<PreImpl>();auto pre=e->preprocessing->impl_;pre->context=context;pre->calibration=std::make_shared<Maps>();
  std::array<std::vector<uint8_t>,2> staging;for(auto& bytes:staging)bytes.resize(1280*2*720*2);
  for(unsigned i=0;i<2;++i){auto s=std::make_shared<PreSlot>();s->buffers[0]=reinterpret_cast<uintptr_t>(staging[i].data());s->graph=std::make_unique<Graph>(Graph{&context->device,true});pre->slots.push_back(std::move(s));}
@@ -206,9 +207,9 @@ int main(int argc,char** argv){try{
  return 0;
 }catch(const std::exception& ex){tracking=false;std::cerr<<ex.what()<<'\n';return 1;}}
 '''
-    if schedule == 'shared-census-sequential':
+    if schedule in ('shared-census-sequential', 'left-aggregated-selection'):
         assert paths in (4, 8)
-        phases = 6 + 2 * paths
+        phases = paths + 5 if schedule == 'left-aggregated-selection' else 6 + 2 * paths
         program = program.replace('unsigned stages=8;', f'unsigned stages={phases};').replace('&s->finished,8}', f'&s->finished,{phases}'+'}')
     directory=tmp_path_factory.mktemp('daxa-depth-bookkeeping')
     code=directory/'probe.cpp';code.write_text(program);binary=directory/'probe'

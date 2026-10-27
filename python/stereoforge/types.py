@@ -11,6 +11,7 @@ class Provenance(IntEnum):
     REPROJECTED = 2
     FUSED = 3
     NEURAL = 4
+    STEREO_LEFT_AGGREGATED = 5
 
 @dataclass(frozen=True)
 class CameraModel:

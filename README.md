@@ -265,6 +265,15 @@ profile it saves 29,491,200 B of requested buffers; matched ABBA runs do not
 establish a repeatable latency improvement. Sequential remains the default.
 See [shared Census evidence](docs/daxa-depth-shared-census-evidence.md).
 
+Adding `--right-reference-mode left-aggregated-selection` to that schedule
+reuses Left aggregation to estimate Right. Matched 720p runs measure about
+19.1 ms GPU / 19.5 ms host wall and 575,079,728 B of requested buffers, versus
+31.4–31.6 / 31.9–32.1 ms and 811,009,328 B for independent SGM. Both layers' LR
+checks become correlated; controlled reference development fixtures show quality
+regressions around thin occluders. This remains experimental and is not promoted;
+independent Right SGM remains the default. See
+[derived estimator evidence and limits](docs/daxa-depth-derived-evidence.md).
+
 ## Standalone C++ runtime
 
 Build without Python, SlangPy or SGL using `cmake --preset standalone` and

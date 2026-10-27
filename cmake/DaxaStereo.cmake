@@ -7,15 +7,21 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS shaders/daxa/ster
 file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/shaders/daxa/stereo_parameters.slang" SF_DAXA_STEREO_PARAMETERS_SHA256)
 file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/shaders/ops/sgm_specialized.slang" SF_DAXA_STEREO_SPECIALIZED_SHA256)
 file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/shaders/daxa/stereo_layered.slang" SF_DAXA_STEREO_LAYERED_SHA256)
+file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/shaders/daxa/stereo_derived.slang" SF_DAXA_STEREO_DERIVED_SHA256)
 file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/shaders/daxa/stereo.slang" SF_DAXA_STEREO_WRAPPER_SHA256)
 file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/shaders/ops/sgm.slang" SF_DAXA_STEREO_OPS_SHA256)
 set(sf_daxa_stereo_entries census cost aggregate_baseline aggregate_wave select_output depth_convert inspect clear_packed aggregate_packed8 aggregate_packed16 select_packed aggregate_specialized8 aggregate_specialized16 select_specialized8 select_specialized16 aggregate_d1288 aggregate_d12816 select_quad8 select_quad16 aggregate_shuffle8 aggregate_shuffle16 aggregate_right_specialized8 aggregate_right_specialized16 select_right_specialized8 select_right_specialized16 aggregate_layered8 aggregate_layered16 select_layered8 select_layered16)
+list(APPEND sf_daxa_stereo_entries select_right_derived8 select_right_derived16)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS shaders/daxa/stereo_derived.slang)
 set(sf_daxa_stereo_spirv)
 foreach(entry IN LISTS sf_daxa_stereo_entries)
   set(output "${CMAKE_CURRENT_BINARY_DIR}/daxa-stereo-${entry}.spv")
   set(source "${CMAKE_CURRENT_SOURCE_DIR}/shaders/daxa/stereo.slang")
   if(entry MATCHES "_layered")
     set(source "${CMAKE_CURRENT_SOURCE_DIR}/shaders/daxa/stereo_layered.slang")
+  endif()
+  if(entry MATCHES "_derived")
+    set(source "${CMAKE_CURRENT_SOURCE_DIR}/shaders/daxa/stereo_derived.slang")
   endif()
   add_custom_command(OUTPUT "${output}"
     COMMAND "${SF_DAXA_SLANGC}" "${source}"
@@ -35,6 +41,7 @@ target_compile_definitions(stereoforge_daxa_stereo PRIVATE
   SF_DAXA_STEREO_OPS_SHA256="${SF_DAXA_STEREO_OPS_SHA256}"
   SF_DAXA_STEREO_PARAMETERS_SHA256="${SF_DAXA_STEREO_PARAMETERS_SHA256}"
   SF_DAXA_STEREO_SPECIALIZED_SHA256="${SF_DAXA_STEREO_SPECIALIZED_SHA256}"
+  SF_DAXA_STEREO_DERIVED_SHA256="${SF_DAXA_STEREO_DERIVED_SHA256}"
   SF_DAXA_STEREO_LAYERED_SHA256="${SF_DAXA_STEREO_LAYERED_SHA256}")
 add_dependencies(stereoforge_daxa_stereo daxa_stereo_shaders)
 add_executable(daxa_stereo_benchmark apps/daxa_stereo_benchmark.cpp)

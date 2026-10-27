@@ -659,3 +659,104 @@ separate quality-changing experiment with explicit provenance and quality gates.
   on measured useful benefit; record memory-only benefit honestly if latency
   improvement is small. Further descriptor-load/cost reuse and single-volume
   dual-disparity research remain open toward the full 60 Hz goal.
+
+
+### Experimental single aggregation with derived right selection
+
+Shared Census is qualified at `0afc996`: it saves 29,491,200 B but does not
+establish a repeatable latency improvement. The next substantial work reduction
+is a separate estimator mode, not another scheduling claim.
+
+Append `DaxaRightReferenceMode::{IndependentSGM,LeftAggregatedSelection}` to
+configuration, keeping IndependentSGM default. Derived mode requires the existing
+SharedCensusSequential coordinator. Preserve full left SGM, then select right
+pixel xR/disparity d using left scores at xL=xR+d:
+`Sderived(xR,d)=paths*Cleft(xR+d,d)+unpack(Pleft(xR+d,d))`.
+This is correlated left-aggregate evidence, not an independently regularized
+right SGM. Both original camera images still contribute matching costs.
+
+Root algorithm choices for this experimental mode: exclude unsupported
+candidates before descriptor/P access; require at least two supported
+candidates; choose lowest disparity on equal costs; retain the existing
+selection-validity and confidence formulas. Refine subpixel only if both
+neighboring candidates are supported, gathering each at its own shifted left
+pixel; otherwise retain integer disparity. Do not add rectification-map support
+vetoes to raw stereo selection. Metric support remains the existing source and
+nearest-correspondence gate. Raw left outputs remain byte-exact; LR-filtered
+left outputs may differ because the right check changes.
+
+- [x] Add private selector-only right setup with no right penalty allocation,
+  clear or aggregation. Share left packed storage through bounded noncyclic
+  RAII retaining the Foundation; a right-only lease keeps its dependencies
+  alive and blocks aligned slot reuse. Reject derived right PackedPenalties or
+  reconstructed-intermediate access rather than labeling left state as right
+  recurrence. Preserve all old constructors, modes and admission behavior.
+- [x] Dispatch two shared Census tasks, left clear, all left paths, unchanged
+  left selection, then derived right selection: P+5 stereo phases (9/13).
+  Declare shared physical resources once, preserve left path hazards and
+  bootstrap synchronization, and add no per-frame CPU image work, allocation,
+  wait or readback. Report actual upload-through-metric span and host wall.
+- [x] Add separate production selector wrapper and derived metric wrapper;
+  preserve all 33 prior control shaders and all 46 existing build SPVs. Bind
+  actual compiled new source identities and all new SPVs in diagnostics.
+- [x] Expose typed right estimator and correlated LR dependency on retained
+  frames/readbacks. Both metric layers use a new explicit provenance value 5
+  (LeftAggregatedStereo), invalid remains 0, and legacy valid stereo remains 1.
+  IDs, observation age, metric geometry and invalid NaN conventions are unchanged.
+- [x] Add a derived-only schema and honest diagnostic flags; the legacy exact
+  dual-SGM harness must reject that schema. Native diagnostics independently
+  check left Census/integer/P and the derived right mask, without claiming
+  independent right recurrence or general CPU compound-float equivalence.
+- [x] Build a separate independent reference selector over dense left scores
+  produced by frozen RHI SGM. Its per-pixel selection cannot call production
+  gather/selection helpers. Validate raw left bytes, derived right bytes and all
+  nine observation planes, with provenance 5 on both supported metric layers.
+  Bind source/compiler/dependency/SPV/binary/fixture/report identities before
+  and after execution. Keep the legacy nine-plus-six oracle unchanged.
+- [x] Required independent performance and functional reviews precede root GPU
+  runs. Guard support-before-load, neighbor coordinates, ties, provenance,
+  shared ownership, alias registration, ring admission, startup and completion.
+  Exercise packing8/16, P4/P8, W32/W64, one/two slots, missing candidates,
+  boundaries, subpixel neighbors and retained-right lifetime.
+- [x] Verify actual buffer accounting; retaining other allocations removes
+  another packed volume (235,929,600 B at 720p/D128/two slots), yielding
+  575,079,728 B requested buffers. Keep the 2 GiB guard and report buffer-only
+  scope rather than peak driver memory.
+- [x] Root measures matched 100/20 independent/derived/derived/independent
+  resident runs after exact algorithm gates. Record latency and buffer accounting
+  separately from accuracy and fresh-camera throughput.
+- [ ] **Partial/open quality gate:** controlled reference development cases cover
+  planes/slopes, thin foregrounds, occlusions, photometric changes and borders,
+  with regional errors/completeness and false consistency. Repeated-texture
+  coverage, production Daxa execution on those quality fixtures, frozen accuracy
+  thresholds and held-out assessment remain open. No default promotion,
+  physical accuracy or live 60 Hz claim follows from exact implementation bytes
+  or timing.
+
+Completed reviewed evidence is recorded in
+[derived estimator evidence](../../daxa-depth-derived-evidence.md) and
+`artifacts/daxa-depth-derived-20261027/`. Native freeze SHA256
+`093223f8156b6df729f6c676f309e23b1e33070259a3321e73b8dec0acba5fd1`
+was rebound after the quality eye-region review fix; independent functional and
+performance reviews cleared that evidence. Fresh precommit CPU verification
+passes 1263 Python tests (37 GPU/camera tests deselected) and all seven CPU CTest
+contracts. Four derived nine-plus-six comparisons and the legacy sequential
+control pass exact bytes. Native core/synchronization contracts and 300-sample
+synchronization stress pass with empty stderr, 303 retirements and zero
+warnings/errors; all 46 preceding build SPVs and 33 prior controls remain byte
+identical.
+
+Matched ABBA means are approximately 19.1 ms GPU / 19.5 ms host for derived
+selection versus 31.4–31.6 / 31.9–32.1 ms for independent SGM, about 39% lower
+latency for a different estimator. Requested buffer bytes fall from 811,009,328
+to 575,079,728; this is buffer-only accounting, not peak driver memory. The
+16.67 ms budget remains unmet. Controlled reference quality exposes regressions:
+thin-occluder Right false LR correspondences rise 55→105 and thin-region MAE
+1.611648→2.239916 px. Those fixtures did not execute production Daxa and are
+neither physical nor held-out evidence; the mode is not promoted.
+
+A subsequent CPU-only development precision probe finds that LR tolerance 0.75
+reduces aggregate Right false correspondences 162→82 while retaining correct
+correspondences 9621→9620. This is exploratory rejection analysis, not a
+production precision fix. No production threshold changed; held-out validation
+and an independently frozen quality gate remain pending.

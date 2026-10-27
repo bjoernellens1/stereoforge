@@ -12,10 +12,17 @@ namespace stereoforge {
 // Positive disparity is x_left-x_right. Left compares L(x) with R(x-d);
 // Right compares R(x) with L(x+d). Census planes always retain ordinary L/R order.
 enum class DaxaStereoReference { Left,Right };
+enum class DaxaRightReferenceMode { IndependentSGM,LeftAggregatedSelection };
+enum class DaxaStereoEstimator { IndependentSGM,LeftAggregatedSelection };
+enum class DaxaLRDependency { IndependentReferences,LeftAggregatedCorrelated };
+// Reserved native observation value; valid derived observations use this on both layers.
+enum class DaxaDepthProvenance : uint32_t { Invalid=0,IndependentStereo=1,LeftAggregatedStereo=5 };
 enum class DaxaSgmVariant { Baseline,Wave,Packed,PackedSpecialized,PackedD128,PackedQuad,PackedShuffle };
 enum class DaxaStereoPlane : unsigned { Disparity,Confidence,Validity,Depth,DepthValidity,Costs,Sums,LeftCensus,RightCensus,LeftCensusValid,RightCensusValid,PackedPenalties };
 struct DaxaStereoReadback {
     DaxaStereoReference reference=DaxaStereoReference::Left;
+    DaxaRightReferenceMode right_reference_mode=DaxaRightReferenceMode::IndependentSGM;
+    DaxaStereoEstimator estimator=DaxaStereoEstimator::IndependentSGM;
     std::vector<float> disparity,confidence,depth;
     std::vector<uint32_t> validity,depth_validity,costs,sums;
     std::array<std::vector<uint32_t>,2> census,census_valid;
@@ -32,6 +39,8 @@ struct DaxaStereoTiming {
 // Scalar diagnostic oracle and independent lane-chunk CPU model. No device use.
 std::array<std::vector<uint32_t>,2> daxa_stereo_fixture(StereoConfig);
 DaxaStereoReadback daxa_stereo_reference(StereoConfig,std::span<const uint32_t> left,std::span<const uint32_t> right,std::optional<MetricCalibration> metric=std::nullopt,DaxaStereoReference reference=DaxaStereoReference::Left);
+// Diagnostic scalar selection from independently computed Left integer sums.
+DaxaStereoReadback daxa_left_aggregated_selection_reference(StereoConfig,const DaxaStereoReadback& left);
 std::vector<uint32_t> daxa_sgm_packed_model(StereoConfig,std::span<const uint32_t> costs,unsigned wave_size);
 std::vector<uint32_t> daxa_wave_min_model(std::span<const uint32_t> lane_values);
 struct DaxaQuadSelection {std::vector<uint32_t> best,best_cost,second;};
@@ -70,6 +79,8 @@ public:
         uint64_t context_id()const;
         uint32_t packing_bits()const;
         DaxaStereoReference reference()const;
+        DaxaRightReferenceMode right_reference_mode()const;
+        DaxaStereoEstimator estimator()const;
         CaptureLease source()const;const std::string& calibration_identity()const;
     };
     static std::array<uint32_t,3> dispatch_grid(uint64_t groups,std::array<uint32_t,3> limits);
@@ -93,9 +104,10 @@ public:
     static std::string shader_identity();
     static std::string shader_directory();
     static std::string specialized_shader_identity(); // Actual compiled Parameters:shared-body SHA256.
+    static std::string derived_shader_identity();
     static std::string layered_shader_identity(); // Actual compiled layered wrapper SHA256.
 private:
-    DaxaStereo(StereoConfig,const DaxaFrame&,DaxaSgmVariant,unsigned,std::optional<MetricCalibration>,std::shared_ptr<DaxaFoundation>,uint32_t,DaxaStereoReference,bool shared_census,const DaxaStereo* descriptor_owner);
+    DaxaStereo(StereoConfig,const DaxaFrame&,DaxaSgmVariant,unsigned,std::optional<MetricCalibration>,std::shared_ptr<DaxaFoundation>,uint32_t,DaxaStereoReference,bool shared_census,const DaxaStereo* descriptor_owner,DaxaRightReferenceMode mode=DaxaRightReferenceMode::IndependentSGM);
     // Depth-only combined scheduling. Setup owns no Frame/producer marker.
     void setup_pair(DaxaStereo& right,bool layered=false,bool shared_census=false);
     unsigned pair_slot_at(uint64_t oldest)const; // Both aligned slots available, before upstream upload.

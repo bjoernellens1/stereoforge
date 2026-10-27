@@ -15,7 +15,8 @@ Offline fixture creation can use Python/OpenCV; native processing uses C++ and
 offline Slang SPIR-V.
 
 `DaxaDepthConfig` contains `StereoConfig`, `lr_tolerance` (default 1), one or two
-slots, required full subgroup size 32 or 64, and an explicit stereo schedule. Both references use
+slots, required full subgroup size 32 or 64, an explicit stereo schedule, and
+`right_reference_mode` (default `IndependentSGM`). Both independent references use
 `PackedSpecialized`; existing disparity, path, penalty and packing limits apply.
 The benchmark fixes subpixel=true and LR tolerance=1. Its default slot count is
 2, while the C++ configuration defaults to 1.
@@ -97,7 +98,10 @@ Z = fx * baseline_m / (d - (cx_left - cx_right))
 The cached rectified calibration supplies these operands. Only finite positive
 Z is accepted. Metric-invalid observations have canonical NaN depth, zero metric
 confidence/validity/provenance, source ID -1 and age 0. Valid fresh observations
-retain stereo confidence, provenance `STEREO=1`, exact source ID and age 0.
+retain stereo confidence, provenance `STEREO=1` in independent-SGM mode, exact
+source ID and age 0. The optional derived mode uses provenance
+`LeftAggregatedStereo=5` for valid observations in both layers because both LR
+checks are correlated; invalid provenance remains 0.
 Age 0 describes fresh observation ancestry; it is not measured camera latency.
 IDs 0 through INT64_MAX are preserved. Larger capture IDs reject before device
 access or upload.
@@ -222,3 +226,17 @@ null per-eye statistics. Its private sharing constructor, retained producer
 ownership, actual buffer savings and measured limits are documented in
 [shared Census evidence](daxa-depth-shared-census-evidence.md). The default
 remains Sequential.
+
+
+`right_reference_mode=LeftAggregatedSelection` is an additional estimator choice
+admitted only with `SharedCensusSequential`. It keeps Left SGM but selects Right
+from shifted Left costs and packed penalties, with no Right recurrence buffer.
+The graph has `paths+5` phases (9/13), and the output layout stays unchanged.
+Typed frame/readback metadata identifies the estimator and correlated LR
+dependency. Right penalty access and intermediate readback reject; raw Right
+outputs remain available. Left raw outputs remain unchanged, while Left LR can
+change. The native derived report uses its own schema and preserves false flags
+for independent Right recurrence/winner and compound CPU float qualification.
+This option is not promoted: development geometry shows quality regressions.
+See the [derived estimator contract and evidence](daxa-depth-derived-evidence.md)
+for support rules, lifetime guarantees, exact-byte gates and measured limits.
