@@ -127,3 +127,18 @@ qualify synchronization validation, full native live capture/rectification/LR
 consistency/temporal integration, or sustained 60 Hz operation. See
 [native-resident-evidence.md](native-resident-evidence.md) for commands, hashes,
 setup cost, p95 and the precise evidence boundary.
+
+Selection-kernel follow-up: **294 Python tests pass**, including 25 direct
+selection structural/property/Vulkan cases; standalone CTest **5/5** passes.
+Four-lane selection preserves the scalar shader's disparity, confidence and
+validity bytes. At 720p/D128 its isolated GPU timestamp p50 falls from
+**31.0485 to 5.6838 ms**; separate full single-reference stereo measurements,
+including uploads and complete output readback, average **111.6670 → 81.1435 ms**
+for four paths and **134.7985 → 109.8910 ms** for eight paths. All six D32/64/128
+and four/eight-path comparisons retain exact output planes. Selection-query,
+stereo and actual GPU handoff fixtures load Khronos core validation and emit
+zero diagnostics across both streams. These measurements establish a standalone
+Slang RHI benchmark baseline and shared Slang reference for the planned
+Daxa + Slang runtime; they do not implement Daxa or qualify sustained 60 Hz.
+See [select-kernel-evidence.md](select-kernel-evidence.md) for timing scopes,
+p95, commands, hashes and qualification limits.

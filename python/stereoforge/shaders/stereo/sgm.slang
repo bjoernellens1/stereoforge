@@ -78,14 +78,40 @@ void aggregate(uint3 gid:SV_GroupID,uint3 lane:SV_GroupThreadID) {
     }
 }
 
-[shader("compute")] [numthreads(64,1,1)]
-void select(uint3 tid:SV_DispatchThreadID){
-    uint i=tid.x; if(i>=width*height)return;
-    uint offset=i*disparity_count,best=0,best_cost=0xffffffff,second=0xffffffff;
-    for(uint d=0;d<disparity_count;d++){
+// Four adjacent lanes scan each pixel's disparity-major cost row.
+// Padded pixels participate in every barrier and never access source buffers.
+groupshared uint select_best_cost[256];
+groupshared uint select_second_cost[256];
+groupshared uint select_best_index[256];
+[shader("compute")] [numthreads(256,1,1)]
+void select(uint3 group_id:SV_GroupID,uint3 group_thread_id:SV_GroupThreadID){
+    uint i=group_id.x*64+group_thread_id.x/4,lane=group_thread_id.x%4;
+    uint thread=group_thread_id.x;
+    uint offset=i*disparity_count,best=0xffffffff,best_cost=0xffffffff,second=0xffffffff;
+    if(i<width*height)for(uint d=lane;d<disparity_count;d+=4){
         uint c=sums[offset+d];
-        if(c<best_cost){second=best_cost;best_cost=c;best=d;}else second=min(second,c);
+        if(c<best_cost||(c==best_cost&&d<best)){
+            second=best_cost;best_cost=c;best=d;
+        }else second=min(second,c);
     }
+    select_best_cost[thread]=best_cost;
+    select_second_cost[thread]=second;
+    select_best_index[thread]=best;
+    GroupMemoryBarrierWithGroupSync();
+    for(uint stride=2;stride>0;stride/=2){
+        if(lane<stride){
+            uint other=thread+stride;
+            uint other_cost=select_best_cost[other],other_index=select_best_index[other];
+            uint own_cost=select_best_cost[thread],own_index=select_best_index[thread];
+            if(other_cost<own_cost||(other_cost==own_cost&&other_index<own_index)){
+                select_second_cost[thread]=min(select_second_cost[other],own_cost);
+                select_best_cost[thread]=other_cost;select_best_index[thread]=other_index;
+            }else select_second_cost[thread]=min(select_second_cost[thread],other_cost);
+        }
+        GroupMemoryBarrierWithGroupSync();
+    }
+    if(lane!=0||i>=width*height)return;
+    best=select_best_index[thread];best_cost=select_best_cost[thread];second=select_second_cost[thread];
     if(disparity_count==1)second=best_cost;
     bool valid=best>0&&best_cost<10000&&second>best_cost;
     float value=float(best);

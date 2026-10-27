@@ -59,7 +59,7 @@ class VulkanStereo:
             lines=h if dy==0 else w if dx==0 else w+h-1
             self.kernels['aggregate'].dispatch([lines*256,1,1],vars=dict(**common,costs=b['costs'],sums=b['sums'],dx=dx,dy=dy,line_count=lines,p1=self.p1,p2=self.p2),command_encoder=encoder,query_pool=self.query_pool,query_index_before=query_index,query_index_after=query_index+1)
             self._stages.append(f'aggregate_{dx}_{dy}');query_index+=2
-        self.kernels['select'].dispatch([n,1,1],vars=dict(**common,sums=b['sums'],disparity=b['disparity'],confidence=b['confidence'],validity=b['validity'],subpixel=int(self.subpixel)),command_encoder=encoder,query_pool=self.query_pool,query_index_before=query_index,query_index_after=query_index+1)
+        self.kernels['select'].dispatch([n*4,1,1],vars=dict(**common,sums=b['sums'],disparity=b['disparity'],confidence=b['confidence'],validity=b['validity'],subpixel=int(self.subpixel)),command_encoder=encoder,query_pool=self.query_pool,query_index_before=query_index,query_index_after=query_index+1)
         self._stages.append('select')
         token=self.device.submit_command_buffer(encoder.finish())
         self._pending=token
