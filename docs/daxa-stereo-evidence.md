@@ -161,3 +161,34 @@ Quad remains an explicit experiment with a wave32 stage benefit; wave64 is a
 negative result and no automatic selection changes. Aggregation still dominates.
 All timings exclude the second reference, consistency, acquisition, calibrated
 preprocessing and view synthesis. The scalar compound-float gate remains open.
+
+
+## Explicit minimum shuffles: allocation improvement without a speedup
+
+The `packed-shuffle` experiment replaces only the specialized aggregate's
+wave-wide minimum with five uniform XOR shuffle steps for wave32 and a sixth
+for wave64. Selection, storage, recurrence and quality settings remain C's.
+All nineteen earlier SPIR-V modules remain identical. It passes 44 additional
+core/synchronization cases, small and full 720p exact frozen-RHI output gates,
+and integer/direct-penalty checks. The full CPU suite passes 603 tests.
+
+| Subgroup | Specialized GPU median | Shuffle GPU median |
+|---|---:|---:|
+| 32 | 15.424 ms | 15.414 ms |
+| 64 | 15.660 ms | 15.672 ms |
+
+Actual RADV/ACO output confirms this was not canonicalized back to the original
+reduction: the linear reduction temporaries disappear and allocated VGPRs fall
+from 96 to 48, with zero spills, scratch and LDS. The compiler subgroup ceiling
+remains 16 in both. Code size is nearly unchanged (3972 versus 3960 bytes), and
+the explicit minimum remains vector-valued. These compiler facts establish the
+allocation change, not measured occupancy or a runtime bottleneck explanation.
+The matched timings establish no useful speed advantage. No automatic selection
+or production adoption follows.
+
+Reports and identities are retained under `shuffle-validation`,
+`shuffle-small-parity`, `shuffle-720p-wave{32,64}-performance` and
+`shuffle-isa.stderr` at the artifact root. Both performance batches use 30
+samples after three warmups at the same one-reference operating point.
+The next integration step is native YUYV conversion and calibrated rectification
+feeding leased GPU luma/RGB buffers into stereo on a shared Daxa context.

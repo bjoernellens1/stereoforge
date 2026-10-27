@@ -246,6 +246,34 @@ def test_quad_guard_catches_assumed_subgroup_identity():
         check_quad_collectives(shader[:start]+shader[start:].replace('WaveGetWaveIndex()','0'))
 
 
+def check_shuffle_minimum_only(shader):
+    original=body(shader,'void aggregate_specialized_body<')
+    changed=body(shader,'void aggregate_shuffle_body<')
+    primitive=(r'uint minimum=local_min;\s*\[unroll\]for\(uint offset=1;offset<32;offset\*=2\)'
+               r'\{uint other=WaveReadLaneAt\(minimum,lane\^offset\);minimum=min\(minimum,other\);\}\s*'
+               r'if\(lanes==64\)\{uint other=WaveReadLaneAt\(minimum,lane\^32\);minimum=min\(minimum,other\);\}\s*uint x=')
+    restored,count=re.subn(primitive,'uint minimum=WaveActiveMin(local_min),x=',changed)
+    assert count==1, 'shuffle butterfly must execute five full-wave steps plus uniform sixth for64'
+    assert re.sub(r'\s+','',restored)==re.sub(r'\s+','',original), 'only the minimum primitive may differ from C; preserve neutral tails, recurrence and addressing'
+    assert 'WaveActiveMin' not in changed
+    for entry,layout in (('aggregate_shuffle8','4,8'),('aggregate_shuffle16','2,16')):
+        assert '<'+layout+'>' in body(shader,'void '+entry+'(')
+
+
+def test_shuffle_variant_changes_only_full_wave_minimum():
+    check_shuffle_minimum_only((ROOT/'python/stereoforge/shaders/daxa/stereo.slang').read_text())
+    setup=body((ROOT/'src/daxa_stereo.cpp').read_text(),'void DaxaStereo::Impl::setup(')
+    assert 'i==19||i==20' in setup[:setup.index('shader.create_flags=')]
+
+
+@pytest.mark.parametrize('old,new,diagnostic',[('offset<32','offset<16','five full-wave'),('if(lanes==64)','if(lane==0)','five full-wave'),('uint local_min=SGM_REDUCTION_INF','uint local_min=0','only the minimum')])
+def test_shuffle_guard_detects_lost_partners_active_sources_or_neutral_value(old,new,diagnostic):
+    shader=(ROOT/'python/stereoforge/shaders/daxa/stereo.slang').read_text()
+    start=shader.index('void aggregate_shuffle_body<')
+    with pytest.raises(AssertionError,match=diagnostic):
+        check_shuffle_minimum_only(shader[:start]+shader[start:].replace(old,new))
+
+
 def definition(source, signature):
     start = source.index(signature)
     opening = source.index('{', start)
@@ -282,7 +310,7 @@ void* operator new[](std::size_t n){return ::operator new(n);}
 void operator delete(void* p)noexcept{std::free(p);}void operator delete[](void* p)noexcept{std::free(p);}
 void operator delete(void* p,std::size_t)noexcept{std::free(p);}void operator delete[](void* p,std::size_t)noexcept{std::free(p);}
 namespace stereoforge {
-enum class DaxaSgmVariant { Baseline,Wave,Packed,PackedSpecialized,PackedD128,PackedQuad };
+enum class DaxaSgmVariant { Baseline,Wave,Packed,PackedSpecialized,PackedD128,PackedQuad,PackedShuffle };
 class DaxaStereo {public:static void validate_shape(StereoConfig,unsigned,std::optional<MetricCalibration>,DaxaSgmVariant variant=DaxaSgmVariant::Baseline);static void validate(StereoConfig,std::span<const uint32_t>,std::span<const uint32_t>,unsigned,std::optional<MetricCalibration>,DaxaSgmVariant variant=DaxaSgmVariant::Baseline);static uint32_t packed_bits(StereoConfig);};
 '''
     program += definition(header, 'struct DaxaStereoReadback') + ';\n'
@@ -295,13 +323,15 @@ class DaxaStereo {public:static void validate_shape(StereoConfig,unsigned,std::o
     for signature in ('void require(', 'float invalid_float(', 'bool inside(', 'uint32_t step(', 'uint32_t line_count(', 'std::array<int,2> line_start('):
         program += definition(source, signature)
     program += '}\n'
-    for signature in ('void DaxaStereo::validate_shape(', 'void DaxaStereo::validate(', 'uint32_t DaxaStereo::packed_bits(', 'std::vector<uint32_t> daxa_sgm_packed_model(', 'std::vector<uint32_t> daxa_sgm_d128_model(', 'DaxaQuadSelection daxa_sgm_quad_model(', 'std::array<std::vector<uint32_t>,2> daxa_stereo_fixture(',
+    for signature in ('void DaxaStereo::validate_shape(', 'void DaxaStereo::validate(', 'uint32_t DaxaStereo::packed_bits(', 'std::vector<uint32_t> daxa_sgm_packed_model(', 'std::vector<uint32_t> daxa_sgm_d128_model(', 'std::vector<uint32_t> daxa_wave_min_model(', 'DaxaQuadSelection daxa_sgm_quad_model(', 'std::array<std::vector<uint32_t>,2> daxa_stereo_fixture(',
                       'DaxaStereoReadback daxa_stereo_reference(', 'std::vector<uint32_t> daxa_sgm_wave_model('):
         program += definition(source, signature)
     program += r'''
 }
 using namespace stereoforge;
 int main(int argc,char** argv){
+  if(argc==3&&std::string(argv[1])=="--wave-min"){std::ifstream input(argv[2],std::ios::binary);uint count;input.read(reinterpret_cast<char*>(&count),4);std::vector<uint> values(count);input.read(reinterpret_cast<char*>(values.data()),count*4);if(!input)return 13;
+    try{auto result=daxa_wave_min_model(values);std::cout.write(reinterpret_cast<const char*>(result.data()),result.size()*4);return std::cout?0:14;}catch(const std::invalid_argument&){return 12;}}
   if(argc==2&&std::string(argv[1])=="--d128-admission"){
     for(uint disparities:{1u,127u,128u,129u,256u}){StereoConfig c{9,7,disparities,4,8,32,true};std::vector<uint> luma(63),costs(63*disparities);bool admitted=true,modeled=true;
       try{DaxaStereo::validate(c,luma,luma,1,std::nullopt,DaxaSgmVariant::PackedD128);}catch(const std::invalid_argument&){admitted=false;}
@@ -335,6 +365,7 @@ int main(int argc,char** argv){
   auto packed32=measure([&]{return daxa_sgm_packed_model(c,r.costs,32);});auto packed64=measure([&]{return daxa_sgm_packed_model(c,r.costs,64);});
   auto d12832=measure([&]{return daxa_sgm_d128_model(c,r.costs,32);});auto d12864=measure([&]{return daxa_sgm_d128_model(c,r.costs,64);});
   auto quad32=measure([&]{return daxa_sgm_quad_model(c,r.sums,32).best_cost;});auto quad64=measure([&]{return daxa_sgm_quad_model(c,r.sums,64).best_cost;});
+  auto min32=measure([&]{return daxa_wave_min_model(std::span<const uint>(r.sums.data(),32));});auto min64=measure([&]{return daxa_wave_min_model(std::span<const uint>(r.sums.data(),64));});
   if(quad32.check!=quad64.check)return 11;
   if(daxa_sgm_d128_model(c,r.costs,32)!=daxa_sgm_packed_model(c,r.costs,32)||daxa_sgm_d128_model(c,r.costs,64)!=daxa_sgm_packed_model(c,r.costs,64))return 9;
   if(scalar.check!=wave32.check||scalar.check!=wave64.check)return 4;
@@ -343,7 +374,8 @@ int main(int argc,char** argv){
     <<",\"wave32_allocations\":"<<wave32.alloc<<",\"wave64_allocations\":"<<wave64.alloc
     <<",\"packed32_model_ms\":"<<packed32.ms<<",\"packed64_model_ms\":"<<packed64.ms<<",\"packed32_allocations\":"<<packed32.alloc<<",\"packed64_allocations\":"<<packed64.alloc
     <<",\"d12832_model_ms\":"<<d12832.ms<<",\"d12864_model_ms\":"<<d12864.ms<<",\"d12832_allocations\":"<<d12832.alloc<<",\"d12864_allocations\":"<<d12864.alloc
-    <<",\"quad32_model_ms\":"<<quad32.ms<<",\"quad64_model_ms\":"<<quad64.ms<<",\"quad32_allocations\":"<<quad32.alloc<<",\"quad64_allocations\":"<<quad64.alloc<<"}\n";
+    <<",\"quad32_model_ms\":"<<quad32.ms<<",\"quad64_model_ms\":"<<quad64.ms<<",\"quad32_allocations\":"<<quad32.alloc<<",\"quad64_allocations\":"<<quad64.alloc
+    <<",\"min32_model_ms\":"<<min32.ms<<",\"min64_model_ms\":"<<min64.ms<<",\"min32_allocations\":"<<min32.alloc<<",\"min64_allocations\":"<<min64.alloc<<"}\n";
 }
 '''
     directory = tmp_path_factory.mktemp('daxa-stereo-cpu')
@@ -386,7 +418,7 @@ def test_cpu_diagnostic_reference_and_wave_model_microbenchmark(scalar_cpu_probe
     result = json.loads(ran.stdout)
     print('Daxa stereo pure CPU diagnostic probe:', json.dumps(result, sort_keys=True))
     assert result['repetitions'] == 3
-    for field in ('scalar_reference_ms', 'wave32_model_ms', 'wave64_model_ms', 'packed32_model_ms', 'packed64_model_ms', 'd12832_model_ms', 'd12864_model_ms', 'quad32_model_ms', 'quad64_model_ms'):
+    for field in ('scalar_reference_ms', 'wave32_model_ms', 'wave64_model_ms', 'packed32_model_ms', 'packed64_model_ms', 'd12832_model_ms', 'd12864_model_ms', 'quad32_model_ms', 'quad64_model_ms', 'min32_model_ms', 'min64_model_ms'):
         assert 0 < result[field] < 30_000
 
 
@@ -429,6 +461,31 @@ def test_quad_model_matches_numpy_lowest_index_and_second_cost_with_tails(scalar
         result=np.fromfile(target,dtype='<u4').reshape(3,height*width)
         for actual,expected in zip(result,(best,best_cost,second)):
             np.testing.assert_array_equal(actual,expected)
+
+
+@pytest.mark.parametrize('lanes',[32,64])
+def test_wave_min_actual_cpu_model_matches_independent_scalar_for_all_lanes(scalar_cpu_probe,lanes):
+    binary,directory=scalar_cpu_probe;rng=np.random.default_rng(0x4d494e+lanes)
+    samples=[np.full(lanes,1_000_000,dtype=np.uint32),np.zeros(lanes,dtype=np.uint32),np.full(lanes,0xffffffff,dtype=np.uint32)]
+    for active in (1,2,3,lanes//2-1,lanes//2,lanes//2+1,lanes-1,lanes):
+        values=np.full(lanes,1_000_000,dtype=np.uint32);values[:active]=rng.integers(0,20001,size=active,dtype=np.uint32);samples.append(values)
+    for _ in range(12):samples.append(rng.integers(0,20001,size=lanes,dtype=np.uint32))
+    values=np.full(lanes,1_000_000,dtype=np.uint32);values[-1]=0;samples.append(values)
+    for trial,values in enumerate(samples):
+        source=directory/f'min-{lanes}-{trial}.input'
+        with source.open('wb') as stream:
+            np.array([lanes],dtype='<u4').tofile(stream);values.astype('<u4').tofile(stream)
+        result=subprocess.run([str(binary),'--wave-min',str(source)],capture_output=True,check=True,timeout=30)
+        actual=np.frombuffer(result.stdout,dtype='<u4')
+        np.testing.assert_array_equal(actual,np.full(lanes,int(values.min()),dtype=np.uint32))
+
+
+@pytest.mark.parametrize('lanes',[0,1,31,33,63,65])
+def test_wave_min_model_rejects_incomplete_or_unsupported_waves(scalar_cpu_probe,lanes):
+    binary,directory=scalar_cpu_probe;source=directory/f'min-invalid-{lanes}.input'
+    np.array([lanes]+[0]*lanes,dtype='<u4').tofile(source)
+    result=subprocess.run([str(binary),'--wave-min',str(source)],capture_output=True,timeout=30)
+    assert result.returncode==12
 
 
 def check_packed_penalty_numpy(scalar_cpu_probe,disparities,paths,p2,model):

@@ -17,7 +17,7 @@ import subprocess
 ROOT=Path(__file__).resolve().parents[1]
 OUTPUT_PLANES=('disparity.f32','confidence.f32','validity.u32')
 INTERMEDIATE_PLANES=('costs.u32','sums.u32')
-PACKED_VARIANTS=('packed','packed-specialized','packed-d128','packed-quad')
+PACKED_VARIANTS=('packed','packed-specialized','packed-d128','packed-quad','packed-shuffle')
 PROFILE_FIELDS=('width','height','disparities','paths','p1','p2','subpixel')
 
 
@@ -136,14 +136,14 @@ def compare_planes(a,b,profile,planes=OUTPUT_PLANES):
     return dict(passed=all(p['bytes_equal'] for p in compared.values()),planes=compared)
 
 
-def commands(rhi,daxa,output,profile,paths,frames,warmup,slots,validation,intermediates,check_reference=False,wave_size=0,include_packed=False,check_integer_reference=False,include_specialized=False,include_d128=False,include_quad=False):
+def commands(rhi,daxa,output,profile,paths,frames,warmup,slots,validation,intermediates,check_reference=False,wave_size=0,include_packed=False,check_integer_reference=False,include_specialized=False,include_d128=False,include_quad=False,include_shuffle=False):
     if include_d128 and profile['disparities']!=128:raise ValueError('packed-d128 requires D128')
-    include_specialized=include_specialized or include_d128 or include_quad
+    include_specialized=include_specialized or include_d128 or include_quad or include_shuffle
     shared=[]
     for key,value in profile.items():shared+=['--'+key,str(int(value)) if type(value) is bool else str(value)]
     shared+=['--left',str(paths['left']),'--right',str(paths['right'])]
     result={'rhi':[str(rhi),*shared,'--iterations',str(frames),'--output',str(output/'rhi')]}
-    variants=('baseline','wave')+(('packed',) if include_packed or include_specialized else ())+(('packed-specialized',) if include_specialized else ())+(('packed-d128',) if include_d128 else ())+(('packed-quad',) if include_quad else ())
+    variants=('baseline','wave')+(('packed',) if include_packed or include_specialized else ())+(('packed-specialized',) if include_specialized else ())+(('packed-d128',) if include_d128 else ())+(('packed-quad',) if include_quad else ())+(('packed-shuffle',) if include_shuffle else ())
     for variant in variants:
         result[variant]=[str(daxa),*shared,'--variant',variant,'--frames',str(frames),'--warmup',str(warmup),
             '--slots',str(slots),'--output',str(output/(variant+'.json')),'--dump-prefix',str(output/variant)]
@@ -167,15 +167,16 @@ def validate_daxa_timing(report):
             raise ValueError('invalid GPU stage timing: '+name)
 
 
-def native_identities(rhi,daxa,compiler,include_packed=False,include_specialized=False,include_d128=False,include_quad=False):
+def native_identities(rhi,daxa,compiler,include_packed=False,include_specialized=False,include_d128=False,include_quad=False,include_shuffle=False):
     from compare_daxa_view import dependencies
-    include_specialized=include_specialized or include_d128 or include_quad
+    include_specialized=include_specialized or include_d128 or include_quad or include_shuffle
     directory=Path(subprocess.check_output([str(daxa),'--shader-directory'],text=True).strip()).resolve(strict=True)
     entries=('census','cost','aggregate_baseline','aggregate_wave','select_output','depth_convert','inspect')
     if include_packed or include_specialized:entries+=('clear_packed','aggregate_packed8','aggregate_packed16','select_packed')
     if include_specialized:entries+=('aggregate_specialized8','aggregate_specialized16','select_specialized8','select_specialized16')
     if include_d128:entries+=('aggregate_d1288','aggregate_d12816')
     if include_quad:entries+=('select_quad8','select_quad16')
+    if include_shuffle:entries+=('aggregate_shuffle8','aggregate_shuffle16')
     spirv={entry:sha256(directory/('daxa-stereo-'+entry+'.spv')) for entry in entries}
     rhi_shader=ROOT/'python/stereoforge/shaders/stereo/sgm.slang'
     sources={name:sha256(ROOT/name) for name in ('apps/native_stereo.cpp','src/runtime.cpp','src/native_device.cpp','apps/daxa_stereo_benchmark.cpp','src/daxa_stereo.cpp','include/stereoforge/daxa_stereo.hpp','cmake/DaxaStereo.cmake')}
@@ -203,6 +204,7 @@ def main():
     p.add_argument('--include-specialized',action='store_true',help='Also compare packed-specialized; implies --include-packed')
     p.add_argument('--include-d128',action='store_true',help='Also compare packed-d128; requires D128 and implies specialized/packed')
     p.add_argument('--include-quad',action='store_true',help='Also compare packed-quad; implies specialized/packed without requiring D128')
+    p.add_argument('--include-shuffle',action='store_true',help='Also compare packed-shuffle; implies specialized/packed, not quad/D128')
     p.add_argument('--check-integer-reference',action='store_true',help='Run exact integer oracle after timing, including direct packed words; excludes compound float oracle')
     a=p.parse_args();frames=a.frames if a.frames is not None else (1 if a.validation_only else 30);warmup=a.warmup if a.warmup is not None else (0 if a.validation_only else 3)
     if min(a.width,a.height)<5 or a.width*a.height>1280*720 or a.disparities not in ((16,32,64,128) if a.validation_only else (32,64,128)) or a.paths not in (4,8) or not 0<=a.p1<=a.p2<=10000 or a.subpixel not in (0,1) or a.slots not in (1,2) or not 0<a.seed<=0xffffffff:
@@ -211,7 +213,7 @@ def main():
         p.error('performance requires30..300samples/3..30warmups; smaller counts require --validation-only')
     profile={key:getattr(a,key) for key in PROFILE_FIELDS};profile['subpixel']=bool(a.subpixel)
     if a.include_d128 and a.disparities!=128:p.error('packed-d128 requires D128')
-    a.include_specialized=a.include_specialized or a.include_d128 or a.include_quad
+    a.include_specialized=a.include_specialized or a.include_d128 or a.include_quad or a.include_shuffle
     a.include_packed=a.include_packed or a.include_specialized
     if a.include_packed:
         try:packed_contract(profile)
@@ -220,7 +222,7 @@ def main():
     manifest=write_fixture(output,profile,a.seed);paths={eye:output/(eye+'.u32') for eye in ('left','right')}
     rhi,daxa=a.rhi_binary.resolve(),a.daxa_binary.resolve()
     evidence=dict(schema=1,profile=profile,fixture=manifest,frames=frames,warmup=warmup,
-        performance_qualified_counts=not a.validation_only,include_packed=a.include_packed,include_specialized=a.include_specialized,include_d128=a.include_d128,include_quad=a.include_quad,integer_reference_requested=a.check_integer_reference,wave_size_requested=a.wave_size,validation_requested=a.validation,selected=None,
+        performance_qualified_counts=not a.validation_only,include_packed=a.include_packed,include_specialized=a.include_specialized,include_d128=a.include_d128,include_quad=a.include_quad,include_shuffle=a.include_shuffle,integer_reference_requested=a.check_integer_reference,wave_size_requested=a.wave_size,validation_requested=a.validation,selected=None,
         inherited_validation_environment={name:os.environ[name] for name in ('VK_INSTANCE_LAYERS','VK_LAYER_VALIDATE_SYNC','VK_LAYER_ENABLES','VK_LOADER_DEBUG','SF_DAXA_VALIDATION') if name in os.environ},
         scope='Single reference stereo only: no second reference, LR consistency, capture, calibrated depth or full-pipeline/60Hz qualification.',
         timing_contract=dict(daxa='Retained luma GPU graph/stage timestamps; upload and diagnostic export outside samples.',
@@ -228,9 +230,9 @@ def main():
             comparable_end_to_end=False,rhi_warmup='unsupported; none fabricated'),
         comparisons={},children={},passed=False)
     try:
-        identities=native_identities(rhi,daxa,a.compiler,a.include_packed,a.include_specialized,a.include_d128,a.include_quad)
+        identities=native_identities(rhi,daxa,a.compiler,a.include_packed,a.include_specialized,a.include_d128,a.include_quad,a.include_shuffle)
         evidence['identities']=identities
-        calls=commands(rhi,daxa,output,profile,paths,frames,warmup,a.slots,a.validation,a.dump_intermediates,a.check_reference,a.wave_size,a.include_packed,a.check_integer_reference,a.include_specialized,a.include_d128,a.include_quad)
+        calls=commands(rhi,daxa,output,profile,paths,frames,warmup,a.slots,a.validation,a.dump_intermediates,a.check_reference,a.wave_size,a.include_packed,a.check_integer_reference,a.include_specialized,a.include_d128,a.include_quad,a.include_shuffle)
         # Explicit source path prevents stale compiled-in RHI shader-directory defaults.
         calls['rhi']+=['--shader-directory',str((ROOT/'python/stereoforge/shaders/stereo').resolve())]
         evidence['commands']=calls
@@ -310,8 +312,16 @@ def main():
                     row=compare_planes(output/other,output/'packed-quad',profile,INTERMEDIATE_PLANES)
                     row['packed_representation']='RECONSTRUCTED from actual GPU Census and packed penalty words; not dense GPU buffers'
                     evidence['comparisons'][other+'_vs_packed_quad_reconstructed']=row
+        if a.include_shuffle:
+            for other in ('rhi','baseline','packed','packed-specialized')+(('packed-d128',) if a.include_d128 else ())+(('packed-quad',) if a.include_quad else ()):
+                evidence['comparisons'][other+'_vs_packed_shuffle']=compare_planes(output/other,output/'packed-shuffle',profile)
+            if a.dump_intermediates:
+                for other in ('baseline','packed-specialized'):
+                    row=compare_planes(output/other,output/'packed-shuffle',profile,INTERMEDIATE_PLANES)
+                    row['packed_representation']='RECONSTRUCTED from actual GPU Census and packed penalty words; not dense GPU buffers'
+                    evidence['comparisons'][other+'_vs_packed_shuffle_reconstructed']=row
         evidence['rhi_intermediate_parity']='unavailable: frozen RHI exposes only final disparity/confidence/validity dumps'
-        after=native_identities(rhi,daxa,a.compiler,a.include_packed,a.include_specialized,a.include_d128,a.include_quad)
+        after=native_identities(rhi,daxa,a.compiler,a.include_packed,a.include_specialized,a.include_d128,a.include_quad,a.include_shuffle)
         if identities!=after:raise ValueError('binary/compiler/shader/dependency bytes changed during comparison')
         evidence['passed']=all(row['passed'] for row in evidence['comparisons'].values())
     except (ValueError,OSError,KeyError,TypeError,subprocess.SubprocessError) as error:

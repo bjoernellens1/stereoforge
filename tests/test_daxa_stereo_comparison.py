@@ -125,6 +125,15 @@ def test_identity_stability_ignores_ldd_load_addresses_but_binds_dependency_byte
     assert len(compare.native_identities(binary,binary,compiler,include_quad=True,include_d128=True)['daxa']['offline_spirv_sha256'])==19
     (directory/'daxa-stereo-select_quad8.spv').write_bytes(b'changed quad code')
     assert quad!=compare.native_identities(binary,binary,compiler,include_quad=True)
+    with pytest.raises(OSError):compare.native_identities(binary,binary,compiler,include_shuffle=True)
+    (directory/'daxa-stereo-aggregate_shuffle8.spv').write_bytes(b'shuffle8 code')
+    with pytest.raises(OSError):compare.native_identities(binary,binary,compiler,include_shuffle=True)
+    (directory/'daxa-stereo-aggregate_shuffle16.spv').write_bytes(b'shuffle16 code')
+    shuffle=compare.native_identities(binary,binary,compiler,include_shuffle=True)
+    assert len(shuffle['daxa']['offline_spirv_sha256'])==17
+    assert len(compare.native_identities(binary,binary,compiler,include_shuffle=True,include_quad=True,include_d128=True)['daxa']['offline_spirv_sha256'])==21
+    (directory/'daxa-stereo-aggregate_shuffle8.spv').write_bytes(b'changed shuffle code')
+    assert shuffle!=compare.native_identities(binary,binary,compiler,include_shuffle=True)
     monkeypatch.setattr(compare_daxa_view,'dependencies',lambda *args:dict(ldd=['different address'],sha256={'library.so':'b'*64}))
     assert compare.native_identities(binary,binary,compiler)!=first
 
@@ -146,16 +155,16 @@ def test_plane_comparison_is_bit_exact_including_invalid_nan_payloads(tmp_path):
     assert not compare.compare_planes(a,b,p)['passed']
 
 
-@pytest.mark.parametrize('mode',['default','packed','changed_plane','unchecked_words','wrong_layout','unmarked_reconstruction','specialized','specialized_changed_plane','specialized_unchecked_words','specialized_wrong_layout','specialized_unmarked_reconstruction','specialized_missing_integer_flag','d128','d128_changed_plane','d128_unchecked_words','d128_missing_integer_flag','d128_wrong_variant','quad','quad_changed_plane','quad_unchecked_words','quad_missing_words','quad_missing_integer_flag','quad_wrong_variant','quad_incomplete_subgroup'])
+@pytest.mark.parametrize('mode',['default','packed','changed_plane','unchecked_words','wrong_layout','unmarked_reconstruction','specialized','specialized_changed_plane','specialized_unchecked_words','specialized_wrong_layout','specialized_unmarked_reconstruction','specialized_missing_integer_flag','d128','d128_changed_plane','d128_unchecked_words','d128_missing_integer_flag','d128_wrong_variant','quad','quad_changed_plane','quad_unchecked_words','quad_missing_words','quad_missing_integer_flag','quad_wrong_variant','quad_incomplete_subgroup','shuffle','shuffle_changed_plane','shuffle_unchecked_words','shuffle_missing_words','shuffle_missing_integer_flag','shuffle_wrong_variant','shuffle_incomplete_subgroup'])
 def test_cpu_only_full_orchestration_records_shared_bytes_and_distinct_timing_scopes(tmp_path,monkeypatch,mode):
     from types import SimpleNamespace
     directory=tmp_path/'comparison'
     identities=dict(daxa=dict(compiler_sha256='compiler',shader_source_sha256={'wrapper':'wrapper','ops':'ops'}))
     monkeypatch.setattr(compare,'native_identities',lambda *args:copy.deepcopy(identities))
     calls=[]
-    d128=mode.startswith('d128');quad=mode.startswith('quad');specialized=mode.startswith('specialized') or d128 or quad
-    target='packed-quad' if quad else 'packed-d128' if d128 else 'packed-specialized' if specialized else 'packed'
-    failure=mode.removeprefix('specialized_').removeprefix('d128_').removeprefix('quad_')
+    d128=mode.startswith('d128');quad=mode.startswith('quad');shuffle=mode.startswith('shuffle');specialized=mode.startswith('specialized') or d128 or quad or shuffle
+    target='packed-shuffle' if shuffle else 'packed-quad' if quad else 'packed-d128' if d128 else 'packed-specialized' if specialized else 'packed'
+    failure=mode.removeprefix('specialized_').removeprefix('d128_').removeprefix('quad_').removeprefix('shuffle_')
     def child(command,**kwargs):
         calls.append(command)
         flags={'--dump-intermediates','--check-integer-reference'};opt={};i=1
@@ -202,15 +211,16 @@ def test_cpu_only_full_orchestration_records_shared_bytes_and_distinct_timing_sc
     if mode!='default':argv+=['--include-packed','--dump-intermediates','--check-integer-reference']
     if specialized:argv+=['--include-specialized']
     if quad:argv+=['--include-quad']
+    if shuffle:argv+=['--include-shuffle']
     if d128:
         argv+=['--include-d128'];argv[argv.index('--disparities')+1]='128'
     monkeypatch.setattr(sys,'argv',argv)
-    if mode in ('default','packed','specialized','d128','quad'):compare.main()
+    if mode in ('default','packed','specialized','d128','quad','shuffle'):compare.main()
     else:
         with pytest.raises(SystemExit):compare.main()
     evidence=json.loads((directory/'comparison.json').read_text())
-    assert evidence['passed']==(mode in ('default','packed','specialized','d128','quad'))
-    assert len(calls)==(3 if mode=='default' else 6 if d128 or quad else 5 if specialized else 4)
+    assert evidence['passed']==(mode in ('default','packed','specialized','d128','quad','shuffle'))
+    assert len(calls)==(3 if mode=='default' else 6 if d128 or quad or shuffle else 5 if specialized else 4)
     assert evidence['performance_qualified_counts'] is False and evidence['frames']==1 and evidence['warmup']==0
     assert evidence['timing_contract']['comparable_end_to_end'] is False
     assert evidence['selected'] is None
@@ -238,6 +248,11 @@ def test_cpu_only_full_orchestration_records_shared_bytes_and_distinct_timing_sc
         for other in ('rhi','baseline','packed','packed-specialized'):assert evidence['comparisons'][other+'_vs_packed_quad']['passed']
         assert evidence['packed_quad_word_reference_checked'] is True
         assert evidence['packed_quad_word_dump']['representation']=='actual GPU packed penalty words'
+    if mode=='shuffle':
+        assert evidence['include_shuffle'] and evidence['include_specialized'] and evidence['include_packed'] and not evidence['include_d128'] and not evidence['include_quad']
+        for other in ('rhi','baseline','packed','packed-specialized'):assert evidence['comparisons'][other+'_vs_packed_shuffle']['passed']
+        assert evidence['packed_shuffle_word_reference_checked'] is True
+        assert evidence['packed_shuffle_word_dump']['representation']=='actual GPU packed penalty words'
     assert all(command[command.index('--left')+1]==str(directory/'left.u32') for command in calls)
 
 
@@ -351,3 +366,14 @@ def test_quad_opt_in_implies_generic_packed_candidates_without_d128(tmp_path):
         assert all(calls[key]==old[key] for key in old)
         assert calls['packed-quad'][calls['packed-quad'].index('--variant')+1]=='packed-quad'
         assert 'packed-d128' not in calls
+
+
+def test_shuffle_opt_in_implies_c_b_without_quad_or_d128(tmp_path):
+    for disparities in (16,32,128):
+        p=dict(profile(),disparities=disparities);paths={'left':'L','right':'R'}
+        old=compare.commands(Path('/rhi'),Path('/daxa'),tmp_path,p,paths,30,3,1,False,False,include_specialized=True)
+        calls=compare.commands(Path('/rhi'),Path('/daxa'),tmp_path,p,paths,30,3,1,False,False,include_shuffle=True)
+        assert set(calls)==set(old)|{'packed-shuffle'}
+        assert all(calls[key]==old[key] for key in old)
+        assert calls['packed-shuffle'][calls['packed-shuffle'].index('--variant')+1]=='packed-shuffle'
+        assert 'packed-d128' not in calls and 'packed-quad' not in calls

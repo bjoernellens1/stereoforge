@@ -313,3 +313,45 @@ void select_quad_body<let Components:uint,let Bits:uint>(uint3 gid){
 void select_quad8(uint3 gid:SV_GroupID){select_quad_body<4,8>(gid);}
 [shader("compute")][numthreads(64,1,1)]
 void select_quad16(uint3 gid:SV_GroupID){select_quad_body<2,16>(gid);}
+
+// Candidate F replaces only the full-wave integer minimum primitive.
+void aggregate_shuffle_body<let Components:uint,let Bits:uint>(uint3 gid){
+    uint width=p.width,height=p.height,disparities=p.disparities,p1=p.p1,p2=p.p2;
+    uint* left_desc=(uint*)p.left_desc_address;uint* right_desc=(uint*)p.right_desc_address;
+    uint* left_valid=(uint*)p.left_valid_address;uint* right_valid=(uint*)p.right_valid_address;
+    uint* words=(uint*)p.penalties_address;
+    uint lanes=WaveGetLaneCount(),lane=WaveGetLaneIndex();int2 dir=sgm_direction(pc.pass);
+    uint line=linear_group(gid)*(64/lanes)+WaveGetWaveIndex();if(line>=sgm_line_count(width,height,dir))return;
+    uint row_words=(disparities+Components-1)/Components,chunks=(row_words+lanes-1)/lanes;
+    uint prev[8],next[8];[unroll]for(uint r=0;r<8;++r){prev[r]=0;next[r]=0;}
+    int2 xy=sgm_line_start(width,height,dir,line);bool first=true;
+    while(sgm_inside(xy,width,height)){
+        uint local_min=SGM_REDUCTION_INF;
+        [unroll]for(uint k=0;k<8/Components;++k)if(k<chunks){[unroll]for(uint component=0;component<Components;++component)if((k*lanes+lane)*Components+component<disparities)local_min=min(local_min,prev[k*Components+component]);}
+        uint minimum=local_min;
+        [unroll]for(uint offset=1;offset<32;offset*=2){uint other=WaveReadLaneAt(minimum,lane^offset);minimum=min(minimum,other);}
+        if(lanes==64){uint other=WaveReadLaneAt(minimum,lane^32);minimum=min(minimum,other);}
+        uint x=uint(xy.x),i=uint(xy.y)*width+x;
+        uint reference=left_desc[i];bool reference_valid=left_valid[i]!=0;
+        [unroll]for(uint k=0;k<8/Components;++k)if(k<chunks){
+            // Full-wave uniform shuffles occur even for lanes whose word/tail is masked.
+            uint lo_same=WaveReadLaneAt(prev[k*Components+Components-1],(lane+lanes-1)%lanes);
+            uint hi_same=WaveReadLaneAt(prev[k*Components],(lane+1)%lanes);
+            uint lo_cross=WaveReadLaneAt(k>0?prev[(k>0?k-1:0)*Components+Components-1]:SGM_REDUCTION_INF,lanes-1);
+            uint hi_cross=WaveReadLaneAt(k+1<chunks?prev[(k+1<8/Components?k+1:k)*Components]:SGM_REDUCTION_INF,0);
+            uint word=k*lanes+lane,addition=0;
+            [unroll]for(uint component=0;component<Components;++component){uint d=word*Components+component,r=k*Components+component;
+                uint lo=component>0?prev[r>0?r-1:0]:(lane>0?lo_same:lo_cross);
+                uint hi=component+1<Components?prev[min(r+1,7u)]:(lane+1<lanes?hi_same:hi_cross);
+                if(d==0)lo=SGM_REDUCTION_INF;if(d+1>=disparities)hi=SGM_REDUCTION_INF;
+                if(d<disparities){uint c=specialized_cost(x,i,d,reference,reference_valid,right_valid,right_desc);next[r]=sgm_step(c,prev[r],lo,hi,minimum,p1,p2,first);addition|=(next[r]-c)<<(component*Bits);}else next[r]=0;
+            }
+            if(word<row_words)words[i*row_words+word]+=addition;
+        }
+        [unroll]for(uint r=0;r<8;++r)prev[r]=next[r];first=false;xy+=dir;
+    }
+}
+[shader("compute")][numthreads(64,1,1)]
+void aggregate_shuffle8(uint3 gid:SV_GroupID){aggregate_shuffle_body<4,8>(gid);}
+[shader("compute")][numthreads(64,1,1)]
+void aggregate_shuffle16(uint3 gid:SV_GroupID){aggregate_shuffle_body<2,16>(gid);}
