@@ -1,5 +1,20 @@
 # Execution and geometry contracts
 
+Production architecture decision (2026-10-27): target C++20 + Daxa TaskGraph +
+Slang, with Daxa as the single Vulkan device/resource/graph owner for the core
+classical/temporal/view pipeline. This is a planned migration gated by Linux dependency/capability/license checks, the
+upstream external-resource-view regression, and a matched resident proof of
+concept; Daxa is not yet adopted or qualified. Keep the working Slang RHI path
+frozen as comparison/migration evidence, not underneath Daxa. Reusable Slang
+operations stay independent of Daxa bindings; curated manually fused/unfused
+variants use bounded offline benchmarks and reviewed configuration. There is no
+custom task scheduler, arbitrary fusion compiler or general auto-tuner. SlangPy
+is optional research; ncnn Vulkan is optional for one validated model, with IREE
+reserved for demonstrated later need. Optional ncnn may use a separate context
+behind measured owned-copy/completion boundaries; cross-context buffer aliases
+and zero-copy claims require proven interoperability. Geometry, metadata, completion and
+output contracts below remain binding. See the [production implementation plan](superpowers/plans/2026-10-27-daxa-slang-production.md).
+
 Optical coordinates use +X right, +Y down, +Z forward. Translations/depth use metres.
 `Calibration.right_to_left` is the unrectified right camera's rigid pose in the
 unrectified left camera/rig frame. Legacy image-geometry names such as

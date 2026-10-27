@@ -12,6 +12,8 @@ This is an initial research implementation, not a qualified real-time release.
 See [hardware evidence](docs/hardware-evidence.md), [architecture](docs/architecture.md),
 and the [implementation ledger](docs/implementation-status.md) for exact boundaries.
 
+See the [Daxa + Slang production plan](docs/superpowers/plans/2026-10-27-daxa-slang-production.md) for the proposed migration, qualification gates and current implementation boundary.
+
 ## Setup
 
 Requires Python 3.11+, uv, CMake 3.24+, Ninja, a C++20 compiler, and a working
