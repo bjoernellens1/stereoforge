@@ -59,10 +59,14 @@ void aggregate(uint3 gid:SV_GroupID,uint3 lane:SV_GroupThreadID) {
     while(x>=0&&x<int(width)&&y>=0&&y<int(height)) {
         reduction[d]=d<disparity_count?previous[d]:1000000;
         GroupMemoryBarrierWithGroupSync();
+#if SINTERGPU_USE_SHARED_REDUCTION
+        SINTERGPU_REDUCE_256(reduction, d, 1, min)
+#else
         for(uint stride=128;stride>0;stride>>=1){
             if(d<stride)reduction[d]=min(reduction[d],reduction[d+stride]);
             GroupMemoryBarrierWithGroupSync();
         }
+#endif
         uint index=(uint(y)*width+uint(x))*disparity_count+d;
         uint value=0;
         if(d<disparity_count){
