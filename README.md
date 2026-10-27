@@ -280,6 +280,10 @@ on fresh synthetic textures, with some coverage loss; it does not recover thin
 geometry. See [consistency threshold evidence](docs/daxa-depth-consistency-evidence.md)
 for native byte checks and the accuracy limits.
 
+The [matching-window and boundary-smoothing study](docs/daxa-stereo-boundary-study.md)
+records thin-object recovery alongside global error and coverage regressions.
+These CPU experiments have not changed the runtime defaults.
+
 ## Standalone C++ runtime
 
 Build without Python, SlangPy or SGL using `cmake --preset standalone` and

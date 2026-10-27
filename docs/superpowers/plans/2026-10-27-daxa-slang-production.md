@@ -440,6 +440,26 @@ acceptance; physical calibration truth remains a separate qualification.
 
 ### 6c. Whole-chain qualification; root alone launches GPU
 
+**Controlled-fixture boundary (2026-10-27):** actual SGM output cannot promise
+the sparse known-depth/tie/occlusion witnesses needed to isolate view geometry.
+The integration owner therefore also owns a separate
+`apps/daxa_view_depth_fixture.cpp` executable and its build target. It creates
+an explicitly synthetic capture/typed depth producer, waits for completion,
+and uploads independently supplied, validated nine-plane observations into its
+exclusive, unconsumed output buffers once, before view construction/use. The
+upload completes before any view reads. There is no mutable production Frame
+API and no override option in the real depth/view benchmark or live path.
+Input extents and metadata domains are validated before device work where
+possible. This tool has no performance loop or FPS claim; its report requires
+`observations_overridden_for_fixture=true`, `measured_stereo_output=false`,
+`metric_source=synthetic_known_geometry` and `performance_qualified=false`.
+The oracle binds these synthetic payloads/identities before and after execution.
+It qualifies calibrated view readers, projection, visibility and metadata,
+not measured stereo accuracy. Whole-chain timing uses untouched real producer
+outputs in `daxa_view_depth_benchmark`, with GPU residency preserved. Guard
+tests prevent fixture injection or qualified-performance claims from leaking
+into that executable. Frozen legacy compositor controls remain separate.
+
 - [ ] Build an independent geometry-generated held-out fixture oracle with
   original RGB, supported rectified depth, explicit poses and known 3D points.
   Bind fixtures, map/model association evidence, all sources, helpers, compiler,
@@ -807,3 +827,51 @@ their preceding fifteen output planes byte for byte. These checks qualify
 threshold plumbing and implementation agreement, not production quality on
 the fresh-texture geometry or physical accuracy. Results and reproduction are
 in [consistency evidence](../../daxa-depth-consistency-evidence.md).
+
+### Thin-boundary cost and regularization study
+
+Tightened consistency rejects some errors but cannot reconstruct a foreground
+surface both references already matched to the background. Isolate matching
+cost and regularization before adding another production shader mode.
+
+Root-selected study rules (not tuned or promoted production settings):
+5x5 strict-less Census / constant P2 control; 3x3 strict-less Census with
+Hamming multiplied by 3 / constant P2; 5x5 / edge-adaptive P2; and scaled 3x3 /
+edge-adaptive P2. All use P4, D32, P1=8 and maximum P2=32. Keep the common
+radius-2 descriptor support domain so a smaller border cannot masquerade as
+better completeness. For a path step, the fixed integer heuristic is
+`local_P2=max(P1,(P2*16)//(16+abs(I_current-I_previous)))`, using the reference
+image only. Path starts retain the existing initialization. This preserves
+`P1 <= local_P2 <= P2`; the intensity scale 16 is an experimental root choice.
+
+- [x] CPU-only isolated study under local
+  `artifacts/daxa-depth-boundary-study-20261027/`, with no production edits.
+  Verify baseline masks and integer winners against frozen RHI outputs for
+  all four existing seed-42 fixtures and report float ULP differences separately.
+  Pin descriptor order/equality/borders, cost scaling, path initialization,
+  local penalty bounds and mirrored Right geometry with literal checks.
+- [x] Freeze the four models before evaluation. Report raw and LR-filtered
+  visible error, correct coverage, false consistency, thin/boundary/plane
+  regions for independent and derived Right, at existing LR 1.0 and 0.75.
+  Evaluate seed 42 development data, then fresh texture seeds 46–48 in the same
+  four geometry families. Separately test fixed independent per-eye integer
+  noise in [-4,4], applied after the ideal warp with its GT unchanged. No rule
+  or threshold tuning on the new texture results; do not call them unseen
+  geometry, physical scenes or GPU/production qualification.
+- [x] Read-only native architecture review identifies additive wrapper and
+  metadata/resource changes needed by a useful candidate while preserving the
+  old defaults and all 49 control SPVs. Do not add a runtime variant until the
+  quality/coverage tradeoff justifies it. A failed candidate is recorded rather
+  than silently promoted or repaired with ground-truth-dependent decisions.
+
+This is a bounded diagnostic step toward the original precision and real-time
+requirements. It does not replace the remaining typed wide RGB-D integration,
+temporal/adaptive pipeline, physical geometry or sustained live 60 Hz gates.
+
+The 128-input CPU study and independent audit completed; all twelve baseline
+raw mask/integer-winner checks and 32 baseline LR-mask checks match frozen RHI
+outputs. The candidates recover some thin geometry but also regress other
+error/coverage measures. No production candidate or default change is justified
+by these probes alone. Record the full tradeoffs in
+[boundary study](../../daxa-stereo-boundary-study.md); resume the already approved
+Task 6 native wide-view integration while retaining the independent-SGM default.
