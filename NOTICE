@@ -1,0 +1,13 @@
+StereoForge
+
+StereoForge's original code is licensed under Apache License 2.0; see LICENSE.
+Dependencies retain their separate copyrights and licenses. Relevant upstream
+license texts are preserved in third_party/licenses; see third_party/README.md
+for dependency versions and use.
+
+For StereoForge's uses of HIDAPI, the BSD-3-Clause license alternative is chosen.
+The upstream license-choice notice is retained alongside that license.
+
+This public source distribution is not a binary release. It does not claim
+ownership of, or grant additional rights to, third-party vendor binaries.
+Redistribution of dependencies must satisfy their respective license terms.

@@ -127,4 +127,6 @@ SGM work: aggregation remains dense over the configured disparity range.
 - Khronos validation must be installed for a requested driver-validation run;
   native `--validation` fails when it is unavailable.
 
-New code is Apache-2.0; see [dependency notices](third_party/README.md).
+New code is Apache-2.0. The [license evaluation](docs/license-evaluation.md) clears
+public source publication; bundled binaries require a separate review. See
+[dependency notices](third_party/README.md) and [NOTICE](NOTICE).

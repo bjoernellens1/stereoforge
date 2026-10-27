@@ -1,4 +1,4 @@
-include CMakeLists.txt CMakePresets.json uv.lock LICENSE README.md
+include CMakeLists.txt CMakePresets.json uv.lock LICENSE NOTICE README.md
 recursive-include include *.hpp
 recursive-include src *.cpp
 recursive-include apps *.cpp
@@ -6,6 +6,6 @@ recursive-include cmake *.cmake
 recursive-include tests *.cpp *.cmake
 recursive-include configs *.json
 recursive-include docs *.md
-recursive-include third_party *.md
+recursive-include third_party *.md *.txt
 recursive-include benchmarks *.py
 recursive-include shaders *.slang
