@@ -1,0 +1,49 @@
+{
+  "schema": 1,
+  "operation": "resident-output-metadata",
+  "contract": {
+    "grid": "flattened target pixels, x-fastest; source owner indexes concatenated left/right source pixels",
+    "units": "signed 64-bit original observation ID; signed nonnegative 64-bit age in nanoseconds",
+    "precision": "exact little-endian uint32 low/high pairs, no floating-point conversion",
+    "border": "t >= width*height has no write; invalid validity/UINT32_MAX/out-of-range owner gives ID -1 and age 0",
+    "layout": "uint32 owner and validity planes; uint2 source IDs/ages and output IDs/ages",
+    "alias": "all output planes disjoint from each other and every input; read-only inputs retained through both split passes",
+    "ownership": "Daxa owns buffers; completion wait precedes host export/reuse; no foreign RHI handles"
+  },
+  "variants": [
+    {
+      "name": "metadata-fused-64",
+      "entrypoints": [
+        "metadata_fused"
+      ],
+      "workgroup": [
+        64,
+        1,
+        1
+      ]
+    },
+    {
+      "name": "metadata-split-64",
+      "entrypoints": [
+        "metadata_ids",
+        "metadata_ages"
+      ],
+      "workgroup": [
+        64,
+        1,
+        1
+      ]
+    }
+  ],
+  "quality": {
+    "profile": "metadata-exact-v1",
+    "minimum_samples": 30,
+    "minimum_warmup": 3,
+    "maximum_allocated_bytes": 134217728,
+    "maximum_gpu_ms": 16.67,
+    "maximum_transfer_inclusive_ms": 100.0,
+    "equality": "exact full output ID/age bytes against scalar oracle after resident and transfer-inclusive sample batches; repeated static fixture, no fresh-frame claim"
+  },
+  "approved": null,
+  "pending": "Compatible 2D 8x8/16x8/16x16/32x4 candidates will be benchmarked in Task 4 preprocessing; 1D metadata has no 2D variants. Whole-pipeline frozen held-out quality remains pending."
+}

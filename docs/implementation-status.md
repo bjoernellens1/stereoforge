@@ -185,3 +185,20 @@ standalone RHI CTest passes **5/5** (2.12 s). The final exclusive paired residen
 benchmark shows lower Daxa CPU enqueue cost but no consistent median total-latency
 advantage across strict and preview modes. Incremental migration is supported
 within this POC boundary; full production cutover remains open.
+
+Bounded Task 3/capture follow-up (2026-10-27): real fused/split metadata variants
+preserve exact 64-bit IDs/ages with complete fail-closed execution/cache identities.
+A controlled ABBA readback experiment localizes a large host-copy cost: first
+coherent round-trip case medians 69.432–72.420 ms versus cached coherent 1.719–1.775 ms,
+with compute GPU timing essentially unchanged. No fused-kernel winner is adopted;
+compatible 2D preprocessing candidates remain pending. The independent native
+capture slice passes CPU ownership/replay/corruption tests and a 600-unique-frame
+physical 720p-per-eye screening at approximately 59.9 interval FPS with zero reported
+drops/gaps. Its delivery ages start after snapshot/copy, camera/host clock mapping
+and pose are unvalidated, and latest queued-at-stop telemetry has CPU evidence
+only. These slices do not complete Task 3/Task 4, GPU stereo or full 720p/60-Hz
+qualification. See [kernel-variant-evidence.md](kernel-variant-evidence.md) and
+[native-capture-evidence.md](native-capture-evidence.md). Renewed core and
+synchronization comparisons pass both readback policies with exact metadata and
+zero validation diagnostics. Final root regression passes **433 Python tests**
+without skips; fresh joint-capture and Daxa CPU CTests each pass **2/2**.
