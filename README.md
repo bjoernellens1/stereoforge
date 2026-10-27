@@ -186,6 +186,30 @@ These checks require the Khronos validation layer. For the existing local
 extraction, set `VK_LAYER_PATH` and `LD_LIBRARY_PATH` as documented in the
 [validation evidence](docs/vulkan-validation-evidence.md) before running them.
 
+## Experimental resident Daxa stereo
+
+The optional native stereo benchmark retains its inputs and outputs on the GPU.
+At 1280×720/D128/four paths, packed penalties and specialized arithmetic reduce
+one-reference GPU time from about 43.5 ms to 15.3 ms while preserving the frozen
+RHI output bytes. Requested retained buffers fall from 984 MB to 159 MB.
+See [stereo evidence](docs/daxa-stereo-evidence.md) for comparisons and limits.
+Dual-reference consistency, live preprocessing and complete 60 Hz operation
+remain open, as does the scalar compound floating-point reference gate.
+
+```bash
+cmake --preset daxa -DSTEREOFORGE_DAXA_STEREO=ON
+cmake --build --preset daxa
+build/daxa/daxa_stereo_benchmark --variant packed-specialized \
+  --width 1280 --height 720 --disparities 128 --paths 4 --wave-size 32 \
+  --frames 30 --warmup 3 --check-integer-reference \
+  --output artifacts/stereo-resident-new.json
+```
+
+Use a new output filename. Diagnostic integer checks and any requested dumps
+run after timing. `--check-integer-reference` verifies integer stages and packed
+words; it does not certify the unresolved scalar compound-float gate. The
+full GPU stereo CTests retain that stricter gate and are currently unqualified.
+
 ## Standalone C++ runtime
 
 Build without Python, SlangPy or SGL using `cmake --preset standalone` and

@@ -7,6 +7,7 @@ set(STEREOFORGE_RHI_PROVIDER "standalone" CACHE STRING "RHI provider: standalone
 set_property(CACHE STEREOFORGE_RHI_PROVIDER PROPERTY STRINGS standalone slangpy)
 option(STEREOFORGE_CAPTURE "Build ZED Open Capture adapter" OFF)
 option(STEREOFORGE_NATIVE_CAPTURE "Build independent C++ capture" OFF)
+option(STEREOFORGE_DAXA_STEREO "Build native Daxa stereo experiments" OFF)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -178,4 +179,8 @@ endif()
 
 if(STEREOFORGE_NATIVE_CAPTURE)
   include(cmake/NativeCapture.cmake)
+endif()
+
+if(STEREOFORGE_DAXA_STEREO)
+  include(cmake/DaxaStereo.cmake)
 endif()
