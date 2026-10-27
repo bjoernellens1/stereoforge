@@ -20,6 +20,9 @@ context; later Vulkan-only and research-first decisions supersede it.
 - Shared Slang strict virtual projection and temporal reprojection/fusion, exposed
   through Python Vulkan adapters and native stage APIs. Conservative ancestry,
   occlusion, expiry, calibration/clock-reset and consumer-history ownership checks.
+- Shared Vulkan per-eye visibility, confidence seams, compatible blending,
+  robust exposure matching and marked preview, exposed through Python and native
+  adapters. Optional stage timestamps and packed Python readback; see fusion-evidence.md.
 - Adaptive bounds and four controlled ablations, input byte identities, frozen
   configuration, truth-support completeness and common-valid metric accuracy.
 - Native C++ bounded persistent resource slots, asynchronous completion and GPU
@@ -51,21 +54,29 @@ context; later Vulkan-only and research-first decisions supersede it.
 
 ## Gates still open
 
-- IMU live access/synchronization and calibrated motion: device permissions blocked
-  acquisition during initial tests. No permissions were changed by the agent.
+- IMU strict image-interval association and calibrated motion: raw delivery and
+  exact recording/replay now pass after the user corrected HID access, but a fresh
+  48-frame run found 38 late-batched samples among 319 ordered observations.
+  Its strict association gate remains failed. Physical synchronization accuracy,
+  camera-IMU calibration and late-arrival handling remain open; see imu-evidence.md.
+  No permissions were changed by the agent.
 - Physical metric-depth/surface accuracy, held-out quality-loss limits and adoption
   decisions: no independent physical ground truth was supplied.
 - Real-time qualification and fully GPU-resident end-to-end native ZED-to-mapping
   integration: research paths have CPU rectification, uploads, metadata gathering
   and readbacks; native stage APIs are building blocks, not that completed demo.
-- GPU exposure compensation/seam blending/preview: available in the CPU oracle;
-  Vulkan/native renderers deliberately expose strict nearest-surface capability.
+- Virtual-view observation identity/age export through Python remains open;
+  source-depth identities are preserved, but FusedView needs corresponding planes.
 - Pose estimation and adaptive candidate compaction: motion is supplied explicitly;
   dense SGM aggregation remains even when matching bounds narrow.
 - Portable neural model conversion/operator qualification, ncnn/IREE adapter,
   ROS2, other GPU vendors, map feedback and binary redistribution packaging are
   optional later gates, not asserted as implemented or qualified.
-- Full driver validation: Khronos validation layer was absent on the local host.
+- Full pipeline driver validation remains open. Native stereo now passes bounded
+  core-validation runs using a locally extracted signed Khronos layer. Native
+  compositor/temporal contract fixtures also pass core validation; synchronization
+  validation and the integrated live chain require further checks.
+  See vulkan-validation-evidence.md.
 
 Detailed commands and measured limits are in README, hardware-evidence.md and
 performance-evidence.md. Local raw recordings are ignored artifacts; numeric
@@ -85,3 +96,9 @@ Source archive includes native CMake sources and shared shaders. These counts
 describe the initial implementation; camera-control follow-up verification is
 recorded in camera-controls-evidence.md. Source changes are integrated into the
 original checkout and pushed to the configured GitHub remote.
+
+Follow-up verification after shared Vulkan RGB fusion: **221 Python tests pass**,
+native Vulkan CTest 4/4 and CPU CTest 1/1. Wheel and source archive build. Positive
+native core validation passes for stereo and geometry/temporal contract fixtures.
+The full requirements audit in requirements-audit.md remains incomplete; these
+checks do not qualify the production chain or physical depth accuracy.

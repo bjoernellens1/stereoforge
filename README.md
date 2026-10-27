@@ -110,10 +110,12 @@ Perspective virtual depth is axial Z; cylindrical virtual depth is ray range.
 Stereo disparity always remains in its source rectified geometry. RGB validity,
 depth validity, approximation, confidence, source, and provenance are separate.
 
-The CPU view oracle includes exposure matching, confidence seams, compatible
-surface blending, and marked infinity-plane preview. The Vulkan renderer currently
-provides strict deterministic nearest-surface projection. Select capabilities
-explicitly; GPU preview is rejected. No view synthesizer invents metric depth.
+The CPU oracle and shared Vulkan compositor provide exposure matching, confidence
+seams, compatible-surface blending, and marked infinity-plane preview. Vulkan
+stereo defaults to Vulkan fusion and shares its device; explicit CPU stereo
+defaults to the CPU reference. Ordinary stereo outputs create no view renderer.
+No view synthesizer invents metric depth. See the
+[fusion evidence and resource contract](docs/fusion-evidence.md).
 
 Configure the virtual camera with `--virtual-camera configs/virtual-camera.json`.
 That example explicitly uses the left-camera origin. Omitting the option derives
@@ -151,8 +153,9 @@ SGM work: aggregation remains dense over the configured disparity range.
   calibrated uncertainty, and other GPU vendors remain gated extensions.
 - No physical metric ground truth was available. Camera rectification screening
   and numerical parity do not establish metric surface accuracy.
-- Khronos validation must be installed for a requested driver-validation run;
-  native `--validation` fails when it is unavailable.
+- Native `--validation` fails when Khronos validation is unavailable. A signed
+  layer extracted locally enabled bounded positive core-validation checks; see
+  [validation evidence](docs/vulkan-validation-evidence.md).
 
 New code is Apache-2.0. The [license evaluation](docs/license-evaluation.md) clears
 public source publication; bundled binaries require a separate review. See

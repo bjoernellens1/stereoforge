@@ -1,5 +1,11 @@
 # Local performance evidence
 
+This section records the initial implementation at `1f2c33a`; its nearest-only
+renderer and separate renderer device are historical. The current compositor,
+shared Python device and packed readback are measured separately in
+[fusion-evidence.md](fusion-evidence.md). The original measurements are retained
+below rather than attributed to changed code.
+
 Measured 2026-10-27 on **AMD Radeon 8060S Graphics (RADV STRIX_HALO)** using the explicit Vulkan backend. This is a synthetic research-adapter microbenchmark, not camera throughput, metric-depth qualification, a quality comparison, or production latency qualification.
 
 Reproduce with:

@@ -33,7 +33,7 @@ def test_identity_strict_geometry(renderer):
     np.testing.assert_allclose(actual.depth_m,expected.depth_m,atol=1e-6,equal_nan=True)
     np.testing.assert_array_equal(actual.rgb,frame.left)
     assert not actual.approximate.any()
-    assert (actual.source[actual.depth_valid]==1).all()
+    np.testing.assert_array_equal(actual.source,expected.source)
 
 
 def test_occlusion_and_cylindrical_range(renderer):

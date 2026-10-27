@@ -35,10 +35,17 @@ stereo directions, without wide RGB synthesis. Evidence:
 `artifacts/qualification-initial/camera-qualification.json` retains the failed
 rectification screen and the successful capture/replay/CPU smoke separately.
 
-ZED IMU acquisition is blocked: `/dev/hidraw2` identifies `2b03:f781` with serial
-`26041639` and is root-owned mode 0600. The adapter reports sensor unavailability
-explicitly. The sensor thread and synchronization path build, but live IMU and
-calibrated camera motion remain unverified. No device permissions were changed.
+IMU access was blocked during the initial tests below. After the user corrected
+permissions, `/dev/hidraw2` (`2b03:f781`, serial `26041639`) became readable by
+`bjoern`; the agent made no permission changes. A fresh 48-frame recording
+retained 319 unique ordered IMU samples at 399.4435 Hz, with 48 SDK sync marks and
+zero native queue drops. RGB, decoded IMU field bits, frame identities/timestamps,
+controls, and calibration replayed exactly. Strict image-interval association
+failed: 38 samples in 33 frames were timestamped at/before the previous delivered
+image; maximum observed batching lag was 3.614846 ms. The original aggregate
+report remains failed. Raw delivery and recording/replay are verified; physical
+synchronization and calibrated motion remain open. See [IMU evidence](imu-evidence.md)
+for hashes, commands, complete statistics, and separate gates.
 
 Reproduce the bounded screen with:
 
@@ -67,7 +74,7 @@ including both directions used 93.2/43.5/53.3 ms; view synthesis including host
 preparation used 152.2/116.2/113.4 ms. The JSON retains individual GPU timestamp
 stages for the last directional stereo pass, submission, waits, and readbacks.
 Those last-pass GPU timings are not whole-pipeline timings. These three frames
-establish neither sustained throughput nor metric accuracy. Live IMU access was
+establish neither sustained throughput nor metric accuracy. At that earlier run, live IMU access was
 still unavailable. Capture and GPU resources were closed after the run.
 
 

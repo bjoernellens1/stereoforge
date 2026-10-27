@@ -18,7 +18,8 @@ struct VirtualView {
     Projection projection=Projection::Perspective;
     float hfov_radians=1.57079632679f;
     Pose4 source_to_virtual_left=identity_pose(), source_to_virtual_right=identity_pose();
-    ViewMode mode=ViewMode::Strict; // Native implementation rejects Preview.
+    ViewMode mode=ViewMode::Strict;
+    bool exposure_match=true;
 };
 struct GeometryConfig { std::uint32_t source_width,source_height,target_width,target_height; };
 // Arrays concatenate left then right, each source_width*source_height elements.
@@ -30,6 +31,10 @@ struct GeometrySources {
     std::span<const std::int64_t> source_ids, age_ns;
     std::int64_t timestamp_ns=0;
     std::string calibration_id;
+    // Optional calibration-only infinity map: two target-sized layers, left
+    // then right. Each element is a concatenated source index in that eye or
+    // 0xffffffff for unsupported directions. Required in Preview mode.
+    std::span<const std::uint32_t> preview_indices;
 };
 // Rectified pinhole geometry; all arrays have source_width*source_height elements.
 struct TemporalInput {
@@ -46,7 +51,9 @@ struct GeometryMetadata;
 struct GeometryFrame {
     BufferView depth,confidence,disparity,validity,provenance,rgb,source,owner,choose_previous;
     // Original metadata remains available on GPU; owner/choose_previous identify
-    // how to gather it. No claim of direct final-id/age GPU materialization.
+    // how to gather it. For Project, metric validity must gate gathering: preview
+    // owner identifies RGB only and never certifies metric identity/age.
+    // No claim of direct final-id/age GPU materialization.
     BufferView current_ids,current_ages,previous_ids,previous_ages;
     CompletionToken completion;
     std::uint32_t width=0,height=0;
@@ -55,14 +62,16 @@ struct GeometryFrame {
     std::int64_t timestamp_ns=0,observation_elapsed_ns=0;
     std::string calibration_id;
     std::shared_ptr<const GeometryMetadata> metadata;
+    BufferView rgb_validity,approximate; // Project only; metric validity remains separate.
 };
 struct GeometryReadback {
     std::vector<float> depth,confidence,disparity;
     std::vector<std::uint32_t> validity,provenance,rgb,source,owner,choose_previous;
     std::vector<std::int64_t> source_ids,age_ns;
+    std::vector<std::uint32_t> rgb_validity,approximate;
 };
-// Strict nearest-surface projection and temporal kernels; no exposure matching,
-// seam blending, or approximate RGB synthesis. Independent device, host upload;
+// Depth-compatible GPU blending/exposure and marked calibration-map preview,
+// plus temporal kernels. Independent device, host upload;
 // two leased persistent slots. Submit from one thread; explicit readback blocks.
 class NativeGeometry {
     struct Impl;

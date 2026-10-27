@@ -24,9 +24,10 @@ class PipelineConfig:
     search_radius: int = 4
     output: str = 'rectified_rgb'
     preview: bool = False
-    fusion_backend: str = 'cpu_reference'
+    fusion_backend: str | None = None
 
     def __post_init__(self):
+        if self.fusion_backend is None:self.fusion_backend='vulkan' if self.backend=='vulkan' else 'cpu_reference'
         if self.backend not in ('vulkan','cpu_sgbm','cpu_census') or self.paths not in (4,8) or not 2<=self.max_disparity<=256 or not 0<=self.p1<=self.p2<=10000:
             raise ValueError('invalid stereo configuration')
         if self.output not in ('left_rgb','right_rgb','rectified_rgb','wide_rgb','wide_rgbd','stabilized_wide_rgb'):
@@ -35,7 +36,6 @@ class PipelineConfig:
             raise ValueError('invalid processing configuration')
         if self.adaptive and self.backend=='cpu_sgbm': raise ValueError('OpenCV SGBM does not support adaptive bounds')
         if self.preview and self.output=='wide_rgbd': raise ValueError('wide_rgbd requires strict geometry')
-        if self.preview and self.fusion_backend=='vulkan': raise ValueError('GPU preview unavailable; select cpu_reference explicitly')
 
 @dataclass
 class PipelineResult:
@@ -56,9 +56,9 @@ class Pipeline:
         if self.gpu and (self.config.temporal or self.config.adaptive):
             from .gpu_temporal import VulkanTemporal
             self.temporal_gpu=VulkanTemporal(self.gpu.device)
-        if self.config.fusion_backend=='vulkan':
+        if self.config.fusion_backend=='vulkan' and self.config.output in ('wide_rgb','wide_rgbd','stabilized_wide_rgb'):
             from .gpu_geometry import VulkanViewSynthesizer
-            self.view_renderer=VulkanViewSynthesizer()
+            self.view_renderer=VulkanViewSynthesizer(device=self.gpu.device if self.gpu else None)
 
     def _estimate(self,left,right,bounds=None):
         cfg=self.config
@@ -137,7 +137,7 @@ class Pipeline:
                 virtual=stabilize_virtual_camera(virtual,rig_to_world.transform,rig_to_world.timestamp_ns)
             raw_depth=self.rectifier.depth_to_raw(depth)
             if self.view_renderer:
-                view=self.view_renderer.render(frame,raw_depth,virtual)
+                view=self.view_renderer.render(frame,raw_depth,virtual,mode='preview' if cfg.preview else 'strict')
             else:
                 view=synthesize(frame,raw_depth,virtual,mode='preview' if cfg.preview else 'strict')
             rgb=view.rgb

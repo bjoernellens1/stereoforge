@@ -45,7 +45,7 @@ int main(int argc, char**) {
         view.mode=ViewMode::Preview;
         bool rejected=false;
         try { auto ignored=engine.project(sources,view); } catch(const std::invalid_argument&) { rejected=true; }
-        require(rejected,"unsupported preview accepted");
+        require(rejected,"preview accepted missing calibration map");
         view.mode=ViewMode::Strict;
         // Two source pixels collide after a known translation. The nearer wins.
         view.source_to_virtual_left[3]=1;
@@ -60,6 +60,52 @@ int main(int argc, char**) {
         auto cylindrical=engine.project(sources,view);
         actual=engine.readback(cylindrical);
         close(actual.depth[2],std::sqrt(32.f));require(cylindrical.depth_convention==DepthConvention::RayRange,"cylindrical convention");cylindrical={};
+        // Shared compositor: compatible surfaces blend, with optional GPU-only
+        // exposure estimation; incompatible surfaces retain the nearer owner.
+        {
+            const auto pack=[](unsigned r,unsigned g,unsigned b){return r|(g<<8)|(b<<16);};
+            const auto channel=[](std::uint32_t value,unsigned c){return int((value>>(8*c))&255);};
+            std::vector<float> full_depth(6,2.f);
+            std::vector<std::uint32_t> full_rgb(6,pack(180,120,60));
+            for(std::size_t i=3;i<6;++i)full_rgb[i]=pack(100,60,30);
+            auto full=sources;full.depth=full_depth;full.rgb=full_rgb;
+            VirtualView composite;composite.intrinsics={1,1,0,0};composite.exposure_match=false;
+            auto blended=engine.project(full,composite);actual=engine.readback(blended);
+            require(actual.source==std::vector<std::uint32_t>({3,3,3}),"compatible surfaces were not blended");
+            require(actual.rgb_validity==std::vector<std::uint32_t>({1,1,1})&&actual.approximate==std::vector<std::uint32_t>({0,0,0}),"strict RGB masks");
+            require(actual.rgb[0]==pack(140,90,45),"compatible blend literal RGB mismatch");
+            require(actual.owner[0]==0&&actual.source_ids[0]==ids[0],"blended metric owner changed");blended={};
+            composite.exposure_match=true;
+            auto matched=engine.project(full,composite);actual=engine.readback(matched);
+            const int expected[3]={180,120,60};
+            for(unsigned c=0;c<3;++c)require(std::abs(channel(actual.rgb[0],c)-expected[c])<=1,"exposure histogram channel mismatch");
+            require(actual.source[0]==3,"exposure matched attribution");matched={};
+            composite.exposure_match=false;full_depth[3]=.5f;full_rgb[3]=pack(200,30,180);
+            auto foreground=engine.project(full,composite);actual=engine.readback(foreground);
+            close(actual.depth[0],.5f);
+            require(actual.owner[0]==3&&actual.source[0]==2&&actual.rgb[0]==pack(200,30,180),"foreground contaminated by incompatible background");foreground={};
+            std::fill(full_depth.begin(),full_depth.end(),NAN);
+            std::vector<std::uint32_t> mapping{0,1,0xffffffff,3,4,5};
+            full.preview_indices=mapping;composite.mode=ViewMode::Preview;
+            auto preview=engine.project(full,composite);actual=engine.readback(preview);
+            require(actual.rgb_validity==std::vector<std::uint32_t>({1,1,1})&&actual.approximate==std::vector<std::uint32_t>({1,1,1}),"preview RGB masks");
+            require(actual.validity==std::vector<std::uint32_t>({0,0,0})&&actual.source==std::vector<std::uint32_t>({1,1,2}),"preview created metric observations");
+            require(actual.owner[2]==5&&actual.source_ids==std::vector<std::int64_t>({-1,-1,-1})&&actual.age_ns==std::vector<std::int64_t>({0,0,0}),"preview RGB owner leaked metric identity");
+            for(float value:actual.depth)require(std::isnan(value),"preview hallucinated metric depth");preview={};
+            mapping={0,0xffffffff,0xffffffff,0xffffffff,0xffffffff,0xffffffff};
+            auto holes=engine.project(full,composite);actual=engine.readback(holes);
+            require(actual.rgb_validity==std::vector<std::uint32_t>({1,0,0})&&actual.approximate==std::vector<std::uint32_t>({1,0,0}),"unsupported preview holes filled");holes={};
+            auto invalid=full;invalid.preview_indices=std::span<const std::uint32_t>(mapping).first(5);
+            rejected=false;try{auto ignored=engine.project(invalid,composite);}catch(const std::invalid_argument&){rejected=true;}
+            require(rejected,"preview map dimensions accepted");
+            mapping[1]=6;rejected=false;try{auto ignored=engine.project(full,composite);}catch(const std::invalid_argument&){rejected=true;}
+            require(rejected,"preview out-of-range source index accepted");
+            mapping[1]=3;rejected=false;try{auto ignored=engine.project(full,composite);}catch(const std::invalid_argument&){rejected=true;}
+            require(rejected,"preview wrong-eye index attribution accepted");
+            full.preview_indices={};composite.mode=ViewMode::Strict;
+            auto strict_holes=engine.project(full,composite);actual=engine.readback(strict_holes);
+            require(actual.rgb_validity==std::vector<std::uint32_t>({0,0,0})&&actual.approximate==std::vector<std::uint32_t>({0,0,0}),"strict mode retained preview state");
+        }
         // Temporal translation x=1 maps source zero to target one and hides z=4.
         std::vector<float> z{1,4,NAN}, conf(3,.8f), disparity(3,3);
         std::vector<std::uint32_t> valid{1,1,0}, prov(3,1);

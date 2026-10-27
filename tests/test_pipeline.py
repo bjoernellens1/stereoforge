@@ -45,3 +45,18 @@ def test_stabilization_rejects_stale_or_unbound_pose():
         p.process(pair(),rig_to_world=TimedPose(np.eye(4),0,'host_monotonic'))
     with pytest.raises(ValueError,match='timestamped'):
         p.process(pair(),rig_to_world=np.eye(4))
+
+
+def test_fusion_defaults_follow_explicit_stereo_backend():
+    assert PipelineConfig().fusion_backend=='vulkan'
+    assert PipelineConfig(backend='cpu_census').fusion_backend=='cpu_reference'
+    assert PipelineConfig(backend='cpu_sgbm').fusion_backend=='cpu_reference'
+    assert PipelineConfig(backend='vulkan',fusion_backend='cpu_reference').fusion_backend=='cpu_reference'
+
+
+@pytest.mark.gpu
+def test_vulkan_fusion_shares_stereo_device_only_for_wide_outputs():
+    ordinary=Pipeline(PipelineConfig(max_disparity=8,output='rectified_rgb'))
+    assert ordinary.view_renderer is None
+    wide=Pipeline(PipelineConfig(max_disparity=8,output='wide_rgb'))
+    assert wide.view_renderer.device is wide.gpu.device
