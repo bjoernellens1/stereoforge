@@ -76,8 +76,11 @@ class StereoFrame:
     frame_id: int
     clock_domain: str = "host_monotonic"
     sensor_samples: list[dict] = field(default_factory=list)
+    camera_controls: dict = field(default_factory=dict)
 
     def __post_init__(self):
+        if not isinstance(self.camera_controls,dict):
+            raise ValueError("camera controls must be a JSON object")
         for image,c in [(self.left,self.calibration.left),(self.right,self.calibration.right)]:
             if image.shape != (c.height,c.width,3) or image.dtype != np.uint8:
                 raise ValueError("RGB image shape/dtype does not match calibration")

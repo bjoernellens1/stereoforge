@@ -11,6 +11,7 @@ import sysconfig
 import cv2
 import numpy as np
 from .types import StereoFrame
+from .controls import CameraControl
 from .calibration import download_calibration, parse_zed_conf
 
 
@@ -47,7 +48,7 @@ def discover_cameras():
     return devices
 
 
-def yuyv_to_stereo(yuyv,calibration,timestamp_ns,frame_id,sensor_samples=None):
+def yuyv_to_stereo(yuyv,calibration,timestamp_ns,frame_id,sensor_samples=None,camera_controls=None):
     """Convert copied packed side-by-side YUYV, preserving unrectified post-ISP lens canvases."""
     left,right=calibration.left,calibration.right
     if (left.width,left.height)!=(right.width,right.height):
@@ -58,12 +59,13 @@ def yuyv_to_stereo(yuyv,calibration,timestamp_ns,frame_id,sensor_samples=None):
         raise ValueError('YUYV lens width must be even')
     rgb=cv2.cvtColor(np.ascontiguousarray(yuyv),cv2.COLOR_YUV2RGB_YUY2)
     return StereoFrame(rgb[:,:left.width].copy(),rgb[:,left.width:].copy(),calibration,
-                       int(timestamp_ns),int(frame_id),'zed_open_capture',list(sensor_samples or []))
+                       int(timestamp_ns),int(frame_id),'zed_open_capture',list(sensor_samples or []),camera_controls=camera_controls or {})
 
 
 class ZedCamera:
     def __init__(self,calibration=None,width=1280,height=720,fps=60,device_id=-1,cache_dir=None):
         self._native=None
+        self._camera_control=None
         native=_native_module().ZedCapture(width=width,height=height,fps=fps,device_id=device_id)
         try:
             self.serial=str(native.serial)
@@ -77,9 +79,24 @@ class ZedCamera:
                 raise ValueError('calibration dimensions do not match capture mode')
             self.calibration=calibration
             self._native=native
+            if hasattr(native,'get_controls') and hasattr(native,'set_controls'):
+                self._camera_control=CameraControl(native,width,height)
+                self._camera_control.read()
         except BaseException:
             native.close()
             raise
+
+    @property
+    def camera_control(self):
+        if self._native is None:raise RuntimeError('camera is closed')
+        if self._camera_control is None:
+            raise RuntimeError('native camera controls unavailable; rebuild the capture extension')
+        return self._camera_control
+
+    @property
+    def control_snapshot(self):
+        if self._native is None:raise RuntimeError('camera is closed')
+        return self._camera_control.snapshot if self._camera_control else {}
 
     @property
     def sensors_available(self):
@@ -96,12 +113,16 @@ class ZedCamera:
     def read(self,timeout_ms=1000):
         if self._native is None:
             raise RuntimeError('camera is closed')
+        # Snapshot before acquiring the image: never attach a later register read
+        # to an older observation. This still does not identify exposure-time state.
+        controls=self.control_snapshot
         result=self._native.read(timeout_ms)
-        return yuyv_to_stereo(result['yuyv'],self.calibration,result['timestamp_ns'],result['frame_id'],result['sensor_samples'])
+        return yuyv_to_stereo(result['yuyv'],self.calibration,result['timestamp_ns'],result['frame_id'],result['sensor_samples'],camera_controls=controls)
 
     def close(self):
         native=self._native
         self._native=None
+        self._camera_control=None
         if native is not None:
             native.close()
 

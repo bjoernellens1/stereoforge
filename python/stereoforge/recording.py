@@ -26,6 +26,8 @@ def _order(entries):
             raise ValueError('missing clock domain')
         if not isinstance(entry['sensor_samples'], list):
             raise ValueError('invalid sensor samples')
+        if not isinstance(entry.get('camera_controls', {}), dict):
+            raise ValueError('invalid camera controls')
         last_id, last_time = fid, ts
 
 
@@ -60,11 +62,13 @@ class Recorder:
             raise ValueError('calibration mismatch')
         # Revalidate mutable frame fields before accepting bytes.
         StereoFrame(frame.left, frame.right, frame.calibration, frame.timestamp_ns,
-                    frame.frame_id, frame.clock_domain, frame.sensor_samples)
+                    frame.frame_id, frame.clock_domain, frame.sensor_samples,
+                    camera_controls=frame.camera_controls)
         entry = dict(path=f'frame_{len(self.manifest["frames"]):08d}.npz',
                      frame_id=frame.frame_id, timestamp_ns=frame.timestamp_ns,
                      clock_domain=frame.clock_domain,
                      sensor_samples=json.loads(_json(frame.sensor_samples)),
+                     camera_controls=json.loads(_json(frame.camera_controls)),
                      calibration_id=self.calibration.identity)
         _order(self.manifest['frames'] + [entry])
         target = self.path/entry['path']
@@ -135,6 +139,7 @@ class Replay:
                         raise ValueError('invalid frame arrays')
                     yield StereoFrame(arrays['left'], arrays['right'], self.calibration,
                                       entry['timestamp_ns'], entry['frame_id'],
-                                      entry['clock_domain'], entry['sensor_samples'])
+                                      entry['clock_domain'], entry['sensor_samples'],
+                                      camera_controls=json.loads(_json(entry.get('camera_controls', {}))))
             except (OSError, KeyError, EOFError, TypeError, zipfile.BadZipFile) as exc:
                 raise ValueError('missing or damaged frame') from exc

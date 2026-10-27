@@ -40,14 +40,58 @@ rectifies RGB and converts it to grayscale on the CPU before Vulkan stereo.
 This is not GPU rectification or a zero-copy capture path. Image controls applied
 before USB delivery are already reflected in the recorded pixels.
 
-Priorities below remain **unimplemented**, with separate correctness and
-transfer-inclusive performance gates:
+## Camera controls and readback
+
+`stereoforge controls --output controls-readback.json` opens the camera and writes
+an explicit control-register snapshot. Opening upstream capture resets automatic
+defaults; StereoForge applies no additional profile unless requested. Both
+`record` and `live` accept `--camera-controls request.json`.
+
+A profile request uses `{"profile":"automatic"}` or a manual profile such as:
+
+```json
+{"profile":"stereo_optimized","exposure":25,"gain":30,"white_balance":4500,"sharpness":0}
+```
+
+These numbers are illustrative and unqualified. `stereo_optimized` and
+`motion_optimized` both require explicit normalized exposure/gain (0–100) and
+white balance (2800–6500); they disable automatic exposure/gain and white balance,
+apply matched left/right values, and default sharpness to zero. Neither label
+promises exposure duration, tuned image quality or motion performance. `automatic`
+enables the two automatic flags and leaves other ISP settings unchanged.
+
+Direct native-setting requests use `exposure_left`, `exposure_right`, `gain_left`,
+`gain_right`, `roi_left` and `roi_right`, alongside supported shared ISP controls.
+Brightness, contrast, saturation and sharpness accept integers 0–8; hue 0–11;
+gamma 1–9. Exposure/gain accept 0–100 and white balance 2800–6500.
+An ROI is `[x,y,width,height]` inside the per-eye source canvas with area greater
+than 100 pixels; `null` resets that eye to its full frame. This interface is
+verified against pinned upstream APIs. Baseline control readback/restoration
+passed a [bounded camera check](camera-controls-evidence.md); image effects,
+different ROI settings and ROI reset remain unqualified.
+
+Reports separate `requested`, `readback`, `matches`, `read_errors` and
+`write_errors`; requested values never stand in for measured readback. Snapshots
+are sampled on open, writes and explicit reads, then cached without per-frame USB
+queries. Their host-monotonic timestamp is not exposure-synchronous metadata.
+Frames carry the cached snapshot through recording, replay and rectification.
+Native requests are fully validated before USB writes, but an I/O failure can
+leave a partially applied request. The CLI stops when readback cannot verify a
+request. Automatic-mode boolean getters cannot distinguish upstream I/O failure;
+their readbacks are API observations, not physical proof. LED writes are explicit
+only: safe LED readback is unavailable because the upstream getter changes GPIO
+direction. Reports leave `led` null and explain this in `readback_limitations`;
+a requested LED write therefore cannot be reported as verified.
+
+## Remaining priorities
+
+These remain **unimplemented**, with separate correctness and transfer-inclusive
+performance gates:
 
 - Preserve packed YUYV, match directly from luminance, and create RGB lazily while
   checking image quality against the existing conversion path.
-- Expose capture controls and record exposure, gain and white balance; validate
-  left/right consistency rather than assume matching settings.
+- Establish exposure-synchronous metadata and validate left/right image effects;
+  a quality-aware automatic-exposure controller is future work.
 - Move rectification to Vulkan and add a persistent upload ring to reduce copies.
 
-These priorities do not establish control ranges, sensor rates or measured depth
-accuracy.
+These priorities do not establish sensor rates or measured depth accuracy.

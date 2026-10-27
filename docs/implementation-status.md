@@ -10,6 +10,8 @@ context; later Vulkan-only and research-first decisions supersede it.
   timestamped-pose contracts; explicit CPU references and Vulkan selection.
 - Native ZED Open Capture binding, lossless checksum-bound recording/replay,
   factory calibration download/cache, rectification and depth-to-raw remapping.
+- Validated per-eye camera controls, explicit automatic/manual profiles, cached
+  host readbacks and control metadata preserved through recordings and replay.
 - Shared Slang Census/four- and eight-path SGM, disparity confidence/subpixel,
   Python left/right consistency and metric depth, scalar-stage regression oracles.
 - CPU strict/preview RGB fusion, separate RGB/depth masks, source/approximation,
@@ -30,7 +32,9 @@ context; later Vulkan-only and research-first decisions supersede it.
 - Ruling: use the empty requested repository as the project root; implement in
   an isolated Git worktree because parent AGENTS requires isolated worker changes.
   Native app worktree creation could not recognize the newly initialized repo;
-  Git worktree fallback is used. No remote is configured or publication attempted.
+  Git worktree fallback is used. Source publication followed the source-license
+  evaluation; the GitHub repository is now public. Binary redistribution remains
+  a separate gate in license-evaluation.md.
 - TDD modules recorded initial missing implementation/failing behavioral tests,
   then passing verification. Integration review found returned-history aliasing,
   unbound pose timestamps and unmatched evaluation masks; regression tests precede
@@ -77,7 +81,7 @@ native GPU geometry/temporal, native GPU stereo/calibrated metric depth).
 The missing-layer test verifies honest rejection; it is not driver validation.
 
 Built wheel and source archive; installed-wheel Vulkan wide RGB-D smoke passed.
-Source archive includes native CMake sources and shared shaders. No remote exists
-and no code was pushed. Initial source and evidence remain in the implementation
-worktree. Local fast-forward integration into the initially empty project makes
-the requested implementation available in the user's original checkout.
+Source archive includes native CMake sources and shared shaders. These counts
+describe the initial implementation; camera-control follow-up verification is
+recorded in camera-controls-evidence.md. Source changes are integrated into the
+original checkout and pushed to the configured GitHub remote.

@@ -89,3 +89,14 @@ def test_fixed_support_and_common_accuracy(monkeypatch):
         assert mode['ground_truth_support_count']==mode['common_metric_samples']==0
         assert mode['completeness_on_ground_truth_support'] is None
         assert mode['common_depth_mae_m'] is mode['common_depth_rmse_m'] is None
+
+
+def test_identity_binds_camera_controls():
+    from stereoforge.benchmark import _identity
+    inputs=frames()[:1]
+    before=_identity(inputs)
+    inputs[0].camera_controls={'requested':{'exposure':100},'readback':{'exposure':101}}
+    assert _identity(inputs)!=before
+    same=_identity(inputs)
+    inputs[0].camera_controls['readback']['exposure']=102
+    assert _identity(inputs)!=same

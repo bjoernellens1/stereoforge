@@ -19,7 +19,8 @@ def _identity(frames):
     for frame in frames:
         metadata=json.dumps(dict(calibration=frame.calibration.to_dict(),
             timestamp_ns=frame.timestamp_ns,frame_id=frame.frame_id,
-            clock_domain=frame.clock_domain,sensor_samples=frame.sensor_samples),
+            clock_domain=frame.clock_domain,sensor_samples=frame.sensor_samples,
+            camera_controls=frame.camera_controls),
             sort_keys=True,separators=(',',':'),allow_nan=False).encode()
         digest.update(len(metadata).to_bytes(8,'big')); digest.update(metadata)
         for image in (frame.left,frame.right):

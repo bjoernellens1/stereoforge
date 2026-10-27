@@ -73,6 +73,31 @@ this ZED2 (`2b03:f781`), immediate access can be granted with
 `sudo setfacl -m "u:$(id -un):rw" /dev/hidraw2` after verifying its current identity.
 An example persistent rule is in [camera notes](docs/camera-calibration.md).
 
+## Camera controls
+
+Inspect host-sampled control readback with
+`uv run stereoforge controls --output artifacts/controls-readback.json`.
+Opening upstream capture resets automatic defaults; no StereoForge profile is
+applied unless requested. Both `record` and `live` accept `--camera-controls`:
+
+```bash
+# Illustrative normalized values, not a qualified exposure/quality preset.
+cat > controls.json <<'EOF'
+{"profile":"stereo_optimized","exposure":25,"gain":30,"white_balance":4500}
+EOF
+uv run stereoforge record --frames 30 --camera-controls controls.json \
+  --output artifacts/manual-recording
+```
+
+`motion_optimized` requires the same explicit exposure/gain/white-balance fields;
+`automatic` enables automatic exposure/gain and white balance. Direct per-eye
+settings and ROIs are supported by the pinned API; baseline readback/restoration
+passed the [bounded camera check](docs/camera-controls-evidence.md). Image effects
+and tuning remain unqualified. Recorded snapshots preserve requested values, readback,
+matches and errors separately. They are cached host observations, not per-frame
+exposure measurements. See [camera controls](docs/camera-calibration.md#camera-controls-and-readback)
+for ranges, semantics and remaining work.
+
 ## Output modes
 
 - `left_rgb`, `right_rgb`: original lens canvases after color conversion.

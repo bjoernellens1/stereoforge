@@ -90,10 +90,12 @@ class Rectifier:
         return np.asarray(camera.distortion,dtype=float) if camera.distortion else np.zeros(5)
 
     def rectify(self,frame):
+        from copy import deepcopy
         if frame.calibration.identity!=self.calibration.identity: raise ValueError('calibration mismatch')
         images=[cv2.remap(image,*maps,cv2.INTER_LINEAR) for image,maps in zip((frame.left,frame.right),self._maps)]
         return StereoFrame(*images,self.rectified_calibration,frame.timestamp_ns,frame.frame_id,
-                           frame.clock_domain,frame.sensor_samples.copy())
+                           frame.clock_domain,frame.sensor_samples.copy(),
+                           camera_controls=deepcopy(frame.camera_controls))
 
     def depth_to_raw(self,depth,side='left'):
         if side not in ('left','right'): raise ValueError('side must be left or right')

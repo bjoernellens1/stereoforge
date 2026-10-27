@@ -3,8 +3,10 @@ import argparse
 from dataclasses import asdict
 import importlib.metadata
 import json
+import os
 from pathlib import Path
 import sys
+import tempfile
 from time import perf_counter
 import cv2
 import numpy as np
@@ -48,11 +50,75 @@ def _pipeline(args):
     camera=VirtualCamera(**json.loads(Path(args.virtual_camera).read_text())) if args.virtual_camera else None
     return Pipeline(_config(args),camera)
 
+def _control_request(args):
+    from .controls import validate_controls, profile_settings
+    path=getattr(args,'camera_controls',None)
+    if not path:return None
+    values=json.loads(Path(path).read_text())
+    if not isinstance(values,dict):raise ValueError('camera controls must be a JSON object')
+    if 'profile' in values:
+        profile=values['profile'];options={k:v for k,v in values.items() if k!='profile'}
+        try:settings=profile_settings(profile,**options)
+        except TypeError as exc:raise ValueError(f'invalid profile options: {exc}') from exc
+        validate_controls(settings,args.width,args.height)
+        return profile,options,settings
+    return None,{},validate_controls(values,args.width,args.height)
+
+
 def _camera(args):
     from .capture import ZedCamera
     from .calibration import load_calibration
+    request=_control_request(args)  # Reject invalid requests before opening hardware.
     cal=load_calibration(args.calibration) if args.calibration else None
-    return ZedCamera(cal,args.width,args.height,args.fps,args.device_id,cache_dir=args.cache)
+    camera=ZedCamera(cal,args.width,args.height,args.fps,args.device_id,cache_dir=args.cache)
+    try:
+        if request is not None:
+            profile,options,settings=request
+            report=(camera.camera_control.apply_profile(profile,**options) if profile is not None
+                    else camera.camera_control.set(settings))
+            if report['applied'] is not True:
+                raise RuntimeError('camera control readback did not verify request: '+json.dumps(report))
+        return camera
+    except BaseException:
+        camera.close()
+        raise
+
+def _controls(args):
+    target=Path(args.destination) if args.destination else None
+    stream=None
+    try:
+        if target is not None:
+            target.parent.mkdir(parents=True,exist_ok=True)
+            stream=target.open('x')  # Reserve before opening or changing hardware.
+        with _camera(args) as camera:
+            report=camera.control_snapshot
+            if not report:raise RuntimeError('camera control readback unavailable; rebuild capture extension')
+            if stream is not None:json.dump(report,stream,indent=2,allow_nan=False)
+            print(json.dumps(report,indent=2,allow_nan=False))
+    except BaseException:
+        if stream is not None:
+            reserved=os.fstat(stream.fileno())
+            stream.close()
+            # Remove only our still-empty exclusive reservation, preserving data.
+            try:
+                current=target.stat()
+                if (current.st_dev,current.st_ino)==(reserved.st_dev,reserved.st_ino) and current.st_size==0:
+                    target.unlink()
+            except FileNotFoundError:
+                pass
+        raise
+    finally:
+        if stream is not None:stream.close()
+
+
+def _preflight_recording(path):
+    target=Path(path)
+    if target.exists() and (not target.is_dir() or any(target.iterdir())):
+        raise ValueError(f'recording destination must be a new or empty directory: {target}')
+    target.mkdir(parents=True,exist_ok=True)
+    # Exercise actual file creation without leaving a manifest or recording file.
+    with tempfile.TemporaryFile(dir=target):pass
+
 
 def _doctor(args):
     from .capture import discover_cameras
@@ -80,7 +146,9 @@ def main(argv=None):
         p.add_argument('--width',type=int,default=1280);p.add_argument('--height',type=int,default=720)
         p.add_argument('--fps',type=int,default=60);p.add_argument('--frames',type=int,default=30)
         p.add_argument('--device-id',type=int,default=-1);p.add_argument('--calibration');p.add_argument('--cache')
+        p.add_argument('--camera-controls',help='JSON profile or per-eye control request; no implicit profile writes')
     syn=sub.add_parser('synthetic');processing(syn);syn.add_argument('--width',type=int,default=96);syn.add_argument('--height',type=int,default=48)
+    controls=sub.add_parser('controls');camera_options(controls);controls.add_argument('--output',dest='destination')
     record=sub.add_parser('record');camera_options(record);record.add_argument('--output',dest='destination',required=True)
     replay=sub.add_parser('replay');processing(replay);replay.add_argument('recording');replay.add_argument('--motions',help='JSON frame_id -> previous-to-current rigid transform')
     live=sub.add_parser('live');processing(live);camera_options(live)
@@ -88,15 +156,17 @@ def main(argv=None):
     args=parser.parse_args(argv)
     try:
         if args.command=='doctor':_doctor(args)
+        elif args.command=='controls':_controls(args)
         elif args.command=='synthetic':
             result=_pipeline(args).process(synthetic_frame(args.width,args.height))
             result.metrics['synthetic_ground_truth_m']=args.width*.12/4
             write_result(args.destination,result);print(json.dumps(result.metrics,indent=2))
         elif args.command=='record':
             if args.frames<1:raise ValueError('frames must be positive')
+            _preflight_recording(args.destination)
             with _camera(args) as camera:
                 ids=[];times=[];start=perf_counter()
-                with Recorder(args.destination,camera.calibration,dict(width=args.width,height=args.height,fps=args.fps,sensors_available=camera.sensors_available,sensor_status=camera.sensor_status)) as recording:
+                with Recorder(args.destination,camera.calibration,dict(width=args.width,height=args.height,fps=args.fps,sensors_available=camera.sensors_available,sensor_status=camera.sensor_status,camera_controls=camera.control_snapshot)) as recording:
                     for _ in range(args.frames):
                         frame=camera.read();recording.write(frame);ids.append(frame.frame_id);times.append(frame.timestamp_ns)
                 report=dict(frames=len(ids),sdk_id_gaps=int(np.maximum(np.diff(ids)-1,0).sum()),elapsed_wall_s=perf_counter()-start,sensors_available=camera.sensors_available,sensor_status=camera.sensor_status,sensor_dropped=camera.sensor_dropped_count)
@@ -106,6 +176,7 @@ def main(argv=None):
             for frame in Replay(args.recording):
                 motion=motions.get(str(frame.frame_id))
                 result=pipeline.process(frame,previous_to_current=np.asarray(motion) if motion is not None else None)
+                result.metrics["camera_controls"]=frame.camera_controls
                 write_result(Path(args.destination)/f'{frame.frame_id:08d}',result)
         elif args.command=='live':
             if args.frames<1:raise ValueError('frames must be positive')
@@ -113,6 +184,7 @@ def main(argv=None):
             with _camera(args) as camera:
                 for _ in range(args.frames):
                     frame=camera.read();result=pipeline.process(frame)
+                    result.metrics['camera_controls']=frame.camera_controls
                     write_result(Path(args.destination)/f'{frame.frame_id:08d}',result)
                     print(json.dumps({'frame_id':frame.frame_id,**result.metrics}),flush=True)
         elif args.command=='ablate':
