@@ -85,9 +85,9 @@ def identity():
 def profile():return dict(width=8,height=5,disparities=16,paths=4,p1=8,p2=32,subpixel=True)
 
 
-def native_report(m,metadata,metric):
+def native_report(m,metadata,metric,schedule="sequential",paths=4):
     stats=dict(p50=1.,p95=2.,mean=1.2)
-    return dict(profile(),schema='stereoforge.daxa_depth.v1',scope=depth.SCOPE,frames=1,warmup=0,slots=1,required_wave_size=32,lr_tolerance=1.,
+    report=dict(profile(),schema='stereoforge.daxa_depth.v1',scope=depth.SCOPE,frames=1,warmup=0,slots=1,required_wave_size=32,lr_tolerance=1.,
         metric_support_policy=depth.SUPPORT_POLICY,layers='left_then_right',depth_units='axial_Z_metres_rectified_rays',source_metadata=metadata,source_id=metadata['frame_id'],
         camera_timestamp_ns=100,host_ingress_timestamp_ns=0,camera_clock_domain='recorded',host_clock_domain='unknown',controls_json=metadata['controls_json'],
         original_identity='original',rectified_identity='rectified',fixture_manifest_sha256='manifest',capture_sha256='capture',record_ordinal=0,
@@ -99,10 +99,23 @@ def native_report(m,metadata,metric):
         capture_drops='not_measured; repeated_fixture',camera_age='unknown; no_clock_mapping',validation_requested=False,
         device=dict(device='mock',slangc_sha256='compiler',validation_errors=0,validation_warnings=0),validation_errors_after_teardown=0,validation_warnings_after_teardown=0,
         **{key:dict(stats) for key in depth.TIMINGS})
+    report['paths']=paths
+    report['requested_observation_buffer_bytes'],report['requested_combined_buffer_bytes']=depth.requested_bytes(m,dict(profile(),paths=paths),1)
+    report.update(stereo_schedule=schedule,per_reference_stereo_timings_available=schedule=='sequential',
+                  stereo_timing_scope='sequential_per_reference_graphs' if schedule=='sequential' else 'paired_per_path_phase_intervals_include_both_references; no_isolated_per_reference_times',
+                  gpu_paired_stereo_ms=None,gpu_paired_stereo_phases_ms={})
+    if schedule=='paired-per-path':
+        report['gpu_left_stereo_ms']=report['gpu_right_stereo_ms']=None
+        report['gpu_paired_stereo_ms']=dict(stats)
+        phases=['census_left','census_right','zero_packed_penalties','aggregate_pos_x','aggregate_neg_x','aggregate_pos_y','aggregate_neg_y']
+        if paths==8:phases+=['aggregate_pos_x_pos_y','aggregate_neg_x_neg_y','aggregate_pos_x_neg_y','aggregate_neg_x_pos_y']
+        report['gpu_paired_stereo_phases_ms']={key:dict(stats) for key in phases+['select']}
+    return report
 
 
 @pytest.mark.parametrize('mutation',[None,'scope','support_policy','layers','units','metric_bits','metric_float','compiler','shader','integer_false','packed_false','compound_true','preprocess_false','lr_false','source_id','metadata','retirement','memory','nonfinite','diagnostic','missing_plane','changed_plane','changed_raw','missing_raw','changed_input','changed_source','changed_report','wrong_adapter','rhi_metric','rhi_profile','admission_missing','admission_changed','changed_setup_manifest'])
-def test_mocked_whole_combined_protocol(tmp_path,monkeypatch,mutation):
+@pytest.mark.parametrize('schedule',['sequential','paired-per-path'])
+def test_mocked_whole_combined_protocol(tmp_path,monkeypatch,mutation,schedule):
     manifest,m,metadata,metric=fixture(tmp_path);ident=identity();luma=(np.arange(40,dtype='<u4').tobytes(),np.arange(40,80,dtype='<u4').tobytes());supports=(np.ones(40,'<u4').tobytes(),)*2
     def planes(path):
         if mutation=='changed_setup_manifest':path.write_text(json.dumps(dict(m,rebound_during_cpu_derivation=True)))
@@ -120,7 +133,8 @@ def test_mocked_whole_combined_protocol(tmp_path,monkeypatch,mutation):
         calls.append(command);out=tmp_path/'result'
         if '--manifest' in command:
             assert '--check-reference' in command
-            r=native_report(m,metadata,metric);r['fixture_manifest_sha256']=depth.base.sha256(manifest)
+            assert command[command.index('--stereo-schedule')+1]==schedule
+            r=native_report(m,metadata,metric,schedule);r['fixture_manifest_sha256']=depth.base.sha256(manifest)
             changes={'scope':('scope','wrong'),'support_policy':('metric_support_policy','wrong'),'layers':('layers','right_then_left'),'units':('depth_units','range'),'integer_false':('both_stereo_integer_reference_checked',False),'packed_false':('both_stereo_packed_penalties_reference_checked',False),'compound_true':('metric_compound_float_reference_checked',True),'preprocess_false':('expected_preprocess_planes_checked',False),'lr_false':('lr_mask_metadata_reference_checked',False),'source_id':('source_id',8),'retirement':('completed_output_retirements',0),'memory':('requested_observation_buffer_bytes',1)}
             if mutation in changes:r[changes[mutation][0]]=changes[mutation][1]
             if mutation=='metadata':r['source_metadata']['controls_json']='{}'
@@ -144,6 +158,7 @@ def test_mocked_whole_combined_protocol(tmp_path,monkeypatch,mutation):
                     if mutation=='changed_raw' and name=='right' and plane=='confidence.f32':data=bytes([data[0]^1])+data[1:]
                     Path(str(out/'gpu')+'.'+name+'.'+plane).write_bytes(data)
             return SimpleNamespace(returncode=0,stdout='',stderr='WARNING: invalid' if mutation=='diagnostic' else '')
+        assert '--stereo-schedule' not in command
         eye=0 if Path(command[command.index('--output')+1]).name=='rhi-left' else 1
         for key,field in (('--fx','fx'),('--baseline-m','baseline_m'),('--principal-offset','cx_offset')):
             assert struct.pack('<f',float(command[command.index(key)+1]))==struct.pack('<I',metric[field+'_bits'])
@@ -156,7 +171,7 @@ def test_mocked_whole_combined_protocol(tmp_path,monkeypatch,mutation):
         if mutation=='rhi_profile':r['paths']=8
         return SimpleNamespace(returncode=0,stdout=json.dumps(r),stderr='')
     monkeypatch.setattr(depth.subprocess,'run',child)
-    result=depth.run_comparison(manifest,Path('/rhi'),Path('/daxa'),Path('/compiler'),tmp_path/'result',disparities=16,frames=1,warmup=0,slots=1,validation_only=True)
+    result=depth.run_comparison(manifest,Path('/rhi'),Path('/daxa'),Path('/compiler'),tmp_path/'result',disparities=16,frames=1,warmup=0,slots=1,validation_only=True,stereo_schedule=schedule)
     assert result['passed'] is (mutation is None)
     if mutation=='changed_setup_manifest':assert not calls and 'CPU oracle setup' in result['error']
     if mutation is None:
@@ -165,6 +180,8 @@ def test_mocked_whole_combined_protocol(tmp_path,monkeypatch,mutation):
         assert result['compound_cpu_float_reference_checked'] is False
         assert result['frozen_gpu_output_bytes_checked'] is True
         assert result['selected'] is None
+        assert result['stereo_schedule']==schedule
+        assert result['stereo_timing_scope']==r_scope(schedule)
 
 
 def test_reject_bounds_and_output_collision_before_child(tmp_path,monkeypatch):
@@ -202,3 +219,44 @@ def test_actual_compiler_dependency_headers_are_hashed_fail_closed(tmp_path,monk
     assert len(calls)==7
     header.unlink()
     with pytest.raises(OSError):depth.compiler_header_identities(tmp_path)
+
+
+def r_scope(schedule):
+    return 'sequential_per_reference_graphs' if schedule=='sequential' else 'paired_per_path_phase_intervals_include_both_references; no_isolated_per_reference_times'
+
+
+@pytest.mark.parametrize('schedule',['sequential','paired-per-path'])
+@pytest.mark.parametrize('paths',[4,8])
+@pytest.mark.parametrize('mutation',[None,'mode','unknown_mode','scope','availability','availability_missing','left_fabricated','right_fabricated','paired_total','phase_missing','phase_extra','phase_zero','phase_nonfinite','pair_zero'])
+def test_schedule_timing_report_contract(tmp_path,schedule,paths,mutation):
+    _,m,metadata,metric=fixture(tmp_path);ident=identity();r=native_report(m,metadata,metric,schedule,paths)
+    good=copy.deepcopy(r);positive=dict(p50=1.,p95=2.,mean=1.2)
+    if mutation=='mode':r['stereo_schedule']='paired-per-path' if schedule=='sequential' else 'sequential'
+    if mutation=='unknown_mode':r['stereo_schedule']='paired'
+    if mutation=='scope':r['stereo_timing_scope']='sum_of_separate_medians'
+    if mutation=='availability':r['per_reference_stereo_timings_available']=schedule!='sequential'
+    if mutation=='availability_missing':del r['per_reference_stereo_timings_available']
+    if mutation=='left_fabricated':r['gpu_left_stereo_ms']=positive if schedule!='sequential' else None
+    if mutation=='right_fabricated':r['gpu_right_stereo_ms']=positive if schedule!='sequential' else None
+    if mutation=='paired_total':r['gpu_paired_stereo_ms']=positive if schedule=='sequential' else None
+    if mutation=='phase_missing':
+        if schedule=='sequential':del r['gpu_paired_stereo_phases_ms']
+        else:del r['gpu_paired_stereo_phases_ms']['select']
+    if mutation=='phase_extra':r['gpu_paired_stereo_phases_ms']['made_up_phase']=positive
+    if mutation in ('phase_zero','phase_nonfinite'):
+        r['gpu_paired_stereo_phases_ms']['select']=dict(positive,mean=0. if mutation=='phase_zero' else float('nan'))
+    if mutation=='pair_zero':r['gpu_paired_stereo_ms']=dict(positive,p50=0.)
+    expected=dict(profile(),paths=paths)
+    if mutation is None:
+        depth.validate_report(r,m,metadata,metric,ident,expected,1,0,1,32,False,stereo_schedule=schedule)
+    else:
+        with pytest.raises(ValueError):depth.validate_report(r,m,metadata,metric,ident,expected,1,0,1,32,False,stereo_schedule=schedule)
+    # Mode selection cannot weaken any oracle or memory requirement.
+    assert good['requested_combined_buffer_bytes']==depth.requested_bytes(m,dict(profile(),paths=paths),1)[1]
+
+
+@pytest.mark.parametrize('schedule',['paired','PairedPerPath',None,True,0])
+def test_unknown_schedule_rejected_before_inputs_or_child(tmp_path,monkeypatch,schedule):
+    monkeypatch.setattr(depth,'fixture_planes',lambda *a:pytest.fail('fixture must not be read'))
+    monkeypatch.setattr(depth.subprocess,'run',lambda *a,**k:pytest.fail('child forbidden'))
+    with pytest.raises(ValueError):depth.run_comparison(Path('/fixture'),Path('/rhi'),Path('/daxa'),Path('/compiler'),tmp_path/'out',validation_only=True,stereo_schedule=schedule)

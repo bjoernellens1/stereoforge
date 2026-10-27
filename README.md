@@ -248,6 +248,11 @@ integration and temporal/adaptive processing remain open. See the
 [depth contract](docs/daxa-depth-contract.md) and
 [validation and measurements](docs/daxa-depth-evidence.md).
 
+An optional `--stereo-schedule paired-per-path` experiment batches both references
+within each scan-direction phase. It preserves exact outputs but measured
+40–41 ms host wall against 32 ms sequential on the current AMD system;
+sequential remains the default. See [paired scheduling evidence](docs/daxa-depth-paired-evidence.md).
+
 ## Standalone C++ runtime
 
 Build without Python, SlangPy or SGL using `cmake --preset standalone` and

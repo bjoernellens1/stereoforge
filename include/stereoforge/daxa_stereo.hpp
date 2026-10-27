@@ -46,6 +46,7 @@ std::vector<uint32_t> daxa_sgm_wave_model(StereoConfig,std::span<const uint32_t>
 class DaxaStereo {
     struct Impl;
     struct Slot;
+    struct Pair;
     std::shared_ptr<Impl> impl_;
     friend class DaxaPreprocessStereo;friend class DaxaDepthPipeline;
 public:
@@ -92,6 +93,11 @@ public:
     static std::string shader_identity();
     static std::string shader_directory();
 private:
+    // Depth-only combined scheduling. Setup owns no Frame/producer marker.
+    void setup_pair(DaxaStereo& right);
+    unsigned pair_slot_at(uint64_t oldest)const; // Both aligned slots available, before upstream upload.
+    std::array<Frame,2> process_pair_at(const DaxaFrame&,uint64_t oldest,unsigned slot);
+    DaxaStereoTiming pair_timings(const Frame& left,const Frame& right)const;
     Frame process_at(const DaxaFrame*,uint64_t oldest);
     size_t collect_completed_inputs_at(uint64_t oldest);
 };

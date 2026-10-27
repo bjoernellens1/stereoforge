@@ -185,3 +185,23 @@ allocator/driver, diagnostic and CPU-source storage; they are not a measured
 peak-memory bound. Wide RGB-D synthesis, rectified-to-raw depth/ray conversion,
 temporal/adaptive processing and sustained live qualification remain subsequent
 work.
+
+
+## Optional scheduling experiment
+
+`DaxaDepthConfig::stereo_schedule` defaults to `Sequential`; `PairedPerPath`
+reuses the same buffers, algorithms and shader binaries in a persistent graph
+that records both reference dispatches within each phase. Required same-eye
+packed-penalty barriers remain between paths. Source/frame ownership, nine
+observation planes and the requested-buffer ceiling remain unchanged.
+
+Paired timings bracket both references together. In paired mode,
+`DaxaDepthTiming::per_reference_stereo_timings_available` is false and
+`paired_stereo` carries the phase intervals/total; `left` and `right` must not be
+interpreted as measurements. The native report writes null individual-eye
+statistics. Direct isolated `DaxaStereo::Frame::timings()` rejects paired frames.
+The same-queue upload-through-metric span remains the complete depth measure.
+
+This explicit experimental mode measured a regression and is not promoted.
+See [paired evidence](daxa-depth-paired-evidence.md). It records two dispatches
+per phase; a combined layered kernel is a subsequent experiment.

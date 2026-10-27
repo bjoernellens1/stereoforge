@@ -166,15 +166,18 @@ class DaxaFrame {std::shared_ptr<PreImpl> owner_;std::shared_ptr<PreSlot> slot_;
 struct PreImpl {std::shared_ptr<Context> context;std::shared_ptr<const Maps> calibration;std::vector<std::shared_ptr<PreSlot>> slots;uint64_t retired_sources=0,next_generation=1;double upload_cpu_ms=0;void require_thread()const{}};
 std::shared_ptr<const Maps> DaxaFrame::calibration()const{return owner_->calibration;}uint64_t DaxaFrame::context_id()const{return reinterpret_cast<uintptr_t>(owner_->context.get());}
 class DaxaPreprocess {public:std::shared_ptr<PreImpl> impl_;static constexpr unsigned Staging=0;DaxaFrame enqueue_at(CaptureLease,uint64_t);size_t collect_completed_sources_at(uint64_t);};
+enum class DaxaDepthStereoSchedule{Sequential,PairedPerPath};struct DaxaDepthConfig{DaxaDepthStereoSchedule stereo_schedule=DaxaDepthStereoSchedule::Sequential;};
 enum class DaxaStereoReference{Left,Right};enum class DaxaStereoPlane{Disparity,Confidence,Validity};enum class DaxaPreprocessPlane{LeftSupport,RightSupport};
 struct StereoSlot{DaxaFrame input;CaptureLease source;uint64_t submit=0,generation=0;};
 struct StereoImpl {std::shared_ptr<Context> context;std::vector<std::shared_ptr<StereoSlot>> slots;DaxaStereoReference reference;void require_thread()const{}};
 class DaxaStereo {public:std::shared_ptr<StereoImpl> impl_;class Frame {std::shared_ptr<StereoImpl> owner_;std::shared_ptr<StereoSlot> slot_;public:Frame()=default;Frame(std::shared_ptr<StereoImpl> o,std::shared_ptr<StereoSlot> s):owner_(o),slot_(s){}DaxaStereoReference reference()const{return owner_->reference;}CaptureLease source()const{return slot_->source;}uint64_t context_id()const{return reinterpret_cast<uintptr_t>(owner_->context.get());}std::shared_ptr<const Maps> calibration_owner()const{return slot_->input.calibration();}const std::string& calibration_identity()const{return slot_->input.calibration()->rectified_identity;}};
  Frame process_at(const DaxaFrame* pre,uint64_t oldest){for(auto& s:impl_->slots)if(detail::available_slot(s.use_count(),s->submit,oldest)){s->input=*pre;s->source=pre->source();s->submit=++impl_->context->device.latest;impl_->context->device.collect_garbage();return Frame(impl_,s);}throw std::runtime_error("stereo full");}
+ unsigned pair_slot_at(uint64_t)const{throw std::runtime_error("unused sequential probe pair admission");}
+ std::array<Frame,2> process_pair_at(const DaxaFrame&,uint64_t,unsigned){throw std::runtime_error("unused sequential probe paired submission");}
  size_t collect_completed_inputs_at(uint64_t);
 };
 class DaxaDepthPipeline {public:struct Slot {DaxaFrame preprocessing;DaxaStereo::Frame left,right;uint64_t submit=0,generation=0;std::chrono::steady_clock::time_point host_start;std::array<External,8> external_inputs{};Parameters data;uint64_t parameters=0;std::unique_ptr<Graph> graph;};
- struct Impl {std::shared_ptr<Context> context;std::unique_ptr<DaxaPreprocess> preprocessing;std::unique_ptr<DaxaStereo> left,right;std::vector<std::shared_ptr<Slot>> slots;uint64_t retired=0,next_generation=1;void require_thread()const{}size_t collect_at(uint64_t);
+ struct Impl {DaxaDepthConfig config;std::shared_ptr<Context> context;std::unique_ptr<DaxaPreprocess> preprocessing;std::unique_ptr<DaxaStereo> left,right;std::vector<std::shared_ptr<Slot>> slots;uint64_t retired=0,next_generation=1;void require_thread()const{}size_t collect_at(uint64_t);
  std::array<uint64_t,8> input_buffers(const DaxaFrame&,const DaxaStereo::Frame&,const DaxaStereo::Frame&){return {};}};
  std::shared_ptr<Impl> impl_;
  class Frame {public:std::shared_ptr<Impl> owner_;std::shared_ptr<Slot> slot_;uint64_t generation_=0;Frame()=default;Frame(std::shared_ptr<Impl> o,std::shared_ptr<Slot> s):owner_(o),slot_(s),generation_(s->generation){}void validate()const;};

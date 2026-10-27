@@ -126,6 +126,19 @@ struct DaxaStereo::Slot {
     uint64_t submit=0,generation=0;
     DaxaFrame input;CaptureLease source;
     unsigned started=0,finished=0;
+    bool per_reference_timings_available=true;
+};
+// One coordinator per Left/Right engine pair. Graphs retain stable raw slots,
+// never Frame markers; right's owner outlives graphs and their pipeline handles.
+struct DaxaStereo::Pair {
+    struct Slot {
+        std::array<std::array<daxa::ExternalTaskBuffer,BufferCount>,2> external;
+        std::unique_ptr<daxa::TaskGraph> graph;
+        daxa::TimelineQueryPool queries;
+        unsigned started=0,finished=0;
+    };
+    std::shared_ptr<Impl> right;
+    std::vector<std::unique_ptr<Slot>> slots;
 };
 struct DaxaStereo::Impl {
     std::shared_ptr<DaxaFoundation> context;
@@ -138,6 +151,7 @@ struct DaxaStereo::Impl {
     std::vector<daxa::BufferId> owned;
     std::vector<daxa::MemoryBlock> memory;
     std::vector<std::shared_ptr<Slot>> slots;
+    std::unique_ptr<Pair> paired;
     uint64_t allocated=0,next_generation=1,storage_range_limit=0;
     uint32_t timestamp_bits=0;
     float timestamp_period=0;
@@ -154,7 +168,7 @@ struct DaxaStereo::Impl {
         if(v!=DaxaSgmVariant::Baseline){VkPhysicalDeviceVulkan13Features f13{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};VkPhysicalDeviceFeatures2 f{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};f.pNext=&f13;vkGetPhysicalDeviceFeatures2(physical,&f);require(f13.subgroupSizeControl&&f13.computeFullSubgroups,"wave SGM requires enabled Daxa-required subgroup size/full subgroup features");require((control.requiredSubgroupSizeStages&VK_SHADER_STAGE_COMPUTE_BIT)!=0,"required subgroup size unavailable for compute");require((subgroup.supportedStages&VK_SHADER_STAGE_COMPUTE_BIT)!=0,"compute subgroups unavailable");require((subgroup.supportedOperations&(VK_SUBGROUP_FEATURE_ARITHMETIC_BIT|VK_SUBGROUP_FEATURE_SHUFFLE_BIT))==(VK_SUBGROUP_FEATURE_ARITHMETIC_BIT|VK_SUBGROUP_FEATURE_SHUFFLE_BIT),"wave SGM requires subgroup arithmetic and shuffle");wave_size=requested_wave?requested_wave:subgroup.subgroupSize;require((wave_size==32||wave_size==64)&&wave_size>=control.minSubgroupSize&&wave_size<=control.maxSubgroupSize&&64/wave_size<=control.maxComputeWorkgroupSubgroups,"requested full subgroup size 32/64 unsupported");}else require(!requested_wave,"wave size supplied for baseline variant");
         uint32_t count=0;vkGetPhysicalDeviceQueueFamilyProperties(physical,&count,nullptr);std::vector<VkQueueFamilyProperties> queues(count);vkGetPhysicalDeviceQueueFamilyProperties(physical,&count,queues.data());uint32_t family=UINT32_MAX;auto result=daxa_dvc_get_vk_queue(context->device.get(),{DAXA_QUEUE_TYPE_MAIN,0},nullptr,&family);require(result==DAXA_RESULT_SUCCESS&&family<count,"cannot identify Daxa main queue");timestamp_bits=queues[family].timestampValidBits;require(timestamp_bits>0,"Daxa main queue does not support timestamps");
     }
-    ~Impl(){auto& d=context->device;d.wait_idle();slots.clear();pipelines={};for(auto b:owned)if(d.is_id_valid(b))d.destroy_buffer(b);d.collect_garbage();memory.clear();}
+    ~Impl(){auto& d=context->device;d.wait_idle();paired.reset();slots.clear();pipelines={};for(auto b:owned)if(d.is_id_valid(b))d.destroy_buffer(b);d.collect_garbage();memory.clear();}
     daxa::BufferId allocate(size_t size,const std::string& name,bool host=false){auto& d=context->device;daxa::BufferInfo info{.size=size,.name=name};daxa::BufferId b;if(host){auto m=d.create_memory({.requirements=context->coherent_readback_requirements(info),.flags=daxa::MemoryFlagBits::HOST_ACCESS_RANDOM});b=d.create_buffer_from_memory_block({.buffer_info=info,.memory_block=m});memory.push_back(std::move(m));}else b=d.create_buffer(info);owned.push_back(b);allocated+=size;return b;}
     void setup(std::span<const uint32_t> left,std::span<const uint32_t> right,unsigned count,const DaxaFrame* prototype=nullptr);
     void completed(Frame const& f)const{f.validate();require(f.slot_->submit<context->device.oldest_pending_submit_index(),"GPU completion required before query access");}
@@ -210,11 +224,72 @@ DaxaStereo::Frame DaxaStereo::process_at(const DaxaFrame* input,uint64_t oldest)
         slot->generation=e.next_generation++;slot->started=0;slot->finished=0;try{slot->graph->execute({});}catch(...){slot->submit=d.latest_queue_submit_index(daxa::QUEUE_MAIN);throw;}require(slot->started==e.stages&&slot->finished==e.stages,"stereo graph callback count changed");slot->submit=d.latest_queue_submit_index(daxa::QUEUE_MAIN);return Frame(impl_,slot);
     }throw std::runtime_error("Daxa stereo slots retained or still in flight");
 }
+void DaxaStereo::setup_pair(DaxaStereo& other){
+    auto& l=*impl_;auto& r=*other.impl_;l.require_thread();r.require_thread();
+    require(!l.paired&&!r.paired&&l.context==r.context&&l.calibration&&l.calibration==r.calibration,"pair requires one shared context and exact calibrated owner");
+    require(l.reference==DaxaStereoReference::Left&&r.reference==DaxaStereoReference::Right&&l.variant==DaxaSgmVariant::PackedSpecialized&&r.variant==l.variant&&!l.metric&&!r.metric,"pair requires Left/Right packed-specialized without standalone metric");
+    auto a=l.config,b=r.config;require(a.width==b.width&&a.height==b.height&&a.disparities==b.disparities&&a.paths==b.paths&&a.p1==b.p1&&a.p2==b.p2&&a.subpixel==b.subpixel&&l.wave_size==r.wave_size&&l.packing==r.packing&&l.slots.size()==r.slots.size(),"pair stereo profile mismatch");
+    l.paired=std::make_unique<Pair>();auto& pair=*l.paired;pair.right=other.impl_;auto& d=l.context->device;size_t n=size_t(a.width)*a.height;
+    for(unsigned index=0;index<l.slots.size();++index){
+        auto s=std::make_unique<Pair::Slot>();auto* raw=s.get();auto prefix="stereo_pair_"+std::to_string(index)+"_";s->queries=d.create_timeline_query_pool({.query_count=l.query_count,.name=prefix+"phase_queries"});
+        s->graph=std::make_unique<daxa::TaskGraph>(daxa::TaskGraphInfo{.device=d,
+            .pre_task_callback=[&l,raw](daxa::TaskInterface ti){if(raw->started++==0){ti.recorder.pipeline_barrier({.src_access=daxa::AccessConsts::HOST_WRITE,.dst_access=daxa::AccessConsts::COMPUTE_SHADER_READ});ti.recorder.reset_timestamps({.query_pool=raw->queries,.start_index=0,.count=l.query_count});ti.recorder.write_timestamp({.query_pool=raw->queries,.pipeline_stage=daxa::PipelineStageFlagBits::TOP_OF_PIPE,.query_index=0});}},
+            .post_task_callback=[&l,raw](daxa::TaskInterface ti){if(++raw->finished==l.stages)ti.recorder.write_timestamp({.query_pool=raw->queries,.pipeline_stage=daxa::PipelineStageFlagBits::BOTTOM_OF_PIPE,.query_index=1});},.name=prefix+"paired_per_path"});
+        auto& graph=*s->graph;std::array<std::array<daxa::TaskBufferView,BufferCount>,2> views;std::array<uint64_t,2> addresses{};
+        for(unsigned eye=0;eye<2;++eye){auto& engine=eye?r:l;auto& slot=*engine.slots[index];addresses[eye]=d.device_address(slot.buffers[Params]).value();
+            for(unsigned resource=0;resource<BufferCount;++resource){if(slot.buffers[resource].is_empty())continue;
+                // Both engines alias the SAME physical luma. Register it only once.
+                if(eye&&resource<2){views[eye][resource]=views[0][resource];continue;}
+                s->external[eye][resource]=daxa::ExternalTaskBuffer({.buffer=slot.buffers[resource],.name=prefix+std::to_string(eye)+"_"+resource_names[resource]});views[eye][resource]=graph.register_buffer(s->external[eye][resource]);
+            }
+        }
+        auto add=[&](unsigned stage,std::array<unsigned,2> pipeline,unsigned pass,uint32_t groups,std::initializer_list<unsigned> reads,std::initializer_list<unsigned> writes,std::initializer_list<unsigned> readwrites){
+            auto grid=dispatch_grid(groups,l.group_limits);auto task=daxa::InlineTask::Compute("paired_phase_"+std::to_string(stage));
+            // Both eyes participate in one phase hazard declaration. In particular
+            // reads_writes(Penalties) preserves every SAME-EYE path WAW barrier.
+            for(unsigned eye=0;eye<2;++eye){task.reads(views[eye][Params]);for(auto resource:reads)if(eye==0||resource>=2)task.reads(views[eye][resource]);for(auto resource:writes)task.writes(views[eye][resource]);for(auto resource:readwrites)task.reads_writes(views[eye][resource]);}
+            graph.add_task(task.executes([&l,&r,raw,addresses,stage,pipeline,pass,grid](daxa::TaskInterface ti){
+                if(stage<2)ti.recorder.pipeline_barrier({.src_access=daxa::AccessConsts::COMPUTE_SHADER_WRITE,.dst_access=daxa::AccessConsts::COMPUTE_SHADER_READ});
+                ti.recorder.write_timestamp({.query_pool=raw->queries,.pipeline_stage=daxa::PipelineStageFlagBits::COMPUTE_SHADER,.query_index=2+stage*2});
+                // No barrier or timestamp between the independent eye dispatches.
+                for(unsigned eye=0;eye<2;++eye){auto& engine=eye?r:l;ti.recorder.set_pipeline(engine.pipelines[pipeline[eye]]);ti.recorder.push_constant(Push{addresses[eye],pass,grid[0]});ti.recorder.dispatch({grid[0],grid[1],1});}
+                ti.recorder.write_timestamp({.query_pool=raw->queries,.pipeline_stage=daxa::PipelineStageFlagBits::COMPUTE_SHADER,.query_index=3+stage*2});
+            }));
+        };
+        add(0,{0,0},0,uint32_t((n+63)/64),{Left},{LeftDesc,LeftValid},{});add(1,{0,0},1,uint32_t((n+63)/64),{Right},{RightDesc,RightValid},{});
+        add(2,{7,7},0,uint32_t((n*((a.disparities+32/l.packing-1)/(32/l.packing))+63)/64),{},{Penalties},{});
+        for(unsigned path=0;path<a.paths;++path){auto [dx,dy]=directions[path];add(3+path,{l.packing==8?11u:12u,l.packing==8?21u:22u},path,line_count(a,dx,dy),{LeftDesc,RightDesc,LeftValid,RightValid},{},{Penalties});}
+        add(3+a.paths,{l.packing==8?13u:14u,l.packing==8?23u:24u},0,uint32_t((n+63)/64),{LeftDesc,RightDesc,LeftValid,RightValid,Penalties},{Disparity,Confidence,Validity},{});
+        graph.submit({});graph.complete({});pair.slots.push_back(std::move(s));
+    }
+}
+unsigned DaxaStereo::pair_slot_at(uint64_t oldest)const{
+    auto& l=*impl_;l.require_thread();require(bool(l.paired),"paired stereo setup required");auto& r=*l.paired->right;
+    for(unsigned index=0;index<l.slots.size();++index)if(detail::available_slot(l.slots[index].use_count(),l.slots[index]->submit,oldest)&&detail::available_slot(r.slots[index].use_count(),r.slots[index]->submit,oldest))return index;
+    throw std::runtime_error("paired stereo backpressure: aligned slots retained/inflight");
+}
+std::array<DaxaStereo::Frame,2> DaxaStereo::process_pair_at(const DaxaFrame& input,uint64_t oldest,unsigned index){
+    auto& l=*impl_;l.require_thread();require(l.paired&&index<l.slots.size(),"invalid paired stereo slot");auto& r=*l.paired->right;input.validate();require(input.owner_->context==l.context&&input.calibration()==l.calibration,"paired GPU luma context/map owner mismatch");
+    auto& ls=l.slots[index];auto& rs=r.slots[index];require(detail::available_slot(ls.use_count(),ls->submit,oldest)&&detail::available_slot(rs.use_count(),rs->submit,oldest),"paired stereo slots retained/inflight");
+    auto& pair=*l.paired->slots[index];auto& d=l.context->device;d.collect_garbage();
+    for(unsigned eye=0;eye<2;++eye){auto& engine=eye?r:l;auto& slot=eye?rs:ls;slot->input=input;slot->source=input.source();
+        auto* params=reinterpret_cast<Parameters*>(d.buffer_host_address(slot->buffers[Params]).value());
+        for(unsigned image=0;image<2;++image){auto buffer=input.plane(image?DaxaPreprocessPlane::RightLuma:DaxaPreprocessPlane::LeftLuma).buffer();slot->buffers[image]=buffer;slot->external[image].set_buffer(buffer);params->address[image]=d.device_address(buffer).value();if(!eye)pair.external[0][image].set_buffer(buffer);}
+        slot->generation=engine.next_generation++;slot->per_reference_timings_available=false;
+    }
+    pair.started=0;pair.finished=0;try{pair.graph->execute({});}catch(...){ls->submit=rs->submit=d.latest_queue_submit_index(daxa::QUEUE_MAIN);throw;}
+    ls->submit=rs->submit=d.latest_queue_submit_index(daxa::QUEUE_MAIN);require(pair.started==l.stages&&pair.finished==l.stages,"paired stereo phase callback count changed");return {Frame(impl_,ls),Frame(l.paired->right,rs)};
+}
+DaxaStereoTiming DaxaStereo::pair_timings(const Frame& left,const Frame& right)const{
+    auto& l=*impl_;l.require_thread();left.validate();right.validate();require(l.paired&&left.owner_==impl_&&right.owner_==l.paired->right&&!left.slot_->per_reference_timings_available&&!right.slot_->per_reference_timings_available,"foreign or sequential stereo pair timing");
+    l.completed(left);l.paired->right->completed(right);unsigned index=0;for(;index<l.slots.size();++index)if(l.slots[index]==left.slot_)break;require(index<l.slots.size()&&l.paired->right->slots[index]==right.slot_&&left.slot_->submit==right.slot_->submit,"unaligned stereo pair timing");
+    std::array<uint64_t,(2+DaxaStereoTiming::max_stages*2)*2> results{};auto& pair=*l.paired->slots[index];require(daxa_timeline_query_pool_query_results(pair.queries.get(),0,l.query_count,results.data())==DAXA_RESULT_SUCCESS,"paired stereo timestamp query failed");for(unsigned i=0;i<l.query_count;++i)require(results[i*2+1],"paired stereo timestamp unavailable");auto mask=l.timestamp_bits==64?UINT64_MAX:(uint64_t{1}<<l.timestamp_bits)-1;auto ms=[&](unsigned a,unsigned b){return double((results[b*2]-results[a*2])&mask)*l.timestamp_period/1e6;};DaxaStereoTiming out;out.stage_count=l.stages;out.total_gpu_ms=ms(0,1);for(unsigned i=0;i<out.stage_count;++i)out.stage_gpu_ms[i]=ms(2+i*2,3+i*2);return out;
+}
 std::shared_ptr<const DaxaRectification> DaxaStereo::Frame::calibration_owner()const{validate();return owner_->calibration;}
 CaptureLease DaxaStereo::Frame::source()const{validate();return slot_->source;}const std::string& DaxaStereo::Frame::calibration_identity()const{validate();require(bool(owner_->calibration),"retained-fixture stereo has no calibrated source metadata");return owner_->calibration->rectified_identity;}
 
 void DaxaStereo::Frame::wait()const{validate();auto& d=owner_->context->device;d.wait_on_submit({.queue=daxa::QUEUE_MAIN,.queue_submit_index=slot_->submit,.timeout=30'000'000'000ull});}
-DaxaStereoTiming DaxaStereo::Frame::timings()const{validate();owner_->completed(*this);constexpr size_t max_queries=2+DaxaStereoTiming::max_stages*2;std::array<uint64_t,max_queries*2> results{};auto status=daxa_timeline_query_pool_query_results(slot_->queries.get(),0,owner_->query_count,results.data());require(status==DAXA_RESULT_SUCCESS,"stereo timestamp query failed");for(unsigned i=0;i<owner_->query_count;++i)require(results[i*2+1]!=0,"stereo timestamp unavailable");uint64_t mask=owner_->timestamp_bits==64?UINT64_MAX:(uint64_t{1}<<owner_->timestamp_bits)-1;auto elapsed=[&](unsigned first,unsigned last){return double((results[last*2]-results[first*2])&mask)*double(owner_->timestamp_period)/1e6;};DaxaStereoTiming out;out.stage_count=owner_->stages;out.total_gpu_ms=elapsed(0,1);for(unsigned i=0;i<out.stage_count;++i)out.stage_gpu_ms[i]=elapsed(2+i*2,3+i*2);return out;}
+DaxaStereoTiming DaxaStereo::Frame::timings()const{validate();require(slot_->per_reference_timings_available,"isolated stereo timings unavailable for paired submission");owner_->completed(*this);constexpr size_t max_queries=2+DaxaStereoTiming::max_stages*2;std::array<uint64_t,max_queries*2> results{};auto status=daxa_timeline_query_pool_query_results(slot_->queries.get(),0,owner_->query_count,results.data());require(status==DAXA_RESULT_SUCCESS,"stereo timestamp query failed");for(unsigned i=0;i<owner_->query_count;++i)require(results[i*2+1]!=0,"stereo timestamp unavailable");uint64_t mask=owner_->timestamp_bits==64?UINT64_MAX:(uint64_t{1}<<owner_->timestamp_bits)-1;auto elapsed=[&](unsigned first,unsigned last){return double((results[last*2]-results[first*2])&mask)*double(owner_->timestamp_period)/1e6;};DaxaStereoTiming out;out.stage_count=owner_->stages;out.total_gpu_ms=elapsed(0,1);for(unsigned i=0;i<out.stage_count;++i)out.stage_gpu_ms[i]=elapsed(2+i*2,3+i*2);return out;}
 daxa::BufferId DaxaStereo::Frame::buffer(DaxaStereoPlane plane)const{validate();auto id=slot_->buffers[buffer_index(plane)];require(!id.is_empty(),"plane unavailable for this variant/calibration; packed penalties are not dense costs or sums");return id;}
 uint64_t DaxaStereo::Frame::generation()const{validate();return generation_;}
 uint64_t DaxaStereo::Frame::context_id()const{validate();return reinterpret_cast<uintptr_t>(owner_->context->device.get());}

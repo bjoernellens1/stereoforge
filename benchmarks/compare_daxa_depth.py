@@ -26,6 +26,12 @@ PLANES=('lr_disparity.f32','lr_confidence.f32','lr_validity.u32','depth.f32','me
 RAW_PLANES=base.OUTPUT_PLANES
 RHI_PLANES=RAW_PLANES+('depth.f32','depth_validity.u32')
 TIMINGS=('enqueue_cpu_ms','wait_cpu_ms','timestamp_query_cpu_ms','host_wall_ms','upload_cpu_ms','gpu_upload_ms','gpu_decode_ms','gpu_rectify_ms','gpu_left_stereo_ms','gpu_right_stereo_ms','gpu_lr_ms','gpu_metric_metadata_ms','gpu_combined_queue_span_ms')
+STEREO_SCOPES={
+    'sequential':'sequential_per_reference_graphs',
+    'paired-per-path':'paired_per_path_phase_intervals_include_both_references; no_isolated_per_reference_times',
+}
+PAIRED_PHASES=('census_left','census_right','zero_packed_penalties','aggregate_pos_x','aggregate_neg_x','aggregate_pos_y','aggregate_neg_y')
+PAIRED_DIAGONALS=('aggregate_pos_x_pos_y','aggregate_neg_x_neg_y','aggregate_pos_x_neg_y','aggregate_neg_x_pos_y')
 mirror_rows=right.mirror_rows
 
 
@@ -141,8 +147,10 @@ def native_identities(rhi,native,compiler,manifest):
     return common
 
 
-def validate_report(report,manifest,metadata,metric,identity,profile,frames,warmup,slots,wave,validation):
+def validate_report(report,manifest,metadata,metric,identity,profile,frames,warmup,slots,wave,validation,stereo_schedule="sequential"):
+    if type(stereo_schedule) is not str or stereo_schedule not in STEREO_SCOPES:raise ValueError("unknown stereo schedule")
     expected=dict(profile,schema='stereoforge.daxa_depth.v1',scope=SCOPE,frames=frames,warmup=warmup,slots=slots,required_wave_size=wave,metric_support_policy=SUPPORT_POLICY,layers='left_then_right',depth_units='axial_Z_metres_rectified_rays',
+        stereo_schedule=stereo_schedule,stereo_timing_scope=STEREO_SCOPES[stereo_schedule],per_reference_stereo_timings_available=stereo_schedule=='sequential',
         source_metadata=metadata,source_id=metadata['frame_id'],original_identity=manifest['calibration']['original_identity'],rectified_identity=manifest['calibration']['rectified_identity'],fixture_manifest_sha256=identity['manifest_sha256'],capture_sha256=manifest['capture']['sha256'],record_ordinal=manifest['capture']['record_ordinal'],
         gpu_combined_scope=GPU_SCOPE,requested_memory_scope=MEMORY_SCOPE,admission_completion_policy=ADMISSION_POLICY,lr_mask_metadata_reference_checked=True,both_stereo_integer_reference_checked=True,both_stereo_packed_penalties_reference_checked=True,expected_preprocess_planes_checked=True,metric_compound_float_reference_checked=False,stereo_compound_float_reference_checked=False,completed_output_retirements=frames+warmup,capture_drops='not_measured; repeated_fixture',camera_age='unknown; no_clock_mapping',validation_requested=validation)
     expected.update({k:metadata[k] for k in ('camera_timestamp_ns','host_ingress_timestamp_ns','camera_clock_domain','host_clock_domain','controls_json')})
@@ -154,9 +162,22 @@ def validate_report(report,manifest,metadata,metric,identity,profile,frames,warm
     for key in ('fx','baseline_m','cx_offset'):
         bits=actual.get(key+'_bits')
         if type(bits) is not int or not 0<=bits<=0xffffffff or type(actual.get(key)) not in (int,float) or f32_bits(actual[key])!=bits or bits!=metric[key+'_bits']:raise ValueError('cached metric float bitpatterns differ from bound calibration')
+    def timing(key,row,positive=False):
+        if not isinstance(row,dict) or set(row)!={'p50','p95','mean'} or any(type(v) not in (int,float) or not math.isfinite(v) or v<0 or (positive and v==0) for v in row.values()) or row['p95']<row['p50']:raise ValueError('invalid combined timing: '+key)
     for key in TIMINGS:
-        row=report.get(key)
-        if not isinstance(row,dict) or set(row)!={'p50','p95','mean'} or any(type(v) not in (int,float) or not math.isfinite(v) or v<0 for v in row.values()) or row['p95']<row['p50']:raise ValueError('invalid combined timing: '+key)
+        if key in ('gpu_left_stereo_ms','gpu_right_stereo_ms'):
+            if stereo_schedule=='paired-per-path':
+                if key not in report or report[key] is not None:raise ValueError('paired per-reference timing must be unavailable: '+key)
+                continue
+        timing(key,report.get(key))
+    if stereo_schedule=='sequential':
+        if 'gpu_paired_stereo_ms' not in report or report['gpu_paired_stereo_ms'] is not None or report.get('gpu_paired_stereo_phases_ms')!={}:raise ValueError('sequential paired timing must be unavailable')
+    else:
+        timing('gpu_paired_stereo_ms',report.get('gpu_paired_stereo_ms'),positive=True)
+        phases=report.get('gpu_paired_stereo_phases_ms')
+        expected_phases=set(PAIRED_PHASES+(PAIRED_DIAGONALS if profile['paths']==8 else ())+('select',))
+        if not isinstance(phases,dict) or set(phases)!=expected_phases:raise ValueError('changed/missing paired stereo phases')
+        for key,row in phases.items():timing(key,row,positive=True)
     if report['gpu_combined_queue_span_ms']['mean']<=0:raise ValueError('actual combined GPU span absent')
     for key in ('initialization_ms','diagnostic_after_timing_ms'):
         if type(report.get(key)) not in (int,float) or not math.isfinite(report[key]) or report[key]<0:raise ValueError('invalid bounded extra timing')
@@ -176,7 +197,8 @@ def validate_bounds(disparities,paths,p1,p2,frames,warmup,slots,wave_size,valida
     if any(type(v) is not int for v in (disparities,paths,p1,p2,frames,warmup,slots,wave_size)) or disparities not in ((16,32,64,128) if validation_only else (32,64,128)) or paths not in (4,8) or not 0<=p1<=p2<=10000 or paths*p2>65535 or not 1<=frames<=300 or not 0<=warmup<=30 or slots not in (1,2) or wave_size not in (32,64) or (not validation_only and (frames<30 or warmup<3)):raise ValueError('invalid bounded combined profile/counts')
 
 
-def run_comparison(manifest_path,rhi,native,compiler,output,disparities=128,paths=4,p1=8,p2=32,frames=30,warmup=3,slots=2,wave_size=32,validation=False,validation_only=False):
+def run_comparison(manifest_path,rhi,native,compiler,output,disparities=128,paths=4,p1=8,p2=32,frames=30,warmup=3,slots=2,wave_size=32,validation=False,validation_only=False,stereo_schedule="sequential"):
+    if type(stereo_schedule) is not str or stereo_schedule not in STEREO_SCOPES:raise ValueError("unknown stereo schedule")
     validate_bounds(disparities,paths,p1,p2,frames,warmup,slots,wave_size,validation_only)
     manifest_path=Path(manifest_path).resolve();manifest_entry_sha256=base.sha256(manifest_path)
     manifest,metadata,luma,supports,metric,cv_identity=fixture_planes(manifest_path)
@@ -188,7 +210,7 @@ def run_comparison(manifest_path,rhi,native,compiler,output,disparities=128,path
         for filename,data in ((name+'.u32',luma[eye]),('mirror-'+name+'.u32',mirror_rows(luma[eye],width,height))):
             path=output/filename;path.write_bytes(data);path.chmod(0o444);derived[filename]=base.sha256(path)
     evidence=dict(schema=1,passed=False,selected=None,profile=profile,frames=frames,warmup=warmup,slots=slots,wave_size=wave_size,validation_requested=validation,performance_qualified_counts=not validation_only,
-        fixture_manifest_entry_sha256=manifest_entry_sha256,scope='Repeated exact recorded fixture: combined upload/preprocess/dualSGM/LR/metric/metadata; no fresh-camera, physical truth, motion, RGB-D synthesis or sustained60Hz qualification.',
+        stereo_schedule=stereo_schedule,stereo_timing_scope=STEREO_SCOPES[stereo_schedule],fixture_manifest_entry_sha256=manifest_entry_sha256,scope='Repeated exact recorded fixture: combined upload/preprocess/dualSGM/LR/metric/metadata; no fresh-camera, physical truth, motion, RGB-D synthesis or sustained60Hz qualification.',
         timing_contract=dict(native=GPU_SCOPE,rhi='Two independent transfer-inclusive oracle runs; no warmup, no comparable performance ratio.',diagnostics='All fifteen native dumps and native exact integer/P checks after samples; frozen RHI oracle outside native timing.'),
         support_policy=SUPPORT_POLICY,compound_cpu_float_reference_checked=False,frozen_gpu_output_bytes_checked=False,children={},cpu_opencv=cv_identity,
         inherited_validation_environment={k:os.environ[k] for k in ('VK_INSTANCE_LAYERS','VK_LAYER_VALIDATE_SYNC','VK_LAYER_ENABLES','VK_LOADER_DEBUG','SF_DAXA_VALIDATION') if k in os.environ})
@@ -203,9 +225,9 @@ def run_comparison(manifest_path,rhi,native,compiler,output,disparities=128,path
                 if base.sha256(output/file)!=digest:raise ValueError('derived oracle inputs changed')
         def child(name,command):
             verify_inputs();result=subprocess.run(command,capture_output=True,text=True,errors='replace');(output/(name+'.stdout')).write_text(result.stdout);(output/(name+'.stderr')).write_text(result.stderr);base.require_child_clean(result.returncode,result.stdout,result.stderr);verify_inputs();evidence['children'][name]=dict(returncode=result.returncode,command=command);reports[name+'.stdout']=base.sha256(output/(name+'.stdout'));reports[name+'.stderr']=base.sha256(output/(name+'.stderr'));return result
-        command=[str(native),'--manifest',str(manifest_path),'--output',str(output/'native.json'),'--dump-prefix',str(output/'gpu'),'--check-reference','--frames',str(frames),'--warmup',str(warmup),'--slots',str(slots),'--wave-size',str(wave_size),'--disparities',str(disparities),'--paths',str(paths),'--p1',str(p1),'--p2',str(p2)]
+        command=[str(native),'--manifest',str(manifest_path),'--output',str(output/'native.json'),'--dump-prefix',str(output/'gpu'),'--check-reference','--frames',str(frames),'--warmup',str(warmup),'--slots',str(slots),'--wave-size',str(wave_size),'--disparities',str(disparities),'--paths',str(paths),'--p1',str(p1),'--p2',str(p2),'--stereo-schedule',stereo_schedule]
         if validation:command.append('--validation')
-        child('native',command);report=base.strict_json((output/'native.json').read_text());validate_report(report,manifest,metadata,metric,identity,profile,frames,warmup,slots,wave_size,validation);evidence['native_report']=report;reports['native.json']=base.sha256(output/'native.json')
+        child('native',command);report=base.strict_json((output/'native.json').read_text());validate_report(report,manifest,metadata,metric,identity,profile,frames,warmup,slots,wave_size,validation,stereo_schedule=stereo_schedule);evidence['native_report']=report;reports['native.json']=base.sha256(output/'native.json')
         # Use the actual cached native float values/bitpatterns, not a fresh
         # Python double calibration or CPU-evaluated depth formula.
         cached=report['metric_calibration'];metric_args=[]
@@ -252,8 +274,9 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--manifest',type=Path,required=True);parser.add_argument('--compiler',type=Path,required=True);parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--rhi-binary',type=Path,default=base.ROOT/'build/standalone/native_stereo');parser.add_argument('--daxa-binary',type=Path,default=base.ROOT/'build/daxa/daxa_depth_benchmark')
     for key,default in (('disparities',128),('paths',4),('p1',8),('p2',32),('slots',2),('wave-size',32)):parser.add_argument('--'+key,type=int,default=default)
+    parser.add_argument('--stereo-schedule',choices=tuple(STEREO_SCOPES),default='sequential')
     parser.add_argument('--frames',type=int);parser.add_argument('--warmup',type=int);parser.add_argument('--validation',action='store_true');parser.add_argument('--validation-only',action='store_true');a=parser.parse_args()
-    try:result=run_comparison(a.manifest,a.rhi_binary.resolve(),a.daxa_binary.resolve(),a.compiler.resolve(),a.output,a.disparities,a.paths,a.p1,a.p2,a.frames if a.frames is not None else 1 if a.validation_only else 30,a.warmup if a.warmup is not None else 0 if a.validation_only else 3,a.slots,a.wave_size,a.validation,a.validation_only)
+    try:result=run_comparison(a.manifest,a.rhi_binary.resolve(),a.daxa_binary.resolve(),a.compiler.resolve(),a.output,a.disparities,a.paths,a.p1,a.p2,a.frames if a.frames is not None else 1 if a.validation_only else 30,a.warmup if a.warmup is not None else 0 if a.validation_only else 3,a.slots,a.wave_size,a.validation,a.validation_only,stereo_schedule=a.stereo_schedule)
     except (ValueError,OSError,KeyError,OverflowError) as error:parser.error(str(error))
     print(json.dumps(dict(passed=result['passed'],output=str(a.output))));return 0 if result['passed'] else 1
 

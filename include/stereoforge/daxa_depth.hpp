@@ -1,11 +1,13 @@
 #pragma once
 #include <stereoforge/daxa_preprocess.hpp>
 namespace stereoforge {
+enum class DaxaDepthStereoSchedule { Sequential,PairedPerPath };
 struct DaxaDepthConfig {
     StereoConfig stereo;
     float lr_tolerance=1.f;
     unsigned slots=1;
     uint32_t required_wave_size=32;
+    DaxaDepthStereoSchedule stereo_schedule=DaxaDepthStereoSchedule::Sequential;
     void validate()const;
     uint64_t requested_buffer_bytes(const DaxaRectification&)const;
 };
@@ -24,6 +26,8 @@ enum class DaxaDepthPlane:unsigned { LRDisparity,LRStereoConfidence,LRValidity,D
 struct DaxaDepthTiming {
     DaxaPreprocessTiming preprocessing;
     DaxaStereoTiming left,right;
+    bool per_reference_stereo_timings_available=true;
+    DaxaStereoTiming paired_stereo; // Phase intervals contain both references; no isolated eye timings.
     double lr_gpu_ms=0,metric_metadata_gpu_ms=0,combined_gpu_ms=0;
 };
 // One submission thread/shared foundation. Output leases retain both producers

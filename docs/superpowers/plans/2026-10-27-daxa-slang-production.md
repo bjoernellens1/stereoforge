@@ -279,3 +279,277 @@ are 840,500,528 bytes. This is not live 60 Hz or general scalar compound-float
 qualification. See [depth evidence](../../daxa-depth-evidence.md). Task 6 shared
 context/compositor intake and correct association of rectified geometry with
 original RGB remain next; the full goal stays active.
+
+
+## Task 6 continuation: retained depth intake and calibrated wide RGB views
+
+**Approved architecture (2026-10-27):** extend the tested `DaxaView`; keep
+metric observations on their rectified geometry grid and retain full original
+RGB in a separate preview namespace. This supersedes the proposed
+rectified-to-raw depth conversion in 5c. There is no second compositor, SDK
+change, rounded raw-depth canvas, or permission to stop after an API shim.
+Task 6a is an integration prerequisite; Task 6b supplies the calibrated grid
+semantics. End-to-end Task 6 acceptance requires both and the existing strict,
+preview, peripheral-coverage and full-chain 60 Hz goals remain unchanged.
+
+### Ownership and interfaces
+
+One integration owner changes `include/stereoforge/daxa_view.hpp`,
+`src/daxa_view.cpp`, `include/stereoforge/daxa_view_parameters.hpp`,
+`tests/daxa_view.cpp`, new `tests/daxa_view_depth.cpp`, and the existing view
+build block in `CMakeLists.txt`. That owner also implements the calibrated
+setup and narrow shader plumbing in those files and new
+`include/stereoforge/daxa_view_calibration.hpp`,
+`src/daxa_view_calibration.cpp`, `shaders/daxa/view_depth.slang`, plus the
+necessary reader specialization in
+`python/stereoforge/shaders/ops/projection.slang`. Preserve the existing
+`shaders/daxa/view.slang` fixture wrapper where possible; explicitly requalify
+any changed legacy SPIR-V. Do not duplicate the visibility/resolve compositor.
+
+An independent oracle owner creates `benchmarks/compare_daxa_view_depth.py`
+and `tests/test_daxa_view_depth_comparison.py`; the integration owner creates
+`apps/daxa_view_depth_benchmark.cpp`. An independent performance reviewer owns
+only `tests/test_daxa_view_depth_hotpath.py` and an ignored review report,
+reads production changes, and does not build or launch GPU workloads. Shared
+files have one writer; owners coordinate signatures before body edits.
+
+Add the following overloads to the existing class, using the existing depth
+header and value types:
+
+```cpp
+DaxaView(GeometryConfig, VirtualView const&,
+         std::shared_ptr<DaxaFoundation>,
+         DaxaDepthPipeline::Frame const& prototype, unsigned slots=2);
+Frame project(DaxaDepthPipeline::Frame const&);
+size_t collect();
+bool can_project() const;
+```
+
+The old `GeometrySources` constructor, `project()` and fixture controls remain
+supported and independently tested. The supplied foundation determines the
+actual device identity. The new constructor validates and caches immutable
+setup from the prototype, then releases the prototype itself. `project(frame)`
+consumes only matching typed depth frames and retains that exact frame until
+its consumer slot retires. `collect()` reclaims completed, unleased slots;
+`can_project()` is a nonblocking admission snapshot on the single submission
+thread. The chain calls collection/admission before capture acquisition and
+upstream upload, with no intervening competing submission. It must not discover
+view exhaustion only after spending an upstream upload/stereo operation.
+
+### 6a. Shared foundation and typed retained intake
+
+- [ ] Write CPU contract tests named `shared_foundation_typed_intake`,
+  `foreign_context_and_map_owner_reject`, `constructor_prototype_released`,
+  `retained_source_metadata_per_slot`, and
+  `view_ring_rejects_before_upstream_upload`. Assert actual device identity,
+  exact immutable calibration-owner pairing, rectified dimensions/layers and
+  plane byte sizes, different-content/same-ID generations, timestamp/calibration
+  metadata per slot, producer destruction safety, full/delayed rings, and no
+  prototype lease retained after setup. Watch these tests fail before changes.
+- [ ] Convert the implementation's foundation storage to shared ownership.
+  The legacy constructor creates its own foundation; supplied shared mode never
+  closes another stage's context. View resources retire before their retained
+  foundation. Preallocate slot state, external task resources, graph bindings,
+  parameters and lease state at setup; avoid the old per-projection
+  `make_shared<Lease>` in the resident path. Store source metadata per slot,
+  not engine-wide. Update only bounded resource addresses and scalar frame
+  metadata at submission, retaining the producer rather than importing RHI
+  buffers or copying images through the host.
+- [ ] Implement typed `project(frame)` using the existing graph/output contract
+  and same-queue producer dependencies. Release retained producer inputs only
+  after view completion and output release; no hidden wait/readback, context
+  creation, JSON/hash scan, matrix validation or heap allocation per frame.
+  Reject shape/owner/context mismatches before graph execution. Keep source
+  calibration/support validation at setup and constant-time owner checks at
+  submission.
+- [ ] Run the new CPU tests and existing `daxa_view` fixture contracts, including
+  `legacy_view_fixture_controls`; preserve old fixture output controls and
+  explicit diagnostic readback. This establishes intake/lifetime correctness,
+  not calibrated wide-view acceptance by itself.
+
+### 6b. Direct calibrated geometry and separate full RGB preview
+
+Setup must distinguish two source spaces: two rectified depth/color grids of
+`rect_width * rect_height` each, and two full original RGB grids of
+`eye_width * source_height` each. Validate sizes, both-eye offsets, checked
+products/counts, preview-index bounds and the count actually used by every
+shader dispatch. Never use original dimensions to index rectified metadata or
+use a raw preview index as a metric observation owner.
+
+For rectified metric pixels, cache unit-Z rays
+`q = ((x-cx)/fx, (y-cy)/fy, 1)` from each rectified camera model. With
+`V = virtual_from_original_left`, use the effective transforms exactly once:
+
+```
+left:  V * block_rotation(R1^T)
+right: V * original.right_to_left * block_rotation(R2^T)
+```
+
+Multiply these rays by the measured rectified axial Z. Do not apply rectified
+baseline translation a second time. If the caller supplies two original-eye
+virtual transforms, validate their relation against the original right-to-left
+pose at setup. Metric color comes from the existing qualified
+`RectifiedLeft/RectifiedRight` RGB images, remapped from the same retained
+original capture. Full `OriginalLeft/OriginalRight` RGB remains independently
+available for peripheral preview; a rectified crop cannot replace it.
+
+Hash/identity and exact immutable ownership bind payload bytes but **do not
+establish per-pixel association between maps and camera geometry**. Introduce
+an explicit setup association gate: use authoritatively geometry-generated
+maps/fixtures and validate their association with the retained models,
+rotations, dimensions and sampling convention. State the accepted calibration
+producer/trust boundary in setup/report metadata. Arbitrary manual maps may
+remain valid for the legacy 2D RGB/stereo fixture path, but cannot silently be
+promoted to strict calibrated view input. Consistent synthetic fixtures and an
+authoritative setup validation/trust boundary are mandatory before strict/live
+acceptance; physical calibration truth remains a separate qualification.
+
+- [ ] Add watched CPU RED cases `rectified_grid_rotation_once`,
+  `shared_raw_cell_distinct_virtual_points`,
+  `original_rectified_dimension_mismatch`,
+  `map_geometry_association_required`, `preview_namespace_bounds_and_eye`,
+  `strict_holes_and_original_rgb_preview`, and
+  `perspective_axial_and_cylindrical_range`. Include nonidentity R1/R2,
+  nonzero principal offset, unequal raw/rectified dimensions, right-eye
+  extrinsics, distortion, unsupported remap samples and both eye boundaries.
+  Two rectified observations that round to one raw pixel but project to
+  distinct virtual pixels must both survive to visibility processing; never
+  reconstruct their positions from the rounded raw pixel's ray.
+- [ ] Implement the setup-only calibrated cache and association checks, then
+  bind separate geometry rays, rectified metric colors and original preview
+  colors in the retained view slot. Generate original preview directions from
+  the original calibrated model/distortion and rotate into the virtual view;
+  explicitly omit translation for infinity preview. Keep metric projection,
+  depth ordering, deterministic owner ties, layer compatibility, exposure and
+  resolution in the existing shared projection operations. Add narrow typed
+  readers/wrappers for the separate RGB namespaces rather than a compositor.
+- [ ] Preserve strict holes. Preview may fill RGB only: mark RGB valid and
+  approximate, keep metric validity false, depth canonical NaN, metric
+  confidence/provenance/age zero and source ID -1. A preview-only owner is
+  `UINT_MAX`; metric metadata gathers require a valid metric owner within
+  `2 * rect_width * rect_height`. Perspective output depth is virtual axial Z;
+  cylindrical output depth is virtual ray range (`length(local.xyz)`), with
+  vertical projection using the horizontal cylinder radius. Expose that depth
+  convention alongside the virtual camera model in reports.
+- [ ] Run CPU GREEN and the legacy fixture controls, then freeze the production
+  sources, shader/compiler/dependency identities and old/new SPIR-V manifests.
+  Independent functional and performance reviews must clear before root GPU
+  execution. The performance gate `no_per_frame_alloc_wait_readback_matrix_validation`
+  inspects actual setup/submission/retirement paths and probes bounded host
+  work, retained buffers and graph reuse. Do not infer speed from source review.
+
+### 6c. Whole-chain qualification; root alone launches GPU
+
+- [ ] Build an independent geometry-generated held-out fixture oracle with
+  original RGB, supported rectified depth, explicit poses and known 3D points.
+  Bind fixtures, map/model association evidence, all sources, helpers, compiler,
+  dependencies, binaries, SPIR-V and reports before/after children. Compare
+  actual final strict/preview outputs and metadata against the independent
+  geometric oracle and preserved frozen compositor controls; no blanket
+  compound-float tolerance or CPU depth approximation substitutes for final
+  output gates. Keep previously unresolved scalar float qualification open.
+- [ ] Root runs isolated native GPU cases for the named 6a/6b contracts, then
+  core and synchronization validation, dynamic-content/same-ID inputs,
+  delayed consumers, full rings, destruction orders and bounded long stress.
+  Exercise perspective and cylindrical outputs, rotated original/rectified
+  models, mismatched grid dimensions, occlusion/ties, strict remap holes,
+  peripheral original RGB and invalid preview indices. Check every output
+  plane/default, exact int64 IDs/ages and correct depth convention. Re-run
+  legacy fixture outputs and qualify every changed shader explicitly.
+- [ ] Root measures actual capture/upload/preprocess/dual stereo/LR/metric/view
+  queue span plus host wall, query/collection costs, retained memory, throughput,
+  frame age, offered/completed/skipped inputs and backpressure at the required
+  720p/wide configurations. Report diagnostic readback separately. Use one
+  shared-context same-clock span including inter-graph gaps; sums of isolated
+  medians are not full-chain latency or FPS. The current approximately 32 ms
+  depth result does not establish 60 Hz. Full strict/preview/peripheral output
+  correctness and transfer-inclusive live 60 Hz acceptance remain mandatory;
+  document any unmet gate rather than concluding at 6a.
+
+
+Implementation verification commands (the new native contract target registers
+`daxa_view_depth_cpu_contracts` and hardware-labelled
+`daxa_view_depth_contracts`; CPU mode must not initialize Vulkan):
+
+```bash
+cmake --build build/daxa --target daxa_view_contracts daxa_view_depth_contracts daxa_view_depth_benchmark
+ctest --test-dir build/daxa -R '^daxa_view(_depth)?_cpu_contracts$' --output-on-failure
+.venv/bin/python -m pytest -q tests/test_daxa_view_depth_comparison.py tests/test_daxa_view_depth_hotpath.py
+```
+
+Watch the relevant new CPU test fail before its implementation, then require
+these commands to pass. After independent functional/performance clearance,
+root additionally runs `ctest --test-dir build/daxa -R
+'^daxa_view(_depth)?_contracts$' --output-on-failure` in the isolated core and
+synchronization validation environments, then the bound comparison harness and
+measurement app. These commands are implementation gates, not runs performed
+by this planning task. Root reviews the demonstrated envelope before any
+commit/push; planning or CPU success alone does not close Task 6.
+
+
+## User steering: paired left/right compute scheduling
+
+2026-10-27: test the useful analogue of VR multiview on the existing compute
+pipeline before continuing Task 6 production bodies. The wide-view scope stays
+active; its initial CPU RED test is preserved. The published `659f4fd` baseline
+and its exact source/native/SPIR-V archive remain the control.
+
+### First causal variant: pair eyes within each path
+
+Keep `Sequential` as the default; add explicit `PairedPerPath` scheduling and
+`--stereo-schedule sequential|paired-per-path`. One persistent paired graph
+records the existing left/right specialized dispatches back-to-back within each
+Census/clear/scan-direction/selection phase. Both references retain independent
+penalty/output buffers. Keep barriers between same-eye scan directions because
+current packed additions are non-atomic. No shader, scan recurrence, D128,
+four-path, subpixel, LR, mask, confidence or metric policy change is authorized.
+All 29 existing shader binaries must remain unchanged for this control.
+
+Retain duplicate Census buffers/computation initially to isolate scheduling.
+Measured historical duplicate Census work is only about 0.09 ms, so removing it
+cannot explain a large speedup. Shared-Census storage can be evaluated separately
+later with exact ownership and source-generation checks. Concurrent same-eye
+paths require a separate atomic or private-accumulator design and qualification;
+plain packed += must never be raced.
+
+Implementation owner: `kernel_variants`, existing Stereo/Depth headers and
+implementations, depth benchmark, native contracts and optional depth build
+registration. Oracle owner: `right_reference`, existing depth comparison harness
+and its Python tests only. Independent performance owner: `native_capture`, new
+`tests/test_daxa_depth_pair_hotpath.py` and ignored report only. One writer per
+shared surface. Root alone executes GPU workloads and makes promotion decisions.
+
+- [ ] Watch new mode/admission/timing contract tests fail, then implement the
+  private persistent pair coordinator and existing typed per-eye frames.
+- [ ] Validate aligned pair capacity before upstream upload. Retain source,
+  calibration, generation and producers through output consumers; release setup
+  prototypes and avoid control-block cycles. No per-frame allocation, waits,
+  readback, matrix validation or image loops. Use the existing admission
+  completion snapshot; report SDK scans separately in measured host cost.
+- [ ] Timestamp each paired phase around both dispatches; do not insert
+  per-reference timestamps between eyes and then claim overlap. Individual eye
+  timings are explicitly unavailable/null in paired reports. Pair total/phases
+  and actual upload-start through metric-end queue span are required. Preserve
+  real individual timings in sequential mode. Coordinate exact JSON keys before
+  authoring strict report protocol tests.
+- [ ] Preserve independent Census/integer/actual packed-P checks and all nine
+  observation plus six raw stereo byte comparisons against frozen RHI. Extend
+  source/binary/compiler/dependency/config/report binding to the schedule. Keep
+  CPU compound-float qualification explicitly open; add no float tolerance.
+- [ ] Complete independent functional and mandatory performance reviews before
+  root GPU validation. Guard actual admission/submit/collect paths and probe
+  bounded host work, allocations, staging bytes and completion snapshots.
+- [ ] Root runs small and dynamic both-mode core/synchronization contracts,
+  then full 720p exact-output checks, full rings/delayed consumers/producer
+  destruction and short static stress. No GPU run by workers.
+- [ ] Root measures sequential / paired / paired / sequential in separate,
+  fresh, non-overlapping runs at identical 720p/D128/P4/W32/two-slot settings,
+  100 measured plus 20 warmup iterations each. Keep readback/reference checks
+  outside performance loops. Compare actual complete queue span, host wall,
+  paired direction/selection intervals, enqueue/query/wait cost and requested
+  buffers. Do not sum unrelated percentiles or infer GPU occupancy from VGPRs.
+- [ ] Record benefit or regression against run-to-run variation. No automatic
+  promotion or 2x claim. If batching does not provide useful acceleration, retain
+  its causal result and continue with a separately reviewed layered dispatch or
+  all-path atomic experiment. A negative scheduling experiment does not close
+  the full stereo optimization, wide RGB-D or live 60 Hz goal.
