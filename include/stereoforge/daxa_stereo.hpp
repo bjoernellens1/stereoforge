@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 namespace stereoforge {
-enum class DaxaSgmVariant { Baseline,Wave,Packed,PackedSpecialized,PackedD128 };
+enum class DaxaSgmVariant { Baseline,Wave,Packed,PackedSpecialized,PackedD128,PackedQuad };
 enum class DaxaStereoPlane : unsigned { Disparity,Confidence,Validity,Depth,DepthValidity,Costs,Sums,LeftCensus,RightCensus,LeftCensusValid,RightCensusValid,PackedPenalties };
 struct DaxaStereoReadback {
     std::vector<float> disparity,confidence,depth;
@@ -28,6 +28,8 @@ struct DaxaStereoTiming {
 std::array<std::vector<uint32_t>,2> daxa_stereo_fixture(StereoConfig);
 DaxaStereoReadback daxa_stereo_reference(StereoConfig,std::span<const uint32_t> left,std::span<const uint32_t> right,std::optional<MetricCalibration> metric=std::nullopt);
 std::vector<uint32_t> daxa_sgm_packed_model(StereoConfig,std::span<const uint32_t> costs,unsigned wave_size);
+struct DaxaQuadSelection {std::vector<uint32_t> best,best_cost,second;};
+DaxaQuadSelection daxa_sgm_quad_model(StereoConfig,std::span<const uint32_t> sums,unsigned wave_size);
 std::vector<uint32_t> daxa_sgm_d128_model(StereoConfig,std::span<const uint32_t> costs,unsigned wave_size);
 std::vector<uint32_t> daxa_sgm_wave_model(StereoConfig,std::span<const uint32_t> costs,unsigned wave_size);
 // Single host submission thread only; callers serialize all uses of a shared

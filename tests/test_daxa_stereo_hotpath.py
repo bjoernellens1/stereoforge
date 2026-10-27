@@ -208,6 +208,44 @@ def test_cli_guard_catches_preflight_moved_after_input_allocation():
         check_setup_preflight(source,app)
 
 
+def check_quad_collectives(shader):
+    quad=body(shader,'void select_quad_body<')
+    assert 'WaveGetWaveIndex()*(wave_size/4)+wave_lane/4' in quad, 'quad pixels must use actual subgroup and lane identity'
+    assert 'linear_group(gid)*16' in quad and 'WaveGetLaneIndex()' in quad
+    assert not re.search(r'GroupMemoryBarrier|groupshared|Interlocked',quad), 'quad selection must not restore LDS, barriers or atomics'
+    assert quad.index('return;')>quad.rindex('WaveReadLaneAt('), 'all tail lanes must execute the uniform shuffles before return'
+    assert 'source=wave_lane^stride' in quad and 'for(uint stride=2;stride>0;stride/=2)' in quad
+    assert quad.rindex('WaveReadLaneAt(')<quad.index('if(lane<stride)'), 'merge predicates must not mask shuffle execution'
+    assert 'if(i<width*p.height)' in quad and 'if(lane!=0||i>=width*p.height)return;' in quad
+    for entry,layout in (('select_quad8','4,8'),('select_quad16','2,16')):
+        assert '<'+layout+'>' in body(shader,'void '+entry+'(')
+
+
+def test_quad_selection_uses_full_active_pixel_groups_without_lds():
+    shader=(ROOT/'python/stereoforge/shaders/daxa/stereo.slang').read_text()
+    source=(ROOT/'src/daxa_stereo.cpp').read_text()
+    check_quad_collectives(shader)
+    setup=body(source,'void DaxaStereo::Impl::setup(')
+    assert 'i==17||i==18' in setup[:setup.index('shader.create_flags=')], 'both quad pipelines require full subgroups'
+    assert 'PackedQuad?15:63' in setup and 'PackedQuad?16:64' in setup, 'quad dispatch must cover16 pixels per group'
+
+
+@pytest.mark.parametrize('insert,diagnostic',[('return;','uniform shuffles'),('GroupMemoryBarrierWithGroupSync();','LDS, barriers')])
+def test_quad_guard_catches_early_tail_exit_or_restored_barrier(insert,diagnostic):
+    shader=(ROOT/'python/stereoforge/shaders/daxa/stereo.slang').read_text()
+    marker='void select_quad_body<let Components:uint,let Bits:uint>(uint3 gid){'
+    assert marker in shader
+    with pytest.raises(AssertionError,match=diagnostic):
+        check_quad_collectives(shader.replace(marker,marker+insert))
+
+
+def test_quad_guard_catches_assumed_subgroup_identity():
+    shader=(ROOT/'python/stereoforge/shaders/daxa/stereo.slang').read_text()
+    start=shader.index('void select_quad_body<')
+    with pytest.raises(AssertionError,match='actual subgroup'):
+        check_quad_collectives(shader[:start]+shader[start:].replace('WaveGetWaveIndex()','0'))
+
+
 def definition(source, signature):
     start = source.index(signature)
     opening = source.index('{', start)
@@ -244,10 +282,11 @@ void* operator new[](std::size_t n){return ::operator new(n);}
 void operator delete(void* p)noexcept{std::free(p);}void operator delete[](void* p)noexcept{std::free(p);}
 void operator delete(void* p,std::size_t)noexcept{std::free(p);}void operator delete[](void* p,std::size_t)noexcept{std::free(p);}
 namespace stereoforge {
-enum class DaxaSgmVariant { Baseline,Wave,Packed,PackedSpecialized,PackedD128 };
+enum class DaxaSgmVariant { Baseline,Wave,Packed,PackedSpecialized,PackedD128,PackedQuad };
 class DaxaStereo {public:static void validate_shape(StereoConfig,unsigned,std::optional<MetricCalibration>,DaxaSgmVariant variant=DaxaSgmVariant::Baseline);static void validate(StereoConfig,std::span<const uint32_t>,std::span<const uint32_t>,unsigned,std::optional<MetricCalibration>,DaxaSgmVariant variant=DaxaSgmVariant::Baseline);static uint32_t packed_bits(StereoConfig);};
 '''
     program += definition(header, 'struct DaxaStereoReadback') + ';\n'
+    program += definition(header, 'struct DaxaQuadSelection') + ';\n'
     program += 'using uint=uint32_t;static const uint SGM_INVALID_COST=10000;uint countbits(uint x){return std::popcount(x);}\n'
     program += definition(ops, 'uint sgm_cost(') + definition(shader, 'uint specialized_cost(')
     directions = re.search(r'constexpr std::array<std::array<int,2>,8> directions.*?;', source)
@@ -256,7 +295,7 @@ class DaxaStereo {public:static void validate_shape(StereoConfig,unsigned,std::o
     for signature in ('void require(', 'float invalid_float(', 'bool inside(', 'uint32_t step(', 'uint32_t line_count(', 'std::array<int,2> line_start('):
         program += definition(source, signature)
     program += '}\n'
-    for signature in ('void DaxaStereo::validate_shape(', 'void DaxaStereo::validate(', 'uint32_t DaxaStereo::packed_bits(', 'std::vector<uint32_t> daxa_sgm_packed_model(', 'std::vector<uint32_t> daxa_sgm_d128_model(', 'std::array<std::vector<uint32_t>,2> daxa_stereo_fixture(',
+    for signature in ('void DaxaStereo::validate_shape(', 'void DaxaStereo::validate(', 'uint32_t DaxaStereo::packed_bits(', 'std::vector<uint32_t> daxa_sgm_packed_model(', 'std::vector<uint32_t> daxa_sgm_d128_model(', 'DaxaQuadSelection daxa_sgm_quad_model(', 'std::array<std::vector<uint32_t>,2> daxa_stereo_fixture(',
                       'DaxaStereoReadback daxa_stereo_reference(', 'std::vector<uint32_t> daxa_sgm_wave_model('):
         program += definition(source, signature)
     program += r'''
@@ -272,7 +311,9 @@ int main(int argc,char** argv){
   }
   if(argc==4){std::ifstream input(argv[2],std::ios::binary);uint32_t parameters[7];input.read(reinterpret_cast<char*>(parameters),sizeof(parameters));
     StereoConfig c{parameters[0],parameters[1],parameters[2],parameters[3],parameters[4],parameters[5],true};std::vector<uint32_t> costs(size_t(c.width)*c.height*c.disparities);
-    input.read(reinterpret_cast<char*>(costs.data()),costs.size()*4);if(!input)return 5;auto packed=std::string(argv[1])=="--d128"?daxa_sgm_d128_model(c,costs,parameters[6]):daxa_sgm_packed_model(c,costs,parameters[6]);
+    input.read(reinterpret_cast<char*>(costs.data()),costs.size()*4);if(!input)return 5;
+    if(std::string(argv[1])=="--quad"){auto result=daxa_sgm_quad_model(c,costs,parameters[6]);std::ofstream output(argv[3],std::ios::binary);for(auto* values:{&result.best,&result.best_cost,&result.second})output.write(reinterpret_cast<const char*>(values->data()),values->size()*4);return output?0:10;}
+    auto packed=std::string(argv[1])=="--d128"?daxa_sgm_d128_model(c,costs,parameters[6]):daxa_sgm_packed_model(c,costs,parameters[6]);
     std::ofstream output(argv[3],std::ios::binary);output.write(reinterpret_cast<const char*>(packed.data()),packed.size()*4);return output?0:6;
   }
   if(argc==2){StereoConfig c{37,11,33,8,8,32,true};auto f=daxa_stereo_fixture(c);auto r=daxa_stereo_reference(c,f[0],f[1],std::nullopt);
@@ -293,13 +334,16 @@ int main(int argc,char** argv){
   auto wave32=measure([&]{return daxa_sgm_wave_model(c,r.costs,32);});auto wave64=measure([&]{return daxa_sgm_wave_model(c,r.costs,64);});
   auto packed32=measure([&]{return daxa_sgm_packed_model(c,r.costs,32);});auto packed64=measure([&]{return daxa_sgm_packed_model(c,r.costs,64);});
   auto d12832=measure([&]{return daxa_sgm_d128_model(c,r.costs,32);});auto d12864=measure([&]{return daxa_sgm_d128_model(c,r.costs,64);});
+  auto quad32=measure([&]{return daxa_sgm_quad_model(c,r.sums,32).best_cost;});auto quad64=measure([&]{return daxa_sgm_quad_model(c,r.sums,64).best_cost;});
+  if(quad32.check!=quad64.check)return 11;
   if(daxa_sgm_d128_model(c,r.costs,32)!=daxa_sgm_packed_model(c,r.costs,32)||daxa_sgm_d128_model(c,r.costs,64)!=daxa_sgm_packed_model(c,r.costs,64))return 9;
   if(scalar.check!=wave32.check||scalar.check!=wave64.check)return 4;
   std::cout<<"{\"width\":160,\"height\":90,\"disparities\":128,\"paths\":4,\"repetitions\":3,\"scalar_reference_ms\":"<<scalar.ms
     <<",\"wave32_model_ms\":"<<wave32.ms<<",\"wave64_model_ms\":"<<wave64.ms<<",\"scalar_allocations\":"<<scalar.alloc
     <<",\"wave32_allocations\":"<<wave32.alloc<<",\"wave64_allocations\":"<<wave64.alloc
     <<",\"packed32_model_ms\":"<<packed32.ms<<",\"packed64_model_ms\":"<<packed64.ms<<",\"packed32_allocations\":"<<packed32.alloc<<",\"packed64_allocations\":"<<packed64.alloc
-    <<",\"d12832_model_ms\":"<<d12832.ms<<",\"d12864_model_ms\":"<<d12864.ms<<",\"d12832_allocations\":"<<d12832.alloc<<",\"d12864_allocations\":"<<d12864.alloc<<"}\n";
+    <<",\"d12832_model_ms\":"<<d12832.ms<<",\"d12864_model_ms\":"<<d12864.ms<<",\"d12832_allocations\":"<<d12832.alloc<<",\"d12864_allocations\":"<<d12864.alloc
+    <<",\"quad32_model_ms\":"<<quad32.ms<<",\"quad64_model_ms\":"<<quad64.ms<<",\"quad32_allocations\":"<<quad32.alloc<<",\"quad64_allocations\":"<<quad64.alloc<<"}\n";
 }
 '''
     directory = tmp_path_factory.mktemp('daxa-stereo-cpu')
@@ -342,7 +386,7 @@ def test_cpu_diagnostic_reference_and_wave_model_microbenchmark(scalar_cpu_probe
     result = json.loads(ran.stdout)
     print('Daxa stereo pure CPU diagnostic probe:', json.dumps(result, sort_keys=True))
     assert result['repetitions'] == 3
-    for field in ('scalar_reference_ms', 'wave32_model_ms', 'wave64_model_ms', 'packed32_model_ms', 'packed64_model_ms', 'd12832_model_ms', 'd12864_model_ms'):
+    for field in ('scalar_reference_ms', 'wave32_model_ms', 'wave64_model_ms', 'packed32_model_ms', 'packed64_model_ms', 'd12832_model_ms', 'd12864_model_ms', 'quad32_model_ms', 'quad64_model_ms'):
         assert 0 < result[field] < 30_000
 
 
@@ -360,6 +404,31 @@ def test_d128_admission_and_model_reject_other_disparity_counts(scalar_cpu_probe
     binary,_=scalar_cpu_probe
     result=subprocess.run([str(binary),'--d128-admission'],capture_output=True,text=True,check=True,timeout=30)
     assert result.stdout.strip()=='only_d128_admitted'
+
+
+@pytest.mark.parametrize('disparities',[1,2,3,4,5,31,32,33,64,127,128,129,255,256])
+@pytest.mark.parametrize('paths,p2',[(4,32),(8,64)])
+def test_quad_model_matches_numpy_lowest_index_and_second_cost_with_tails(scalar_cpu_probe,disparities,paths,p2):
+    binary,directory=scalar_cpu_probe
+    height,width=(5,7) if paths==4 else (7,9)
+    rng=np.random.default_rng(0x51554144+disparities+paths)
+    sums=rng.integers(0,paths*20000+1,size=(height*width,disparities),dtype=np.uint32)
+    sums[:4]=rng.integers(0,8,size=(4,disparities),dtype=np.uint32)
+    sums[0]=0;sums[1]=paths*20000
+    sums[2]=31;sums[2,-1]=0
+    sums[3]=31;sums[3,0]=0;sums[3,-1]=0
+    best=np.argmin(sums,axis=1).astype(np.uint32)
+    best_cost=np.take_along_axis(sums,best[:,None],axis=1)[:,0]
+    second=np.partition(sums,1,axis=1)[:,1] if disparities>1 else best_cost
+    for lanes in (32,64):
+        source=directory/f'quad-{disparities}-{paths}-{lanes}.input';target=source.with_suffix('.output')
+        with source.open('wb') as stream:
+            np.array([width,height,disparities,paths,8,p2,lanes],dtype='<u4').tofile(stream)
+            sums.astype('<u4').tofile(stream)
+        subprocess.run([str(binary),'--quad',str(source),str(target)],check=True,timeout=30)
+        result=np.fromfile(target,dtype='<u4').reshape(3,height*width)
+        for actual,expected in zip(result,(best,best_cost,second)):
+            np.testing.assert_array_equal(actual,expected)
 
 
 def check_packed_penalty_numpy(scalar_cpu_probe,disparities,paths,p2,model):

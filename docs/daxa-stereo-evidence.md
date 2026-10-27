@@ -127,3 +127,37 @@ checks and same-profile GPU byte comparisons must not be reported as that gate
 passing. Capture, calibrated preprocessing, the second reference, consistency,
 metadata and GPU view synthesis still need shared-context integration and
 transfer-inclusive sustained validation before a 60 Hz claim.
+
+
+## Quad selector: subgroup-specific benefit
+
+The `packed-quad` experiment reuses specialized aggregation and penalty storage.
+Four actual subgroup lanes cooperate on each pixel; register top-two selection
+uses uniform shuffles. The compiled selectors have 64 threads, no workgroup
+storage and no barriers. All seventeen earlier SPIR-V modules remain identical.
+
+Matched 30-sample/three-warmup 720p/D128/four-path results:
+
+| Subgroup | Specialized GPU / selection median | Quad GPU / selection median |
+|---|---:|---:|
+| 32 | 15.302 / 3.168 ms | 15.109 / 2.427 ms |
+| 64 | 15.684 / 3.128 ms | 16.203 / 3.602 ms |
+
+Both batches pass exact frozen-RHI outputs and integer/direct-penalty gates.
+Separate 44 core/synchronization cases cover D1..256, odd counts, both subgroup
+sizes, four/eight paths and packing bounds; all pass with zero diagnostics
+through teardown. The full CPU suite passes 583 tests. Artifacts are in
+`quad-validation`, `quad-small-parity` and `quad-720p-wave{32,64}-performance`.
+
+A follow-up wave32 C/quad/quad/C ordering uses 100 samples after 20 warmups,
+identical explicit retained inputs and no full output exports. Quad selection
+medians are 2.263 and 2.350 ms, versus 3.088 and 3.236 ms for C. Total GPU medians
+are 14.977/15.191 ms for quad and 15.382/16.669 ms for C. Unchanged aggregation
+stages also vary, so these runs do not isolate a stable whole-pipeline gain or
+justify summing stage medians. See `quad-wave32-abba/summary.json` for identities
+and commands. External shared-system activity is not globally locked.
+
+Quad remains an explicit experiment with a wave32 stage benefit; wave64 is a
+negative result and no automatic selection changes. Aggregation still dominates.
+All timings exclude the second reference, consistency, acquisition, calibrated
+preprocessing and view synthesis. The scalar compound-float gate remains open.

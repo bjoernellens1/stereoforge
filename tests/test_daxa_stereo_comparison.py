@@ -116,6 +116,15 @@ def test_identity_stability_ignores_ldd_load_addresses_but_binds_dependency_byte
     assert len(d128['daxa']['offline_spirv_sha256'])==17
     (directory/'daxa-stereo-aggregate_d1288.spv').write_bytes(b'changed d128 code')
     assert d128!=compare.native_identities(binary,binary,compiler,include_d128=True)
+    with pytest.raises(OSError):compare.native_identities(binary,binary,compiler,include_quad=True)
+    (directory/'daxa-stereo-select_quad8.spv').write_bytes(b'quad8 code')
+    with pytest.raises(OSError):compare.native_identities(binary,binary,compiler,include_quad=True)
+    (directory/'daxa-stereo-select_quad16.spv').write_bytes(b'quad16 code')
+    quad=compare.native_identities(binary,binary,compiler,include_quad=True)
+    assert len(quad['daxa']['offline_spirv_sha256'])==17
+    assert len(compare.native_identities(binary,binary,compiler,include_quad=True,include_d128=True)['daxa']['offline_spirv_sha256'])==19
+    (directory/'daxa-stereo-select_quad8.spv').write_bytes(b'changed quad code')
+    assert quad!=compare.native_identities(binary,binary,compiler,include_quad=True)
     monkeypatch.setattr(compare_daxa_view,'dependencies',lambda *args:dict(ldd=['different address'],sha256={'library.so':'b'*64}))
     assert compare.native_identities(binary,binary,compiler)!=first
 
@@ -137,16 +146,16 @@ def test_plane_comparison_is_bit_exact_including_invalid_nan_payloads(tmp_path):
     assert not compare.compare_planes(a,b,p)['passed']
 
 
-@pytest.mark.parametrize('mode',['default','packed','changed_plane','unchecked_words','wrong_layout','unmarked_reconstruction','specialized','specialized_changed_plane','specialized_unchecked_words','specialized_wrong_layout','specialized_unmarked_reconstruction','specialized_missing_integer_flag','d128','d128_changed_plane','d128_unchecked_words','d128_missing_integer_flag','d128_wrong_variant'])
+@pytest.mark.parametrize('mode',['default','packed','changed_plane','unchecked_words','wrong_layout','unmarked_reconstruction','specialized','specialized_changed_plane','specialized_unchecked_words','specialized_wrong_layout','specialized_unmarked_reconstruction','specialized_missing_integer_flag','d128','d128_changed_plane','d128_unchecked_words','d128_missing_integer_flag','d128_wrong_variant','quad','quad_changed_plane','quad_unchecked_words','quad_missing_words','quad_missing_integer_flag','quad_wrong_variant','quad_incomplete_subgroup'])
 def test_cpu_only_full_orchestration_records_shared_bytes_and_distinct_timing_scopes(tmp_path,monkeypatch,mode):
     from types import SimpleNamespace
     directory=tmp_path/'comparison'
     identities=dict(daxa=dict(compiler_sha256='compiler',shader_source_sha256={'wrapper':'wrapper','ops':'ops'}))
     monkeypatch.setattr(compare,'native_identities',lambda *args:copy.deepcopy(identities))
     calls=[]
-    d128=mode.startswith('d128');specialized=mode.startswith('specialized') or d128
-    target='packed-d128' if d128 else 'packed-specialized' if specialized else 'packed'
-    failure=mode.removeprefix('specialized_').removeprefix('d128_')
+    d128=mode.startswith('d128');quad=mode.startswith('quad');specialized=mode.startswith('specialized') or d128 or quad
+    target='packed-quad' if quad else 'packed-d128' if d128 else 'packed-specialized' if specialized else 'packed'
+    failure=mode.removeprefix('specialized_').removeprefix('d128_').removeprefix('quad_')
     def child(command,**kwargs):
         calls.append(command)
         flags={'--dump-intermediates','--check-integer-reference'};opt={};i=1
@@ -173,6 +182,8 @@ def test_cpu_only_full_orchestration_records_shared_bytes_and_distinct_timing_sc
                 report.update(packed_report(p,True),packed_penalties_reference_checked=True,scalar_reference_checked=False,compound_float_reference_checked=False)
                 if opt['--variant']==target:
                     if failure=='unchecked_words':report['packed_penalties_reference_checked']=False
+                    if failure=='missing_words':del report['packed_penalties_reference_checked']
+                    if failure=='incomplete_subgroup':report['full_subgroups_required']=False
                     if failure=='wrong_layout':report['packed_penalty_layout']='unknown'
                     if failure=='unmarked_reconstruction':report['diagnostic_intermediates_reconstructed']=False
                     if failure=='missing_integer_flag':del report['integer_reference_checked']
@@ -190,15 +201,16 @@ def test_cpu_only_full_orchestration_records_shared_bytes_and_distinct_timing_sc
         '--rhi-binary','/rhi','--daxa-binary','/daxa','--width','32','--height','16','--disparities','32','--validation-only']
     if mode!='default':argv+=['--include-packed','--dump-intermediates','--check-integer-reference']
     if specialized:argv+=['--include-specialized']
+    if quad:argv+=['--include-quad']
     if d128:
         argv+=['--include-d128'];argv[argv.index('--disparities')+1]='128'
     monkeypatch.setattr(sys,'argv',argv)
-    if mode in ('default','packed','specialized','d128'):compare.main()
+    if mode in ('default','packed','specialized','d128','quad'):compare.main()
     else:
         with pytest.raises(SystemExit):compare.main()
     evidence=json.loads((directory/'comparison.json').read_text())
-    assert evidence['passed']==(mode in ('default','packed','specialized','d128'))
-    assert len(calls)==(3 if mode=='default' else 6 if d128 else 5 if specialized else 4)
+    assert evidence['passed']==(mode in ('default','packed','specialized','d128','quad'))
+    assert len(calls)==(3 if mode=='default' else 6 if d128 or quad else 5 if specialized else 4)
     assert evidence['performance_qualified_counts'] is False and evidence['frames']==1 and evidence['warmup']==0
     assert evidence['timing_contract']['comparable_end_to_end'] is False
     assert evidence['selected'] is None
@@ -221,6 +233,11 @@ def test_cpu_only_full_orchestration_records_shared_bytes_and_distinct_timing_sc
         for other in ('rhi','baseline','packed','packed-specialized'):assert evidence['comparisons'][other+'_vs_packed_d128']['passed']
         assert evidence['packed_d128_word_reference_checked'] is True
         assert evidence['packed_d128_word_dump']['representation']=='actual GPU packed penalty words'
+    if mode=='quad':
+        assert evidence['include_quad'] and evidence['include_specialized'] and evidence['include_packed'] and not evidence['include_d128']
+        for other in ('rhi','baseline','packed','packed-specialized'):assert evidence['comparisons'][other+'_vs_packed_quad']['passed']
+        assert evidence['packed_quad_word_reference_checked'] is True
+        assert evidence['packed_quad_word_dump']['representation']=='actual GPU packed penalty words'
     assert all(command[command.index('--left')+1]==str(directory/'left.u32') for command in calls)
 
 
@@ -323,3 +340,14 @@ def test_d128_opt_in_implies_previous_candidates_and_rejects_wrong_shape(tmp_pat
     monkeypatch.setattr(sys,'argv',['compare','--output',str(directory),'--compiler','/unused','--disparities','64','--include-d128'])
     with pytest.raises(SystemExit):compare.main()
     assert not directory.exists()
+
+
+def test_quad_opt_in_implies_generic_packed_candidates_without_d128(tmp_path):
+    for disparities in (16,32,128):
+        p=dict(profile(),disparities=disparities);paths={'left':'L','right':'R'}
+        old=compare.commands(Path('/rhi'),Path('/daxa'),tmp_path,p,paths,30,3,1,False,False,include_specialized=True)
+        calls=compare.commands(Path('/rhi'),Path('/daxa'),tmp_path,p,paths,30,3,1,False,False,include_quad=True)
+        assert set(calls)==set(old)|{'packed-quad'}
+        assert all(calls[key]==old[key] for key in old)
+        assert calls['packed-quad'][calls['packed-quad'].index('--variant')+1]=='packed-quad'
+        assert 'packed-d128' not in calls
