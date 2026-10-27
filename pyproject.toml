@@ -11,7 +11,7 @@ description = "Vulkan-only stereo vision and explicit geometric view synthesis"
 requires-python = ">=3.11"
 dependencies = ["numpy>=2.1,<3", "opencv-python-headless>=4.10,<5"]
 [project.optional-dependencies]
-shared-reduction = ["sintergpu>=0.1.0,<0.2.0"]
+shared-reduction = ["sintergpu @ https://github.com/bjoernellens1/sintergpu/releases/download/v0.1.0/sintergpu-0.1.0-py3-none-any.whl#sha256=2de6610de431abb4ed687793dd368ebf09567ebabda5ad5e0f6512cc85c300bf"]
 gpu = ["slangpy==0.43.1"]
 capture = ["pybind11==2.13.6"]
 test = ["pytest>=8,<10"]
