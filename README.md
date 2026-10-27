@@ -159,6 +159,28 @@ SGM work: aggregation remains dense over the configured disparity range.
   layer extracted locally enabled bounded positive core-validation checks; see
   [validation evidence](docs/vulkan-validation-evidence.md).
 
+## Opt-in Daxa + Slang foundation
+
+The independent Linux x86_64 foundation uses pinned Daxa and an official Linux
+Slang SDK for offline SPIR-V compilation. Its executable does not link Python,
+SGL, Slang RHI or the Slang compiler. This is a foundation qualification fixture;
+its bounded GPU contract/core-validation checks pass on the tested AMD device.
+The stereo pipeline migration and sustained real-time operation remain open.
+See [foundation evidence](docs/daxa-foundation-evidence.md) for current results,
+source patches, licenses and timing scope.
+
+```bash
+cmake --preset daxa
+cmake --build --preset daxa
+mkdir -p artifacts/daxa-foundation-20261027
+build/daxa/daxa_probe --validation --output artifacts/daxa-foundation-20261027/probe.json
+ctest --preset daxa --output-on-failure
+```
+
+These checks require the Khronos validation layer. For the existing local
+extraction, set `VK_LAYER_PATH` and `LD_LIBRARY_PATH` as documented in the
+[validation evidence](docs/vulkan-validation-evidence.md) before running them.
+
 ## Standalone C++ runtime
 
 Build without Python, SlangPy or SGL using `cmake --preset standalone` and

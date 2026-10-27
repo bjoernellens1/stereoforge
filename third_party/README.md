@@ -5,10 +5,12 @@ repository for public Apache-2.0 publication. It does not clear a bundled binary
 release. Dependency licenses remain separate from StereoForge's own license.
 
 Python versions/hashes are in `uv.lock`; CMake source revisions/hashes are in
-`cmake/Capture.cmake` and `cmake/StandaloneRHI.cmake`. Full notice texts are in [licenses](licenses/).
+`cmake/Capture.cmake`, `cmake/StandaloneRHI.cmake` and `cmake/Daxa.cmake`. Full notice texts are in [licenses](licenses/).
 
 | Component | Actual source license / election | Use |
 |---|---|---|
+| Daxa tag `3.6`, `00761e80c1dd6d1972d5f4569ce49620a7b4d384` | MIT (actual LICENSE retained) | Independent native Vulkan foundation |
+| Vulkan Memory Allocator `v3.1.0`, `009ecd192c1289c7529bff248a16cfe896254816` | MIT (actual LICENSE.txt retained) | Required Daxa implementation dependency |
 | SlangPy 0.43.1 | Apache-2.0 WITH LLVM-exception (actual LICENSE; metadata omits exception) | Python research Vulkan; optional research native provider |
 | Slang 2026.12 | Apache-2.0 WITH LLVM-exception | SPIR-V compiler and fetched helper headers |
 | Slang RHI `1a9768741246b1f356116d5dfa305933034ce049` | Apache-2.0 WITH LLVM-exception | Source-built standalone native API; optional research provider |
@@ -33,3 +35,11 @@ mean a complete environment is not uniformly Apache/BSD licensed. StereoForge
 uses Vulkan explicitly; it does not require or initialize CUDA/ROCm. Audit the
 actual contents and licenses before redistributing wheels, native bundles or
 containers, including platform-specific and numerical runtime dependencies.
+
+The Daxa foundation compiles SPIR-V offline with the Linux Slang 2026.12 SDK;
+its pipeline managers and optional third-party utility integrations are disabled.
+The SDK LICENSE matches the retained Slang notice. Daxa and VMA notices are exact
+copies from the pinned source archives. Preserve both when distributing their
+source or compiled code. Optional Daxa dependency licenses and the exact system
+Vulkan/window-library inventory are pending if those components are bundled;
+this inventory does not clear a complete native bundle or Slang SDK redistribution.

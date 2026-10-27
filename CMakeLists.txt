@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 project(StereoForge VERSION 0.1.0 LANGUAGES CXX)
 include(CTest)
+option(STEREOFORGE_DAXA "Build the independent pinned Daxa + Slang foundation" OFF)
 option(STEREOFORGE_RHI "Build the pinned Slang RHI Vulkan native stereo runtime" OFF)
 set(STEREOFORGE_RHI_PROVIDER "standalone" CACHE STRING "RHI provider: standalone production or slangpy research")
 set_property(CACHE STEREOFORGE_RHI_PROVIDER PROPERTY STRINGS standalone slangpy)
@@ -91,4 +92,26 @@ endif()
 endif()
 if(STEREOFORGE_CAPTURE)
   include(cmake/Capture.cmake)
+endif()
+
+if(STEREOFORGE_DAXA)
+  include(cmake/Daxa.cmake)
+  add_library(stereoforge_daxa_foundation src/daxa_foundation.cpp)
+  target_link_libraries(stereoforge_daxa_foundation PUBLIC stereoforge_contracts daxa::daxa Vulkan::Vulkan PRIVATE GPUOpen::VulkanMemoryAllocator)
+  target_compile_definitions(stereoforge_daxa_foundation PUBLIC
+    SF_DAXA_REVISION="${STEREOFORGE_DAXA_REVISION}"
+    SF_DAXA_SLANG_VERSION="${STEREOFORGE_DAXA_SLANG_VERSION}"
+    SF_DAXA_COMPILER_SHA256="${SF_DAXA_COMPILER_SHA256}"
+    SF_DAXA_SPIRV="${SF_DAXA_SPIRV}")
+  add_dependencies(stereoforge_daxa_foundation daxa_foundation_shader)
+  add_executable(daxa_probe apps/daxa_probe.cpp)
+  target_link_libraries(daxa_probe PRIVATE stereoforge_daxa_foundation)
+  if(BUILD_TESTING)
+    add_executable(daxa_foundation_contracts tests/daxa_foundation.cpp)
+    target_link_libraries(daxa_foundation_contracts PRIVATE stereoforge_daxa_foundation)
+    add_test(NAME daxa_foundation_contracts COMMAND daxa_foundation_contracts --validation)
+    set_tests_properties(daxa_foundation_contracts PROPERTIES LABELS "vulkan;hardware;daxa")
+    add_test(NAME daxa_foundation_source_contracts COMMAND "${CMAKE_COMMAND}"
+      "-DDAXA_SOURCE=${SF_DAXA_SOURCE_DIR}" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/daxa_source_contracts.cmake")
+  endif()
 endif()

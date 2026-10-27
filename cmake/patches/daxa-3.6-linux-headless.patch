@@ -1,0 +1,53 @@
+--- a/src/utils/impl_task_graph.cpp
++++ b/src/utils/impl_task_graph.cpp
+@@ -2737,8 +2737,8 @@
+             return r0_lifetime > r1_lifetime; });
+
+         // Calculate transient heap size and allocation offsets.
+-        auto resource_heap_size = 0ull;
+-        auto resource_heap_alignment = 0ull;
++        u64 resource_heap_size = 0;
++        u64 resource_heap_alignment = 0;
+         auto resource_heap_memory_bits = ~0u;
+         struct NonExternalResourceAllocation
+         {
+@@ -3604,11 +3604,13 @@
+         /// ==== DEBUG UI HOOK ====
+         /// =======================
+
++#if DAXA_BUILT_WITH_UTILS_IMGUI
+         ImplTaskGraphDebugUi * debug_ui_context = info.debug_ui ? info.debug_ui->get() : nullptr;
+         if (debug_ui_context && debug_ui_context->resource_viewer_states.size() == 0)
+         {
+             debug_ui_context = nullptr; // We only care about the debug ui when there are active attachment viewers.
+         }
++#endif
+
+         /// ====================================
+         /// ==== RECORD AND SUBMIT COMMANDS ====
+@@ -3873,10 +3875,12 @@
+                                 .name = task.name.data(),
+                             });
+                         }
++#if DAXA_BUILT_WITH_UTILS_IMGUI
+                         if (debug_ui_context)
+                         {
+                             task_resource_viewer_debug_ui_hook(*debug_ui_context, &impl, task_i, interface, true);
+                         }
++#endif
+                         if (impl.info.pre_task_callback)
+                         {
+                             impl.info.pre_task_callback(interface);
+@@ -3886,10 +3890,12 @@
+                         {
+                             impl.info.post_task_callback(interface);
+                         }
++#if DAXA_BUILT_WITH_UTILS_IMGUI
+                         if (debug_ui_context)
+                         {
+                             task_resource_viewer_debug_ui_hook(*debug_ui_context, &impl, task_i, interface, false);
+                         }
++#endif
+                         if (impl.info.enable_command_labels)
+                         {
+                             impl_runtime.recorder.end_label();

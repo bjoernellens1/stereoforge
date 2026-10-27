@@ -1,5 +1,15 @@
 # License evaluation — public source repository
 
+Daxa foundation follow-up (2026-10-27): the independent Daxa/Slang build
+selects Daxa tag `3.6`, revision `00761e80c1dd6d1972d5f4569ce49620a7b4d384`,
+and its required Vulkan Memory Allocator (VMA) `v3.1.0`, resolved revision
+`009ecd192c1289c7529bff248a16cfe896254816`. Both downloaded source license
+files were inspected and retained byte-for-byte under `third_party/licenses`.
+Their MIT terms introduce no identified source-publication blocker for this
+selection. This finding is limited to the selected sources, not every optional
+Daxa dependency or the contents of a future binary bundle. The Linux Slang
+2026.12 SDK's actual LICENSE matches the existing retained Slang notice.
+
 Standalone follow-up (2026-10-27): the production provider now source-builds
 Slang RHI revision `1a9768741246b1f356116d5dfa305933034ce049` against the official
 Slang 2026.12 SDK. Both archive hashes are pinned in cmake/StandaloneRHI.cmake;
@@ -40,6 +50,8 @@ retain their own terms; the project license does not relicense them.
 | ZED Open Capture `93739154903a66c112ee52c3c6fbfd83b7218617` | MIT | Compatible with publication. Keep full copyright/permission/disclaimer when distributing its source or compiled capture module. |
 | hidapi header `d6b2a974608dec3b76fb1e36c189f22b9cf3650c` and local hidapi 0.15.0 | User-selectable GPL-3.0 / BSD-style / original terms; **StereoForge elects BSD-3-Clause** | GPL is not mandatory for this use. Preserve the elected BSD notice and disclaimer. The local capture module links the hidraw backend dynamically. |
 | pybind11 2.13.6 | BSD-3-Clause | Compatible; preserve its notice in redistributed bindings/binaries. |
+| Daxa tag `3.6`, source `00761e80c1dd6d1972d5f4569ce49620a7b4d384` | MIT; actual source LICENSE inspected | Independent native Vulkan foundation. Preserve full notice in source/compiled distributions. |
+| Vulkan Memory Allocator `v3.1.0`, source `009ecd192c1289c7529bff248a16cfe896254816` | MIT; actual source LICENSE.txt inspected | Required Daxa implementation dependency (`VMA_IMPLEMENTATION`); preserve full AMD notice. |
 | SlangPy 0.43.1, source `2f6c4625fdd2b3bd812ca6cd2802cf98bd89b248` | Actual LICENSE is **Apache-2.0 WITH LLVM-exception** | Compatible. Metadata's shorter Apache label omits the exception; the license text governs this evaluation. |
 | Slang 2026.12, source `a7fbf1ab0e9ddd18b0a9eaa675ddc95f63532fee` | Apache-2.0 WITH LLVM-exception | Compatible. Includes the two fetched compiler helper headers; retain relevant notices. |
 | RHI bundled with SlangPy, source `1a9768741246b1f356116d5dfa305933034ce049` | Apache-2.0 WITH LLVM-exception | Compatible. This is the actual bundled pin, not today's upstream HEAD. |
@@ -51,12 +63,32 @@ retain their own terms; the project license does not relicense them.
 | Pygments 2.21.0; colorama 0.4.6 | BSD-2-Clause; BSD-3-Clause respectively | Fetched test/platform dependencies; colorama is not installed in this Linux environment. |
 | typing-extensions 4.16.0 | PSF-2.0 | Fetched dependency; retain its license if bundled. |
 
+The selected Daxa foundation uses the separately obtained Linux Slang 2026.12
+`slangc` to compile SPIR-V offline; Daxa's Slang/GLSL pipeline managers, SPIR-V
+validation utility, tests, tools, ImGui/ImPlot and FidelityFX integrations are
+disabled. Daxa's upstream Windows-only Slang bootstrap is therefore bypassed;
+that bootstrap limitation is a build issue, not a new license restriction.
+The task graph and memory utilities are enabled and add no further fetched
+source dependencies in the inspected CMake files. At this pin, `cmake/deps.cmake`
+and the selected `src`/`include` tree contain no volk, fmt, robin-map, glm or
+SPIRV-Reflect dependency. Vulkan headers/loader come from system discovery rather
+than a pinned Vulkan-Headers source fetch. Optional dependency licenses have not
+been inventoried or cleared here. Changing
+these options requires reviewing the newly selected source and license files.
+Daxa also discovers Linux system dependencies (Vulkan headers/loader, X11 and
+Wayland/xkbcommon where available); their exact linked versions and notices remain
+pending for any binary redistribution inventory. They are not copied by this
+source-publication change. Slang SDK binary contents and generated-shader release
+obligations likewise require artifact-specific review before bundling.
+
 Setuptools is a separately resolved MIT-licensed build tool, not a vendored
 runtime. CMake/Ninja, Python and system loader/runtime packages are also obtained
 separately. A binary release must inventory the actual versions and system
 libraries it packages rather than infer their licenses from this source table.
 
-Primary evidence: [Open Capture MIT](https://github.com/stereolabs/zed-open-capture/blob/93739154903a66c112ee52c3c6fbfd83b7218617/LICENSE),
+Primary evidence: [Daxa MIT](https://github.com/Ipotrick/Daxa/blob/00761e80c1dd6d1972d5f4569ce49620a7b4d384/LICENSE),
+[VMA MIT](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator/blob/009ecd192c1289c7529bff248a16cfe896254816/LICENSE.txt),
+[Open Capture MIT](https://github.com/stereolabs/zed-open-capture/blob/93739154903a66c112ee52c3c6fbfd83b7218617/LICENSE),
 [hidapi license choice](https://github.com/libusb/hidapi/blob/d6b2a974608dec3b76fb1e36c189f22b9cf3650c/LICENSE.txt),
 [hidapi BSD terms](https://github.com/libusb/hidapi/blob/d6b2a974608dec3b76fb1e36c189f22b9cf3650c/LICENSE-bsd.txt),
 [pybind11 license](https://github.com/pybind/pybind11/blob/v2.13.6/LICENSE),
@@ -85,6 +117,8 @@ Verified notice SHA256 values:
 
 | Notice | SHA256 |
 |---|---|
+| Daxa MIT | `566dadaf9e98c94b563f168488e0b696ebc9e216ee6e126650c73a9c7a3c3914` |
+| VMA MIT | `f56ab0392925231e34dd008a7670bb5c5ead490203bc9e125de3106fef642a27` |
 | Open Capture MIT | `74e2b9fe5d883aec86d16546f68f7963232ceedd7e7b61c302303a5ae9a9f402` |
 | hidapi BSD | `30eb1bef29b46f8ba7ab8b416035dbd93cb034a45481dd97815b944284582cd2` |
 | hidapi license selector | `7d3b087c34f35d4d538e3bcddd1ff8f66e92f9ef336881999482800ddf840913` |

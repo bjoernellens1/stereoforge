@@ -62,13 +62,15 @@ writing bindings; do not infer compatibility from the current RHI API.
 
 **Interfaces:** `STEREOFORGE_DAXA=OFF` by default; a `daxa` preset enables an independent Daxa executable without linking `stereoforge_runtime`. `daxa_probe --output FILE` emits exact versions, required/available features, subgroup sizes, resource limits, memory/coherency choices and actionable missing-feature errors.
 
-- [ ] Write failing `daxa_foundation_contracts` cases for the pinned SDK/build configuration and externally registered resident-buffer views. The GPU regression writes/reads a Daxa-created application buffer across graph executions, validates its view and generation, and checks tiny final counters under Khronos validation.
-- [ ] Pin Daxa full commit/source hash and an explicit Linux Slang SDK. First test the existing 2026.12 Linux SDK deliberately; if incompatible, record the failure and test a separately pinned Linux SDK supported by Daxa. Preserve compiler identity in every comparison; do not silently use its Windows bootstrap or RHI-linked compiler.
-- [ ] Resolve the documented external-resource blocker with a verified upstream fix or one minimal checked-in patch and its regression. Record the original failing revision; this is a dependency fix, not a new StereoForge resource framework.
-- [ ] Add the probe/build wiring, source/transitive license inventory and notices; query actual AMD capabilities and UMA coherency rather than hardcoding support.
-- [ ] Run `cmake --preset daxa`, `cmake --build --preset daxa`, then `ctest --test-dir build/daxa -R daxa_foundation --output-on-failure`. Require actual Daxa/Slang device execution and clean core validation; unavailable features/build support remain a recorded blocker. A skipped native test is not a pass.
+- [x] Write failing `daxa_foundation_contracts` cases for the pinned SDK/build configuration and externally registered resident-buffer views. The GPU regression writes/reads a Daxa-created application buffer across graph executions, validates its view and generation, and checks tiny final counters under Khronos validation.
+- [x] Pin Daxa full commit/source hash and an explicit Linux Slang SDK. First test the existing 2026.12 Linux SDK deliberately; if incompatible, record the failure and test a separately pinned Linux SDK supported by Daxa. Preserve compiler identity in every comparison; do not silently use its Windows bootstrap or RHI-linked compiler.
+- [x] Resolve the documented external-resource blocker with a verified upstream fix or one minimal checked-in patch and its regression. Record the original failing revision; this is a dependency fix, not a new StereoForge resource framework.
+- [x] Add the probe/build wiring, source/transitive license inventory and notices; query actual AMD capabilities and UMA coherency rather than hardcoding support.
+- [x] Run `cmake --preset daxa`, `cmake --build --preset daxa`, then `ctest --test-dir build/daxa -R daxa_foundation --output-on-failure`. Require actual Daxa/Slang device execution and clean core validation; unavailable features/build support remain a recorded blocker. A skipped native test is not a pass.
 
 **Gate:** No production migration or externally registered history/ring resources until Linux build, feature, license and external-view checks pass. If they fail, retain the working RHI reference and record the specific blocker; do not claim Daxa adoption.
+
+Verified 2026-10-27: the bounded foundation gate passes; see [foundation evidence](../../daxa-foundation-evidence.md). This does not qualify the Task 2 compositor or the complete production chain.
 
 ## Task 2: Match the resident RHI compositor in a small Daxa POC
 

@@ -1,0 +1,7 @@
+file(READ "${DAXA_SOURCE}/src/utils/impl_task_graph.cpp" source)
+foreach(kind buffer blas tlas)
+  string(REGEX MATCH "auto TaskGraph::register_${kind}[^}]*}[^}]*}" registration "${source}")
+  if(NOT registration MATCHES "task_graph_index = impl.unique_index" OR NOT registration MATCHES "index = static_cast<u32>")
+    message(FATAL_ERROR "register_${kind} returns a malformed positional view; explicit graph identity and resource index required")
+  endif()
+endforeach()

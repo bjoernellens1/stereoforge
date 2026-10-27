@@ -142,3 +142,27 @@ Slang RHI benchmark baseline and shared Slang reference for the planned
 Daxa + Slang runtime; they do not implement Daxa or qualify sustained 60 Hz.
 See [select-kernel-evidence.md](select-kernel-evidence.md) for timing scopes,
 p95, commands, hashes and qualification limits.
+
+
+Daxa Task 1 foundation follow-up: opt-in independent Linux Daxa/Slang build,
+Daxa CTest **3/3**, capability probe and 300-execution primitive benchmark pass
+with Khronos core validation loaded and zero warnings/errors through device close.
+Three fresh GPU frames retain changing IDs through producer/consumer graphs with
+only a final 12-byte readback. Clean unpatched external-view registration fails;
+the bounded three-return-field patch passes. Offline official Slang 2026.12
+compilation requires no Python/SGL/Slang RHI/compiler runtime linkage. The tiny
+benchmark measures CPU enqueue p50 **33.192 microseconds** / p95 **43.432
+microseconds**, including per-execute reclamation, with explicit batch-16
+backpressure reported separately. GPU timestamp timing is unavailable. This is
+Task 1 foundation qualification only: no full Daxa pipeline adoption, compositor
+speedup, synchronization-validation or sustained 60 Hz claim. Selected-source
+licenses are reviewed; binary release inventory remains pending. See
+[daxa-foundation-evidence.md](daxa-foundation-evidence.md) for raw artifact paths,
+source/binary hashes, failure history and measurement boundaries.
+
+Task 1 final regression checks: **319 Python tests pass** (5.05 s), existing
+standalone Slang RHI CTest **5/5**, Daxa CTest **3/3**. A deliberately unavailable
+Khronos layer makes the Daxa probe exit 1 with a blocked JSON report; missing
+validation is not silently passed. Daxa still allocates internal command-recorder
+objects per execution and garbage-collects them; no allocation-free claim is made.
+Tiny-graph benchmark timings cover CPU submission/completion only.

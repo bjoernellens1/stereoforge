@@ -29,6 +29,16 @@
         "STEREOFORGE_RHI_PROVIDER": "standalone",
         "STEREOFORGE_CAPTURE": "OFF"
       }
+    },
+    {
+      "name": "daxa",
+      "inherits": "cpu",
+      "binaryDir": "${sourceDir}/build/daxa",
+      "cacheVariables": {
+        "STEREOFORGE_DAXA": "ON",
+        "STEREOFORGE_RHI": "OFF",
+        "STEREOFORGE_CAPTURE": "OFF"
+      }
     }
   ],
   "buildPresets": [
@@ -43,6 +53,10 @@
     {
       "name": "standalone",
       "configurePreset": "standalone"
+    },
+    {
+      "name": "daxa",
+      "configurePreset": "daxa"
     }
   ],
   "testPresets": [
@@ -66,6 +80,10 @@
       "output": {
         "outputOnFailure": true
       }
+    },
+    {
+      "name": "daxa",
+      "configurePreset": "daxa"
     }
   ]
 }

@@ -1,0 +1,29 @@
+--- a/src/utils/impl_task_graph.cpp
++++ b/src/utils/impl_task_graph.cpp
+@@ -870,7 +870,7 @@
+         auto & impl = *reinterpret_cast<ImplTaskGraph *>(this->object);
+         register_external_buffer_helper(impl, TaskResourceKind::BUFFER, buffer.get());
+
+-        return {static_cast<u32>(impl.resources.size() - 1u), impl.unique_index};
++        return {.task_graph_index = impl.unique_index, .index = static_cast<u32>(impl.resources.size() - 1u)};
+     }
+
+     auto TaskGraph::register_blas(ExternalTaskBlas const & blas) -> TaskBlasView
+@@ -878,7 +878,7 @@
+         auto & impl = *reinterpret_cast<ImplTaskGraph *>(this->object);
+         register_external_buffer_helper(impl, TaskResourceKind::BLAS, blas.get());
+
+-        return {static_cast<u32>(impl.resources.size() - 1u), impl.unique_index};
++        return {.task_graph_index = impl.unique_index, .index = static_cast<u32>(impl.resources.size() - 1u)};
+     }
+
+     auto TaskGraph::register_tlas(ExternalTaskTlas const & tlas) -> TaskTlasView
+@@ -886,7 +886,7 @@
+         auto & impl = *reinterpret_cast<ImplTaskGraph *>(this->object);
+         register_external_buffer_helper(impl, TaskResourceKind::TLAS, tlas.get());
+
+-        return {static_cast<u32>(impl.resources.size() - 1u), impl.unique_index};
++        return {.task_graph_index = impl.unique_index, .index = static_cast<u32>(impl.resources.size() - 1u)};
+     }
+
+     auto TaskGraph::register_image(ExternalTaskImage const & timg) -> TaskImageView
