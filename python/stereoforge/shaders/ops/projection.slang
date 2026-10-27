@@ -4,6 +4,13 @@
 // source depths before upload and supplies undistorted, unit-Z source rays.
 
 
+#ifndef SF_METRIC_RGB
+#define SF_METRIC_RGB(index) source_rgb[index]
+#define SF_PREVIEW_RGB(index) source_rgb[index]
+#define SF_PREVIEW_BOUND (2*src_width*src_height)
+#define SF_PREVIEW_OWNER(index) index
+#endif
+
 bool project_source(uint index, out uint target, out float depth)
 {
     target=0; depth=0;
@@ -87,7 +94,7 @@ void resolve(uint3 dispatch_id : SV_DispatchThreadID)
     if (target>=target_width*target_height) return;
     uint index=owner[target];
     if (index==0xffffffff) return;
-    output_rgb[target]=source_rgb[index];
+    output_rgb[target]=SF_METRIC_RGB(index);
     output_valid[target]=1;
     output_source[target]=index<src_width*src_height ? 1 : 2;
     output_provenance[target]=source_provenance[index];
@@ -153,8 +160,8 @@ void histogram_ratios(uint3 tid:SV_DispatchThreadID)
 {
     uint t=tid.x,count=target_width*target_height;
     if(t>=count||exposure_enabled==0||!compatible_layers(t))return;
-    float3 l=unpack_color(source_rgb[layer_owner[t]]);
-    float3 r=unpack_color(source_rgb[layer_owner[count+t]]);
+    float3 l=unpack_color(SF_METRIC_RGB(layer_owner[t]));
+    float3 r=unpack_color(SF_METRIC_RGB(layer_owner[count+t]));
     for(uint c=0;c<3;c++)if(l[c]>8&&l[c]<247&&r[c]>8&&r[c]<247){
         // Valid integer colors bound ratios to [9/246,246/9]. Symmetric
         // log bins preserve both middle values before the final gain clamp.
@@ -195,7 +202,10 @@ void resolve_layers(uint3 tid:SV_DispatchThreadID)
         if(preview_enabled!=0){
             uint index=preview_indices[t],source=1;
             if(index==0xffffffff){index=preview_indices[count+t];source=2;}
-            if(index!=0xffffffff){owner[t]=index;output_rgb[t]=source_rgb[index];output_rgb_valid[t]=1;output_source[t]=source;output_approximate[t]=1;}
+            #ifdef SF_TYPED_VIEW
+            if(index!=0xffffffff&&(index>=SF_PREVIEW_BOUND||index/(SF_PREVIEW_BOUND/2)!=source-1))index=0xffffffff;
+#endif
+            if(index!=0xffffffff){owner[t]=SF_PREVIEW_OWNER(index);output_rgb[t]=SF_PREVIEW_RGB(index);output_rgb_valid[t]=1;output_source[t]=source;output_approximate[t]=1;}
         }
         return;
     }
@@ -204,12 +214,12 @@ void resolve_layers(uint3 tid:SV_DispatchThreadID)
     bool right=rv&&(!lv||(!compatible&&rz<lz)||(compatible&&source_confidence[r]>source_confidence[l]));
     uint chosen=right?r:l;
     float3 gains=float3(exposure_gain[0],exposure_gain[1],exposure_gain[2]);
-    float3 color=unpack_color(source_rgb[chosen])*(right?gains:float3(1));
+    float3 color=unpack_color(SF_METRIC_RGB(chosen))*(right?gains:float3(1));
     uint attribution=right?2:1;
     if(compatible&&abs(source_confidence[l]-source_confidence[r])<=.1){
         float weight=source_confidence[l]+source_confidence[r];
         float alpha=weight>0?source_confidence[l]/weight:.5;
-        color=unpack_color(source_rgb[l])*alpha+unpack_color(source_rgb[r])*gains*(1-alpha);
+        color=unpack_color(SF_METRIC_RGB(l))*alpha+unpack_color(SF_METRIC_RGB(r))*gains*(1-alpha);
         attribution=3;
     }
     owner[t]=chosen;output_rgb[t]=pack_color(color);output_valid[t]=1;output_rgb_valid[t]=1;

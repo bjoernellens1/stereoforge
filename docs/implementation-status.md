@@ -202,3 +202,29 @@ qualification. See [kernel-variant-evidence.md](kernel-variant-evidence.md) and
 synchronization comparisons pass both readback policies with exact metadata and
 zero validation diagnostics. Final root regression passes **433 Python tests**
 without skips; fresh joint-capture and Daxa CPU CTests each pass **2/2**.
+
+
+### 2026-10-27: retained native depth-to-view integration
+
+The opt-in Daxa View accepts typed retained depth output in one shared Vulkan
+context, with setup-validated map/model association, separate rectified metric
+and original preview RGB spaces, perspective axial Z and cylindrical ray range.
+A legacy last-owner Frame assignment teardown regression was reproduced, fixed
+with child-before-context release ordering, and requalified with original
+teardown assertions plus copy/move/self/cross-owner tests.
+
+The frozen revision passes 1,436 CPU tests (37 deselected), nine CPU CTests,
+native legacy/typed core and synchronization contracts, all eleven output planes
+for 12 synthetic geometry profiles in strict/preview under core/sync validation,
+and a 300+3 repeated-720p-frame synchronization stress run. Native validation is
+clean in these runs; the frozen RHI numerical control is explicitly not validation
+qualified and supports only perspective comparisons. Cylindrical uses the
+restricted independent known-point oracle, not claimed RHI parity.
+
+Post-repair ABBA run means span 33.98–35.85 ms GPU chain and 34.44–36.32 ms host
+wall, with roughly 2 ms View cost and 1,032,292,504 requested buffer bytes. The
+actual independent SGM output remains GPU resident; optional exports occur after
+timing. This is static synthetic repeated-input evidence, not stereo accuracy,
+physical calibration, live throughput, peak-memory or 60 Hz acceptance. Full
+Task 6 acceptance and native temporal/adaptive/live work remain open. See
+[bounded evidence](daxa-view-depth-evidence.md).

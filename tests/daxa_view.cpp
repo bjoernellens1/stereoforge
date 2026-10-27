@@ -52,5 +52,18 @@ int main(int argc,char** argv){try{
         auto diagnostics=engine->diagnostics();engine.reset();next.wait();check(next.buffer("output_source_ids").is_empty()==false,"facade destruction invalidated consumer lease");
         check(!diagnostics->closed,"context closed while consumer retains lease");next={};check(diagnostics->closed&&diagnostics->errors==0&&diagnostics->warnings==0,"context teardown validation failed");
     }
+    for(bool moving:{false,true}){
+        auto first=std::make_unique<DaxaView>(c,source,v,1,true),second=std::make_unique<DaxaView>(c,source,v,1,true);
+        auto first_diagnostics=first->diagnostics(),second_diagnostics=second->diagnostics();
+        auto a=first->project(),b=second->project();a.wait();b.wait();auto second_context=b.context_id();
+        first.reset();second.reset();check(!first_diagnostics->closed&&!second_diagnostics->closed,"facade teardown lost assigned frame context");
+        if(moving){a=std::move(b);rejected([&]{b.wait();});}else a=b;
+        check(first_diagnostics->closed&&first_diagnostics->errors==0&&first_diagnostics->warnings==0,"cross-owner assignment closed context before children");
+        check(a.context_id()==second_context&&!second_diagnostics->closed,"cross-owner assignment lost replacement context");
+        auto* alias=&a;a=*alias;a=std::move(*alias);a.wait();
+        auto copy=a;auto moved=std::move(copy);rejected([&]{copy.wait();});copy=moved;copy={};
+        check(moved.context_id()==second_context&&a.context_id()==second_context,"copy/move/self assignment lost frame");
+        moved={};b={};a={};check(second_diagnostics->closed&&second_diagnostics->errors==0&&second_diagnostics->warnings==0,"assigned context teardown validation failed");
+    }
     std::cout<<"Daxa view contracts passed\n";return 0;
 }catch(std::exception const& e){std::cerr<<e.what()<<'\n';return 1;}}

@@ -1,5 +1,8 @@
 #include <stereoforge/daxa_view.hpp>
+#include <stereoforge/daxa_depth.hpp>
 #include <stereoforge/daxa_view_parameters.hpp>
+#include <stereoforge/daxa_view_calibration.hpp>
+#include <thread>
 #include <daxa/utils/task_graph.hpp>
 #include <daxa/c/device.h>
 #include <algorithm>
@@ -15,8 +18,8 @@ namespace {
 using Parameters=detail::ViewParameters;
 constexpr const char* entries[]={"clear","clear_layers","splat_layer_depth","splat_layer_owner","histogram_ratios","reduce_ratios","resolve_layers","gather_project_metadata","inspect_outputs"};
 void require(bool ok,char const* error){if(!ok)throw std::invalid_argument(error);}
-std::vector<uint32_t> shader(char const* entry){
-    auto path=std::filesystem::path(SF_DAXA_VIEW_SPIRV_DIRECTORY)/(std::string("daxa-view-")+entry+".spv");
+std::vector<uint32_t> shader(char const* entry,bool typed=false){
+    auto path=std::filesystem::path(SF_DAXA_VIEW_SPIRV_DIRECTORY)/(std::string(typed?"daxa-view-depth-":"daxa-view-")+entry+".spv");
     std::ifstream in(path,std::ios::binary|std::ios::ate);
     if(!in)throw std::runtime_error("missing offline Daxa view shader: "+path.string());
     auto bytes=in.tellg();require(bytes>0&&bytes%4==0,"invalid offline SPIR-V size");
@@ -49,74 +52,85 @@ void DaxaView::validate(GeometryConfig c,GeometrySources const& s,VirtualView co
         require(determinant>0,"proper rigid rotation required");
     }
 }
+struct DaxaView::Slot {
+    std::map<std::string,daxa::BufferId,std::less<>> buffers;
+    std::map<std::string,daxa::ExternalTaskBuffer,std::less<>> external;
+    std::unique_ptr<daxa::TaskGraph> graph;daxa::TimelineQueryPool queries;
+    DaxaDepthPipeline::Frame input;CaptureLease source;
+    int64_t timestamp=0;uint64_t submit=0,generation=0;unsigned visited=0,finished=0;
+};
 struct DaxaView::Impl {
-    DaxaFoundation context;
+    std::shared_ptr<DaxaFoundation> context;
+    bool owns_context=false,typed=false;
+    std::shared_ptr<const DaxaRectification> maps;
+    DaxaViewCalibration cache;
+    VirtualView virtual_view;
+    const std::thread::id thread=std::this_thread::get_id();
+    void require_thread()const{require(thread==std::this_thread::get_id(),"view requires one submission thread");}
     GeometryConfig config;
     std::shared_ptr<Diagnostics> diagnostics=std::make_shared<Diagnostics>();
     uint64_t bytes=0,next_generation=1;
-    inline static std::atomic<uint64_t> next_context{1};
-    uint64_t identity=next_context.fetch_add(1);
     int64_t timestamp=0;
     std::string calibration;
     float timestamp_period=0;
-    uint32_t timestamp_bits=0;
+    uint32_t timestamp_bits=0;uint64_t storage_range=0;uint32_t max_dispatch_x=0;
     std::map<std::string,daxa::BufferId> inputs;
     std::vector<daxa::MemoryBlock> memory;
     std::vector<daxa::BufferId> owned;
     std::array<daxa::ComputePipeline,9> pipelines;
-    struct Slot {
-        std::map<std::string,daxa::BufferId> buffers;
-        std::map<std::string,daxa::ExternalTaskBuffer> external;
-        std::unique_ptr<daxa::TaskGraph> graph;
-        daxa::TimelineQueryPool queries;
-        std::weak_ptr<Lease> lease;
-        uint64_t submit=0,generation=0;
-        unsigned visited=0,finished=0;
-    };
-    std::vector<std::unique_ptr<Slot>> slots;
-    Impl(GeometryConfig c,bool validation):context(validation),config(c){
-        auto physical=daxa_dvc_get_vk_physical_device(context.device.get());
-        VkPhysicalDeviceProperties p{};vkGetPhysicalDeviceProperties(physical,&p);timestamp_period=p.limits.timestampPeriod;
+    std::vector<std::shared_ptr<Slot>> slots;
+    Impl(GeometryConfig c,bool validation,std::shared_ptr<DaxaFoundation> supplied={}):context(supplied?supplied:std::make_shared<DaxaFoundation>(validation)),owns_context(!supplied),config(c){
+        auto physical=daxa_dvc_get_vk_physical_device(context->device.get());
+        VkPhysicalDeviceProperties p{};vkGetPhysicalDeviceProperties(physical,&p);timestamp_period=p.limits.timestampPeriod;storage_range=p.limits.maxStorageBufferRange;max_dispatch_x=p.limits.maxComputeWorkGroupCount[0];require(p.limits.maxComputeWorkGroupInvocations>=64&&p.limits.maxComputeWorkGroupSize[0]>=64,"view workgroup64 unavailable");
         uint32_t count=0;vkGetPhysicalDeviceQueueFamilyProperties(physical,&count,nullptr);
         std::vector<VkQueueFamilyProperties> queues(count);vkGetPhysicalDeviceQueueFamilyProperties(physical,&count,queues.data());
         uint32_t family=UINT32_MAX;
-        auto result=daxa_dvc_get_vk_queue(context.device.get(),{DAXA_QUEUE_TYPE_MAIN,0},nullptr,&family);
+        auto result=daxa_dvc_get_vk_queue(context->device.get(),{DAXA_QUEUE_TYPE_MAIN,0},nullptr,&family);
         require(result==DAXA_RESULT_SUCCESS&&family<queues.size(),"cannot query actual Daxa main queue family");
         timestamp_bits=queues[family].timestampValidBits;
         require(timestamp_bits>0,"main queue has no supported GPU timestamps");
     }
     ~Impl(){
         // Teardown boundary only: leases hold this owner until downstream use ends.
-        context.device.wait_idle();slots.clear();pipelines={};
-        for(auto id:owned)if(context.device.is_id_valid(id))context.device.destroy_buffer(id);
-        context.device.collect_garbage();memory.clear();
-        context.close(); // Messenger remains alive through resource/device teardown.
-        diagnostics->errors=context.validation_errors.load();diagnostics->warnings=context.validation_warnings.load();diagnostics->closed=true;
+        context->device.wait_idle();slots.clear();pipelines={};
+        for(auto id:owned)if(context->device.is_id_valid(id))context->device.destroy_buffer(id);
+        context->device.collect_garbage();memory.clear();
+        if(owns_context)context->close(); // Messenger remains alive through resource/device teardown.
+        diagnostics->errors=context->validation_errors.load();diagnostics->warnings=context->validation_warnings.load();diagnostics->closed=true;
     }
     daxa::BufferId allocate(size_t size,std::string const& name,bool host=false){
-        auto& d=context.device;daxa::BufferId id;
+        require(size&&size<=storage_range&&bytes+size<2ull*1024*1024*1024,"view buffer allocation exceeds checked storage/2GiB budget");auto& d=context->device;daxa::BufferId id;
         daxa::BufferInfo info{.size=size,.name=name};
-        if(host){auto block=d.create_memory({.requirements=context.coherent_readback_requirements(info),.flags=daxa::MemoryFlagBits::HOST_ACCESS_RANDOM});
+        if(host){auto block=d.create_memory({.requirements=context->coherent_readback_requirements(info),.flags=daxa::MemoryFlagBits::HOST_ACCESS_RANDOM});
             id=d.create_buffer_from_memory_block({.buffer_info=info,.memory_block=block});memory.push_back(std::move(block));}
         else id=d.create_buffer(info);
         owned.push_back(id);bytes+=size;return id;
     }
     void upload(daxa::CommandRecorder& recorder,std::string const& name,void const* data,size_t size){
         auto id=allocate(size,name);inputs[name]=id;auto staging=allocate(size,"setup upload "+name,true);
-        std::memcpy(context.device.buffer_host_address(staging).value(),data,size);
+        std::memcpy(context->device.buffer_host_address(staging).value(),data,size);
         recorder.copy_buffer_to_buffer({.src_buffer=staging,.dst_buffer=id,.size=size});
     }
+    #ifdef SF_DAXA_VIEW_HAS_DEPTH
+    size_t collect_at(uint64_t pending){size_t retired=0;for(auto& slot:slots)if(slot.use_count()==1&&(!slot->submit||slot->submit<pending)&&slot->input){slot->input={};slot->source.reset();++retired;}return retired;}
+    #else
+    size_t collect_at(uint64_t){return 0;}
+    #endif
     void setup(GeometrySources const& s,VirtualView const& v,unsigned count);
+    void setup_slots(VirtualView const&,unsigned);
+    void validate_frame(DaxaDepthPipeline::Frame const&)const;
+    void bind(Slot&,DaxaDepthPipeline::Frame const&);
 };
-struct DaxaView::Lease {
-    std::shared_ptr<Impl> owner;
-    size_t slot;
-    uint64_t generation,submit;
-    void validate() const {require(owner&&slot<owner->slots.size()&&owner->slots[slot]->generation==generation,"stale Daxa frame generation");}
-};
+DaxaView::Frame::Frame(std::shared_ptr<Impl> owner,std::shared_ptr<Slot> slot):owner_(std::move(owner)),slot_(std::move(slot)),generation_(slot_->generation){}
+DaxaView::Frame& DaxaView::Frame::operator=(Frame other)noexcept{
+    // Keep both old references together: the temporary destroys its slot before
+    // its owner, including when this frame is the last owner of the context.
+    owner_.swap(other.owner_);slot_.swap(other.slot_);std::swap(generation_,other.generation_);return *this;
+}
+void DaxaView::Frame::validate()const{require(owner_&&slot_&&generation_==slot_->generation,"stale/empty Daxa view frame");}
 void DaxaView::Impl::setup(GeometrySources const& s,VirtualView const& v,unsigned count){
     timestamp=s.timestamp_ns;calibration=s.calibration_id;
-    auto& d=context.device;auto recorder=d.create_command_recorder({.name="one-time source upload"});
+    auto& d=context->device;auto recorder=d.create_command_recorder({.name="one-time source upload"});
     auto put=[&](char const* name,auto span){upload(recorder,name,span.data(),span.size_bytes());};
     put("source_depth",s.depth);put("source_confidence",s.confidence);put("source_rgb",s.rgb);put("source_provenance",s.provenance);put("source_rays",s.rays);put("source_ids",s.source_ids);put("source_ages",s.age_ns);
     if(!s.preview_indices.empty())put("preview_indices",s.preview_indices);
@@ -124,15 +138,19 @@ void DaxaView::Impl::setup(GeometrySources const& s,VirtualView const& v,unsigne
     recorder.pipeline_barrier({.src_access=daxa::AccessConsts::TRANSFER_WRITE,.dst_access=daxa::AccessConsts::COMPUTE_SHADER_READ});
     auto command=recorder.complete_current_commands();d.submit_commands({.command_lists={&command,1}});
     d.wait_on_submit({.queue=daxa::QUEUE_MAIN,.queue_submit_index=d.latest_queue_submit_index(daxa::QUEUE_MAIN),.timeout=30'000'000'000ull});d.collect_garbage();
-    for(size_t i=0;i<9;++i){auto words=shader(entries[i]);pipelines[i]=d.create_compute_pipeline({.shader_info={.byte_code=words.data(),.byte_code_size=uint32_t(words.size())},.push_constant_size=8,.name=entries[i]});}
+    setup_slots(v,count);
+}
+void DaxaView::Impl::setup_slots(VirtualView const& v,unsigned count){
+    virtual_view=v;auto& d=context->device;
+    for(size_t i=0;i<9;++i){auto words=shader(entries[i],typed);pipelines[i]=d.create_compute_pipeline({.shader_info={.byte_code=words.data(),.byte_code_size=uint32_t(words.size())},.push_constant_size=8,.name=entries[i]});}
     const size_t n=size_t(config.source_width)*config.source_height,m=size_t(config.target_width)*config.target_height;
     for(unsigned i=0;i<count;++i){
-        slots.push_back(std::make_unique<Slot>());auto& slot=*slots.back();slot.buffers=inputs;
+        slots.push_back(std::make_shared<Slot>());auto& slot=*slots.back();for(auto const& [name,id]:inputs)slot.buffers[name]=id;slot.timestamp=timestamp;
         for(char const* name:{"zbuffer","owner","output_rgb","output_valid","output_source","output_provenance","output_depth","output_confidence","output_rgb_valid","output_approximate"})slot.buffers[name]=allocate(4*m,name);
         for(char const* name:{"layer_z","layer_owner","output_source_ids","output_age_ns"})slot.buffers[name]=allocate(8*m,name);
         slot.buffers["ratio_histogram"]=allocate(3*4096*4,"ratio_histogram");slot.buffers["exposure_gain"]=allocate(12,"exposure_gain");
         slot.buffers["packed_readback"]=allocate(16,"downstream consumer counters");
-        Parameters p{};
+        detail::DepthViewParameters extended{};auto& p=extended.view;
         p.address_packed_readback=d.device_address(slot.buffers.at("packed_readback")).value();
         p.address_source_depth=d.device_address(slot.buffers.at("source_depth")).value();
         p.address_source_confidence=d.device_address(slot.buffers.at("source_confidence")).value();
@@ -162,13 +180,14 @@ void DaxaView::Impl::setup(GeometrySources const& s,VirtualView const& v,unsigne
         p.field_projection=v.projection==Projection::Cylindrical;p.field_fx=v.intrinsics.fx;p.field_fy=v.intrinsics.fy;p.field_cx=v.intrinsics.cx;p.field_cy=v.intrinsics.cy;
         p.field_hfov_radians=v.hfov_radians;p.field_source_to_virtual_left=v.source_to_virtual_left;p.field_source_to_virtual_right=v.source_to_virtual_right;
         p.field_preview_enabled=v.mode==ViewMode::Preview;p.field_exposure_enabled=v.exposure_match;
-        auto parameters=slot.buffers["parameters"]=allocate(sizeof(p),"immutable shader parameters",true);
-        std::memcpy(d.buffer_host_address(parameters).value(),&p,sizeof(p));
+        if(typed){extended.rectified_right_rgb=d.device_address(slot.buffers.at("rectified_right_rgb")).value();extended.original_left_rgb=d.device_address(slot.buffers.at("original_left_rgb")).value();extended.original_right_rgb=d.device_address(slot.buffers.at("original_right_rgb")).value();extended.original_width=cache.original_width;extended.original_height=cache.original_height;}
+        auto parameters=slot.buffers["parameters"]=allocate(typed?sizeof(extended):sizeof(p),"immutable shader parameters",true);
+        std::memcpy(d.buffer_host_address(parameters).value(),&extended,typed?sizeof(extended):sizeof(p));
         slot.queries=d.create_timeline_query_pool({.query_count=2,.name="compositor GPU timestamps"});
         auto* timed_slot=&slot;
         slot.graph=std::make_unique<daxa::TaskGraph>(daxa::TaskGraphInfo{.device=d,
             .pre_task_callback=[timed_slot](daxa::TaskInterface ti){
-                if(timed_slot->visited++==0){ti.recorder.reset_timestamps({.query_pool=timed_slot->queries,.start_index=0,.count=2});ti.recorder.write_timestamp({.query_pool=timed_slot->queries,.pipeline_stage=daxa::PipelineStageFlagBits::TOP_OF_PIPE,.query_index=0});}
+                if(timed_slot->visited++==0){ti.recorder.pipeline_barrier({.src_access=daxa::AccessConsts::HOST_WRITE|daxa::AccessConsts::COMPUTE_SHADER_WRITE,.dst_access=daxa::AccessConsts::COMPUTE_SHADER_READ});ti.recorder.reset_timestamps({.query_pool=timed_slot->queries,.start_index=0,.count=2});ti.recorder.write_timestamp({.query_pool=timed_slot->queries,.pipeline_stage=daxa::PipelineStageFlagBits::TOP_OF_PIPE,.query_index=0});}
             },
             .post_task_callback=[timed_slot](daxa::TaskInterface ti){
                 if(++timed_slot->finished==8)ti.recorder.write_timestamp({.query_pool=timed_slot->queries,.pipeline_stage=daxa::PipelineStageFlagBits::BOTTOM_OF_PIPE,.query_index=1});
@@ -190,9 +209,11 @@ void DaxaView::Impl::setup(GeometrySources const& s,VirtualView const& v,unsigne
         for(size_t pass=0;pass<passes.size();++pass){auto task=daxa::InlineTask::Compute(entries[pass]);
             task.reads(views.at("parameters"));
             for(auto name:passes[pass].reads)task.reads(views.at(name));
+            if(typed&&(pass==4||pass==6))task.reads(views.at("rectified_right_rgb"));
+            if(typed&&pass==6)task.reads(views.at("original_left_rgb")).reads(views.at("original_right_rgb"));
             for(auto name:passes[pass].writes)task.writes(views.at(name));
             for(auto name:passes[pass].readwrites)task.reads_writes(views.at(name));
-            auto address=d.device_address(parameters).value();auto threads=passes[pass].threads;
+            auto address=d.device_address(parameters).value();auto threads=passes[pass].threads;require((threads+(pass==5?1:64)-1)/(pass==5?1:64)<=max_dispatch_x,"view dispatch exceeds actual device group limit");
             graph.add_task(task.executes([this,pass,address,threads](daxa::TaskInterface ti){
                 ti.recorder.set_pipeline(pipelines[pass]);ti.recorder.push_constant(address);
                 ti.recorder.dispatch({uint32_t((threads+(pass==5?1:64)-1)/(pass==5?1:64)),1,1});
@@ -204,31 +225,49 @@ void DaxaView::Impl::setup(GeometrySources const& s,VirtualView const& v,unsigne
 DaxaView::DaxaView(GeometryConfig c,GeometrySources const& s,VirtualView const& v,unsigned slots,bool validation){
     validate(c,s,v,slots);impl_=std::make_shared<Impl>(c,validation);impl_->setup(s,v,slots);
 }
+#ifdef SF_DAXA_VIEW_HAS_DEPTH
+void DaxaView::Impl::validate_frame(DaxaDepthPipeline::Frame const& frame)const{
+    require(frame&&frame.context_id()==reinterpret_cast<uintptr_t>(context->device.get()),"foreign depth context");require(frame.calibration()==maps,"foreign immutable map/model owner");require(frame.width()==config.source_width&&frame.height()==config.source_height&&frame.layers()==2,"typed depth dimensions mismatch");auto n=size_t(config.source_width)*config.source_height;for(auto plane:{DaxaDepthPlane::Depth,DaxaDepthPlane::MetricConfidence,DaxaDepthPlane::MetricValidity,DaxaDepthPlane::Provenance})require(frame.size_bytes(plane)==2*n*4,"typed depth plane size mismatch");for(auto plane:{DaxaDepthPlane::SourceIds,DaxaDepthPlane::AgeNs})require(frame.size_bytes(plane)==2*n*8,"typed metadata plane size mismatch");require(frame.source()&&frame.source()->host_ingress_timestamp_ns<=uint64_t(INT64_MAX),"view timestamp outside signed64 domain");
+}
+void DaxaView::Impl::bind(Slot& slot,DaxaDepthPipeline::Frame const& frame){
+    auto& d=context->device;auto* extended=reinterpret_cast<detail::DepthViewParameters*>(d.buffer_host_address(slot.buffers.find("parameters")->second).value());auto& p=extended->view;
+    auto set=[&](const char* name,daxa::BufferId id,uint64_t& address){slot.buffers.find(name)->second=id;slot.external.find(name)->second.set_buffer(id);address=d.device_address(id).value();};
+    set("source_depth",frame.buffer(DaxaDepthPlane::Depth),p.address_source_depth);set("source_confidence",frame.buffer(DaxaDepthPlane::MetricConfidence),p.address_source_confidence);set("source_provenance",frame.buffer(DaxaDepthPlane::Provenance),p.address_source_provenance);set("source_ids",frame.buffer(DaxaDepthPlane::SourceIds),p.address_source_ids);set("source_ages",frame.buffer(DaxaDepthPlane::AgeNs),p.address_source_ages);
+    set("source_rgb",frame.image(DaxaPreprocessPlane::RectifiedLeft).buffer(),p.address_source_rgb);set("rectified_right_rgb",frame.image(DaxaPreprocessPlane::RectifiedRight).buffer(),extended->rectified_right_rgb);set("original_left_rgb",frame.image(DaxaPreprocessPlane::OriginalLeft).buffer(),extended->original_left_rgb);set("original_right_rgb",frame.image(DaxaPreprocessPlane::OriginalRight).buffer(),extended->original_right_rgb);
+    slot.input=frame;slot.source=frame.source();slot.timestamp=int64_t(slot.source->host_ingress_timestamp_ns);
+}
+DaxaView::DaxaView(GeometryConfig c,VirtualView const& v,std::shared_ptr<DaxaFoundation> context,DaxaDepthPipeline::Frame const& prototype,unsigned count){
+    require(context&&prototype&&prototype.context_id()==reinterpret_cast<uintptr_t>(context->device.get()),"shared foundation typed intake requires matching context");require(count>=1&&count<=3,"view ring requires1..3 slots");auto maps=prototype.calibration();auto cache=prepare_daxa_view_calibration(*maps,c,v);
+    impl_=std::make_shared<Impl>(c,false,std::move(context));auto& e=*impl_;e.typed=true;e.maps=std::move(maps);e.cache=std::move(cache);e.calibration=e.maps->rectified_identity;e.validate_frame(prototype);auto& d=e.context->device;
+    e.inputs["source_depth"]=prototype.buffer(DaxaDepthPlane::Depth);e.inputs["source_confidence"]=prototype.buffer(DaxaDepthPlane::MetricConfidence);e.inputs["source_provenance"]=prototype.buffer(DaxaDepthPlane::Provenance);e.inputs["source_ids"]=prototype.buffer(DaxaDepthPlane::SourceIds);e.inputs["source_ages"]=prototype.buffer(DaxaDepthPlane::AgeNs);e.inputs["source_rgb"]=prototype.image(DaxaPreprocessPlane::RectifiedLeft).buffer();e.inputs["rectified_right_rgb"]=prototype.image(DaxaPreprocessPlane::RectifiedRight).buffer();e.inputs["original_left_rgb"]=prototype.image(DaxaPreprocessPlane::OriginalLeft).buffer();e.inputs["original_right_rgb"]=prototype.image(DaxaPreprocessPlane::OriginalRight).buffer();
+    auto recorder=d.create_command_recorder({.name="one-time calibrated rays and preview map"});e.upload(recorder,"source_rays",e.cache.rays.data(),e.cache.rays.size()*sizeof(Ray3));e.upload(recorder,"preview_indices",e.cache.preview_indices.data(),e.cache.preview_indices.size()*4);recorder.pipeline_barrier({.src_access=daxa::AccessConsts::TRANSFER_WRITE,.dst_access=daxa::AccessConsts::COMPUTE_SHADER_READ});auto commands=recorder.complete_current_commands();d.submit_commands({.command_lists={&commands,1}});d.wait_on_submit({.queue=daxa::QUEUE_MAIN,.queue_submit_index=d.latest_queue_submit_index(daxa::QUEUE_MAIN),.timeout=30'000'000'000ull});e.setup_slots(e.cache.effective_view,count);
+}
+#endif
+size_t DaxaView::collect(){auto& e=*impl_;e.require_thread();return e.collect_at(e.context->device.oldest_pending_submit_index());}
+bool DaxaView::can_project()const{auto& e=*impl_;e.require_thread();auto pending=e.context->device.oldest_pending_submit_index();e.collect_at(pending);for(auto const& slot:e.slots)if(slot.use_count()==1&&(!slot->submit||slot->submit<pending))return true;return false;}
+#ifdef SF_DAXA_VIEW_HAS_DEPTH
+DaxaView::Frame DaxaView::project(DaxaDepthPipeline::Frame const& input){
+    auto& e=*impl_;e.require_thread();require(e.typed,"typed project requires calibrated shared constructor");e.validate_frame(input);auto pending=e.context->device.oldest_pending_submit_index();e.collect_at(pending);
+    for(auto& s:e.slots)if(s.use_count()==1&&(!s->submit||s->submit<pending)){e.bind(*s,input);s->generation=e.next_generation++;s->visited=s->finished=0;e.context->device.collect_garbage();try{s->graph->execute({});}catch(...){s->submit=e.context->device.latest_queue_submit_index(daxa::QUEUE_MAIN);throw;}s->submit=e.context->device.latest_queue_submit_index(daxa::QUEUE_MAIN);require(s->visited==8&&s->finished==8,"view callback count changed");return Frame(impl_,s);}throw std::runtime_error("view output ring exhausted before projection");
+}
+#endif
 DaxaView::Frame DaxaView::project(){
-    auto& e=*impl_;e.context.device.collect_garbage();
-    auto pending=e.context.device.oldest_pending_submit_index();
-    for(size_t i=0;i<e.slots.size();++i){auto& s=*e.slots[i];if(!s.lease.expired()||(s.submit&&s.submit>=pending))continue;
-        s.generation=e.next_generation++;s.visited=0;s.finished=0;s.graph->execute({});
-        require(s.visited==8&&s.finished==8,"Daxa compositor scheduled callback count changed");s.submit=e.context.device.latest_queue_submit_index(daxa::QUEUE_MAIN);
-        auto lease=std::make_shared<Lease>(Lease{impl_,i,s.generation,s.submit});s.lease=lease;return Frame(std::move(lease));}
-    throw std::runtime_error("Daxa output ring exhausted: retained consumer or pending completion");
+    auto& e=*impl_;e.require_thread();require(!e.typed,"calibrated resident view requires explicit DepthFrame");auto pending=e.context->device.oldest_pending_submit_index();
+    for(auto& s:e.slots)if(s.use_count()==1&&(!s->submit||s->submit<pending)){s->generation=e.next_generation++;s->visited=s->finished=0;e.context->device.collect_garbage();try{s->graph->execute({});}catch(...){s->submit=e.context->device.latest_queue_submit_index(daxa::QUEUE_MAIN);throw;}s->submit=e.context->device.latest_queue_submit_index(daxa::QUEUE_MAIN);require(s->visited==8&&s->finished==8,"view callback count changed");return Frame(impl_,s);}throw std::runtime_error("Daxa output ring exhausted: retained consumer or pending completion");
 }
-void DaxaView::Frame::wait()const{require(bool(lease_),"empty Daxa frame");lease_->validate();auto& d=lease_->owner->context.device;d.wait_on_submit({.queue=daxa::QUEUE_MAIN,.queue_submit_index=lease_->submit,.timeout=30'000'000'000ull});d.collect_garbage();}
-uint64_t DaxaView::Frame::generation()const{require(bool(lease_),"empty Daxa frame");lease_->validate();return lease_->generation;}
-daxa::BufferId DaxaView::Frame::buffer(std::string const& name)const{generation();return lease_->owner->slots[lease_->slot]->buffers.at(name);}
-double DaxaView::Frame::gpu_ms()const{
-    require(bool(lease_),"empty Daxa frame");lease_->validate();auto& e=*lease_->owner;require(lease_->submit<e.context.device.oldest_pending_submit_index(),"GPU timestamps require completed frame");auto values=e.slots[lease_->slot]->queries.get_query_results(0,2);
-    require(values.size()==4&&values[1]&&values[3],"GPU timestamp results unavailable");
-    uint64_t mask=e.timestamp_bits==64?~uint64_t(0):(uint64_t(1)<<e.timestamp_bits)-1;
-    return double((values[2]-values[0])&mask)*double(e.timestamp_period)/1e6;
-}
+void DaxaView::Frame::wait()const{validate();auto& d=owner_->context->device;d.wait_on_submit({.queue=daxa::QUEUE_MAIN,.queue_submit_index=slot_->submit,.timeout=30'000'000'000ull});d.collect_garbage();}
+uint64_t DaxaView::Frame::generation()const{validate();return generation_;}
+daxa::BufferId DaxaView::Frame::buffer(std::string const& name)const{validate();return slot_->buffers.at(name);}
+uint64_t DaxaView::Frame::start_tick()const{validate();require(slot_->submit<owner_->context->device.oldest_pending_submit_index(),"view query requires completion");std::array<uint64_t,4> values{};require(daxa_timeline_query_pool_query_results(slot_->queries.get(),0,2,values.data())==DAXA_RESULT_SUCCESS&&values[1]&&values[3],"view timestamps unavailable");return values[0];}
+uint64_t DaxaView::Frame::end_tick()const{validate();require(slot_->submit<owner_->context->device.oldest_pending_submit_index(),"view query requires completion");std::array<uint64_t,4> values{};require(daxa_timeline_query_pool_query_results(slot_->queries.get(),0,2,values.data())==DAXA_RESULT_SUCCESS&&values[1]&&values[3],"view timestamps unavailable");return values[2];}
+double DaxaView::Frame::gpu_ms()const{validate();auto mask=owner_->timestamp_bits==64?UINT64_MAX:(uint64_t(1)<<owner_->timestamp_bits)-1;return double((end_tick()-start_tick())&mask)*owner_->timestamp_period/1e6;}
 GeometryReadback DaxaView::readback(Frame const& frame)const{
-    require(frame.lease_&&frame.lease_->owner==impl_,"foreign or empty Daxa frame context");frame.wait();auto& e=*impl_;auto& d=e.context.device;auto& slot=*e.slots[frame.lease_->slot];
+    require(frame.owner_==impl_&&frame.slot_,"foreign or empty Daxa frame context");frame.wait();auto& e=*impl_;auto& d=e.context->device;auto& slot=*frame.slot_;
     const size_t m=size_t(e.config.target_width)*e.config.target_height;
     // One explicit diagnostic allocation/copy outside the measured compositor.
     const size_t size=m*(9*4+2*8);
     daxa::BufferInfo info{.size=size,.name="diagnostic output readback"};
-    auto memory=d.create_memory({.requirements=e.context.coherent_readback_requirements(info),.flags=daxa::MemoryFlagBits::HOST_ACCESS_RANDOM});
+    auto memory=d.create_memory({.requirements=e.context->coherent_readback_requirements(info),.flags=daxa::MemoryFlagBits::HOST_ACCESS_RANDOM});
     auto host=d.create_buffer_from_memory_block({.buffer_info=info,.memory_block=memory});
     struct Cleanup {daxa::Device& device;daxa::BufferId id;~Cleanup(){device.destroy_buffer(id);device.collect_garbage();}} cleanup{d,host};
     daxa::ExternalTaskBuffer external({.buffer=host,.name="diagnostic host readback"});
@@ -246,19 +285,19 @@ GeometryReadback DaxaView::readback(Frame const& frame)const{
     get(out.depth);get(out.confidence);get(out.rgb);get(out.validity);get(out.rgb_validity);get(out.provenance);get(out.source);get(out.approximate);get(out.owner);get(out.source_ids);get(out.age_ns);
     return out;
 }
-std::string DaxaView::device_report()const{return impl_->context.report();}
+std::string DaxaView::device_report()const{return impl_->context->report();}
 uint64_t DaxaView::allocated_bytes()const{return impl_->bytes;}
-unsigned DaxaView::validation_errors()const{return impl_->context.validation_errors.load();}
+unsigned DaxaView::validation_errors()const{return impl_->context->validation_errors.load();}
 }
 
 namespace stereoforge { std::shared_ptr<DaxaView::Diagnostics const> DaxaView::diagnostics()const{return impl_->diagnostics;} }
 
 namespace stereoforge {
 std::array<uint32_t,4> DaxaView::inspect(Frame const& frame)const {
-    require(frame.lease_&&frame.lease_->owner==impl_,"foreign or empty Daxa consumer context");
-    frame.wait();auto& e=*impl_;auto& slot=*e.slots[frame.lease_->slot];auto& d=e.context.device;
+    require(frame.owner_==impl_&&frame.slot_,"foreign or empty Daxa consumer context");
+    frame.wait();auto& e=*impl_;auto& slot=*frame.slot_;auto& d=e.context->device;
     daxa::BufferInfo info{.size=16,.name="downstream counters host"};
-    auto memory=d.create_memory({.requirements=e.context.coherent_readback_requirements(info),.flags=daxa::MemoryFlagBits::HOST_ACCESS_RANDOM});
+    auto memory=d.create_memory({.requirements=e.context->coherent_readback_requirements(info),.flags=daxa::MemoryFlagBits::HOST_ACCESS_RANDOM});
     auto host=d.create_buffer_from_memory_block({.buffer_info=info,.memory_block=memory});
     struct Cleanup {daxa::Device& device;daxa::BufferId id;~Cleanup(){device.destroy_buffer(id);device.collect_garbage();}} cleanup{d,host};
     daxa::ExternalTaskBuffer external({.buffer=host,.name="downstream readback"});
@@ -279,10 +318,16 @@ std::array<uint32_t,4> DaxaView::inspect(Frame const& frame)const {
 }
 
 namespace stereoforge {
-uint64_t DaxaView::Frame::context_id()const{generation();return lease_->owner->identity;}
-int64_t DaxaView::Frame::timestamp_ns()const{generation();return lease_->owner->timestamp;}
-std::string DaxaView::Frame::calibration_id()const{generation();return lease_->owner->calibration;}
-GeometryConfig DaxaView::Frame::config()const{generation();return lease_->owner->config;}
+uint64_t DaxaView::Frame::context_id()const{generation();return reinterpret_cast<uintptr_t>(owner_->context->device.get());}
+int64_t DaxaView::Frame::timestamp_ns()const{generation();return slot_->timestamp;}
+std::string DaxaView::Frame::calibration_id()const{generation();return owner_->calibration;}
+GeometryConfig DaxaView::Frame::config()const{generation();return owner_->config;}
 }
 
 namespace stereoforge { std::string DaxaView::shader_directory(){return SF_DAXA_VIEW_SPIRV_DIRECTORY;} }
+
+namespace stereoforge {
+CaptureLease DaxaView::Frame::source()const{validate();return slot_->source;}
+DepthConvention DaxaView::Frame::depth_convention()const{validate();return owner_->virtual_view.projection==Projection::Perspective?DepthConvention::AxialZ:DepthConvention::RayRange;}
+std::string DaxaView::depth_shader_identity(){return std::string(SF_DAXA_VIEW_DEPTH_SHA256)+":"+SF_DAXA_VIEW_PROJECTION_SHA256;}
+}

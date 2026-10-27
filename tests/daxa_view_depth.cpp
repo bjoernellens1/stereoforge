@@ -1,0 +1,45 @@
+#include <stereoforge/daxa_view_calibration.hpp>
+#include <stereoforge/daxa_view.hpp>
+#include <bit>
+#include <iostream>
+#include <stdexcept>
+#include <cmath>
+using namespace stereoforge;
+static void check(bool x,const char* m){if(!x)throw std::runtime_error(m);}
+template<class F>static void reject(F f){bool caught=false;try{f();}catch(const std::invalid_argument&){caught=true;}check(caught,"invalid association must reject");}
+static DaxaRectification fixture(){
+ DaxaRectification c;c.eye_width=8;c.source_height=6;c.stride_bytes=32;c.width=6;c.height=4;c.original_identity="raw";c.rectified_identity="rect";
+ DaxaRectifiedGeometry g;g.original_identity="raw";g.rectified_identity="rect";
+ for(unsigned eye=0;eye<2;++eye){g.original.eyes[eye]={8,6,8,8,3,2,{}};g.rectified.eyes[eye]={6,4,8,8,2,1,{}};}
+ g.original.right_to_left=g.rectified.right_to_left={1,0,0,.1,0,1,0,0,0,0,1,0,0,0,0,1};g.R1=g.R2={1,0,0,0,1,0,0,0,1};g.P1={8,0,2,0,0,8,1,0,0,0,1,0};g.P2={8,0,2,-.8,0,8,1,0,0,0,1,0};c.geometry=g;
+ for(unsigned eye=0;eye<2;++eye)for(unsigned y=0;y<4;++y)for(unsigned x=0;x<6;++x){c.maps[eye*2].push_back(float(x+1));c.maps[eye*2+1].push_back(float(y+1));}return c;
+}
+int main(int argc,char** argv){try{
+ auto c=fixture();GeometryConfig config{6,4,8,6};VirtualView v;v.intrinsics={8,8,3,2};v.source_to_virtual_right[3]=.1f;v.mode=ViewMode::Preview;
+ auto cache=prepare_daxa_view_calibration(c,config,v);check(cache.rays.size()==48&&cache.preview_indices.size()==96,"independent grid counts");check(cache.original_width==8&&cache.original_height==6,"retain original dimensions");check(cache.rays[0].x==-.25f&&cache.rays[0].y==-.125f,"rectified unitZ rays");check(cache.effective_view.source_to_virtual_right[3]==.1f,"right baseline once");check(cache.preview_valid_count==96,"full original RGB preview");check(cache.preview_indices[0]==0&&cache.preview_indices[48]==48,"raw eye offsets");
+ // rectified_grid_rotation_once: R^T applied once, while preview stays in original namespace.
+ auto rotated=c;rotated.geometry->R1=rotated.geometry->R2={1,0,0,0,.8,-.6,0,.6,.8};for(unsigned eye=0;eye<2;++eye)for(unsigned y=0;y<4;++y)for(unsigned x=0;x<6;++x){double qx=(double(x)-2)/8,qy=(double(y)-1)/8,z=-.6*qy+.8;rotated.maps[eye*2][y*6+x]=float(8*qx/z+3);rotated.maps[eye*2+1][y*6+x]=float(8*(.8*qy+.6)/z+2);}auto rotated_cache=prepare_daxa_view_calibration(rotated,config,v);check(std::abs(rotated_cache.effective_view.source_to_virtual_left[6]-.6f)<1e-6,"rectified_grid_rotation_once");check(rotated_cache.preview_indices==cache.preview_indices,"original preview ignores rectified rotation");
+ // shared_raw_cell_distinct_virtual_points: never round rectified geometry onto a raw canvas.
+ auto dense=c;for(auto& camera:dense.geometry->rectified.eyes)camera.fx=camera.fy=64;for(auto* projection:{&dense.geometry->P1,&dense.geometry->P2}){(*projection)[0]=64;(*projection)[5]=64;}dense.geometry->P2[3]=-6.4;for(unsigned eye=0;eye<2;++eye)for(unsigned y=0;y<4;++y)for(unsigned x=0;x<6;++x){dense.maps[eye*2][y*6+x]=float((double(x)-2)/8+3);dense.maps[eye*2+1][y*6+x]=float((double(y)-1)/8+2);}auto dense_cache=prepare_daxa_view_calibration(dense,config,v);check(std::floor(dense.maps[0][0]+.5)==std::floor(dense.maps[0][1]+.5)&&dense_cache.rays[0].x!=dense_cache.rays[1].x,"shared_raw_cell_distinct_virtual_points");
+ auto cylinder=v;cylinder.projection=Projection::Cylindrical;auto cylindrical_cache=prepare_daxa_view_calibration(c,config,cylinder);check(cylindrical_cache.effective_view.projection==Projection::Cylindrical,"perspective_axial_and_cylindrical_range setup selection");
+ auto wrap=cylinder;wrap.hfov_radians=std::nextafter(float(2*3.141592653589793),0.f);prepare_daxa_view_calibration(c,config,wrap);wrap.hfov_radians=float(2*3.141592653589793);reject([&]{prepare_daxa_view_calibration(c,config,wrap);}); // Cylinder seam coverage remains bounded below2pi.
+ auto bad=c;bad.maps[0][0]+=.03125f;reject([&]{prepare_daxa_view_calibration(bad,config,v);});
+ bad=c;bad.maps[0][0]+=.01f;prepare_daxa_view_calibration(bad,config,v); // Same effective address+phase is accepted.
+ bad=c;bad.geometry.reset();reject([&]{prepare_daxa_view_calibration(bad,config,v);});
+ bad=c;bad.geometry->original.eyes[0].distortion={0,0,0};reject([&]{prepare_daxa_view_calibration(bad,config,v);});
+ bad=c;bad.geometry->original.eyes[0].distortion={0,0,0,0,0,-1,0,0};bad.geometry->original.eyes[0].fx=2;reject([&]{prepare_daxa_view_calibration(bad,config,v);});
+ auto wrong=v;wrong.source_to_virtual_right[3]=0;reject([&]{prepare_daxa_view_calibration(c,config,wrong);});
+ auto dims=config;++dims.source_width;reject([&]{prepare_daxa_view_calibration(c,dims,v);});
+ for(int i=1;i<argc;++i)if(std::string(argv[i])!="--cpu-only"&&std::string(argv[i])!="--gpu"){auto f=load_daxa_preprocess_fixture(argv[i]);auto g=f.rectification.geometry.value();GeometryConfig cfg{f.rectification.width,f.rectification.height,f.rectification.eye_width,f.rectification.source_height};VirtualView view;auto cam=g.original.eyes[0];view.intrinsics={float(cam.fx),float(cam.fy),float(cam.cx),float(cam.cy)};for(unsigned j=0;j<16;++j)view.source_to_virtual_right[j]=float(g.original.right_to_left[j]);prepare_daxa_view_calibration(f.rectification,cfg,view);}
+ if(argc>1&&std::string(argv[1])=="--gpu"){
+  auto context=std::make_shared<DaxaFoundation>(true);auto maps=c;maps.height=5;for(auto& camera:maps.geometry->rectified.eyes)camera.height=5;for(unsigned eye=0;eye<2;++eye){maps.maps[eye*2].clear();maps.maps[eye*2+1].clear();for(unsigned y=0;y<5;++y)for(unsigned x=0;x<6;++x){maps.maps[eye*2].push_back(float(x+1));maps.maps[eye*2+1].push_back(float(y+1));}}
+  auto source=std::make_shared<CaptureFrame>();source->source_width=16;source->height=6;source->stride_bytes=32;source->frame_id=7;source->host_ingress_timestamp_ns=101;source->calibration_identity="raw";source->device_identity="synthetic-view-contract";source->packed_yuyv.resize(192);for(size_t i=0;i<192;++i)source->packed_yuyv[i]=uint8_t(i*17);
+  for(auto mode:{ViewMode::Strict,ViewMode::Preview})for(auto projection:{Projection::Perspective,Projection::Cylindrical})for(auto count:{1u,2u}){
+   DaxaView::Frame retained;{DaxaDepthConfig cfg{StereoConfig{6,5,3,4},1.f,count,32};auto pipeline=std::make_unique<DaxaDepthPipeline>(maps,cfg,context,source);auto prototype=pipeline->enqueue(source);auto view_config=GeometryConfig{6,5,8,6};auto virtual_view=v;virtual_view.mode=mode;virtual_view.projection=projection;auto view=std::make_unique<DaxaView>(view_config,virtual_view,context,prototype,count);prototype.wait();prototype={};pipeline->collect(); // constructor_prototype_released
+    auto input=pipeline->enqueue(source);auto foreign_context=std::make_shared<DaxaFoundation>(true);reject([&]{DaxaView invalid(view_config,virtual_view,foreign_context,input,count);});foreign_context->close();auto first=view->project(input);check(first.context_id()==input.context_id()&&first.source()==source,"shared_foundation_typed_intake");input={};first.wait();auto planes=view->readback(first);for(size_t i=0;i<planes.validity.size();++i)if(!planes.validity[i])check(std::bit_cast<uint32_t>(planes.depth[i])==0x7fc00000u&&planes.source_ids[i]==-1&&planes.age_ns[i]==0&&planes.provenance[i]==0&&planes.confidence[i]==0&&(!planes.approximate[i]||planes.owner[i]==UINT32_MAX),"strict_holes_and_original_rgb_preview");
+    auto old_generation=first.generation();if(count==1){auto submission=context->device.latest_queue_submit_index(daxa::QUEUE_MAIN);check(!view->can_project()&&submission==context->device.latest_queue_submit_index(daxa::QUEUE_MAIN),"view_ring_rejects_before_upstream_upload");first={};}view->collect();pipeline->collect();auto changed=std::make_shared<CaptureFrame>(*source);changed->host_ingress_timestamp_ns=202;changed->packed_yuyv[0]^=255;auto next=pipeline->enqueue(changed);retained=view->project(next);retained.wait();auto changed_planes=view->readback(retained);if(mode==ViewMode::Preview&&projection==Projection::Perspective)check(changed_planes.rgb[0]!=planes.rgb[0],"different content sameID rebinds actual original RGB");if(count==2)check(!view->can_project(),"two retained views exhaust bounded ring");check(retained.generation()>old_generation&&retained.timestamp_ns()==202&&retained.source()==changed&&retained.source()->frame_id==7,"retained_source_metadata_per_slot sameIDdifferentcontent");auto fresh_maps=maps;DaxaDepthPipeline other(fresh_maps,cfg,context,source);auto foreign=other.enqueue(source);reject([&]{view->project(foreign);}); // foreign_context_and_map_owner_reject
+    if(count==2)check(first.timestamp_ns()==101&&first.source()==source,"retained_source_metadata_per_slot");first={};next={};view.reset();pipeline.reset();}retained.wait();check(!retained.buffer("output_rgb").is_empty(),"producer destruction safety");retained={};
+  }context->close();check(context->validation_errors==0&&context->validation_warnings==0,"shared view teardown validation");
+ }
+ std::cout<<"Daxa calibrated view CPU contracts passed\n";return 0;
+ }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

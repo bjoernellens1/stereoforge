@@ -2,8 +2,9 @@
 
 These deliberately inspect StereoForge code, including graph callbacks. Daxa
 records commands internally on execute; its pooled recorders are not a promise
-of zero allocations. One host Lease allocation per submitted frame is accepted
-for this POC. GPU correctness, timing and allocator residency need native runs.
+of zero allocations. Application slots and frame lease state are preallocated;
+submission must not allocate a fresh host lease. GPU correctness, timing and
+allocator residency need native runs.
 """
 from pathlib import Path
 import re
@@ -19,8 +20,9 @@ BENCHMARK = ROOT / "apps/daxa_view_benchmark.cpp"
 
 
 def execution_closure(source):
-    yield "project", block(source, source.index("DaxaView::Frame DaxaView::project("))[0]
-    setup = block(source, source.index("void DaxaView::Impl::setup("))[0]
+    for match in re.finditer(r"DaxaView::Frame DaxaView::project\(", source):
+        yield "project", block(source, match.start())[0]
+    setup = block(source, source.index("void DaxaView::Impl::setup_slots("))[0]
     callbacks = list(re.finditer(r"\.executes\(\s*\[[^\]]*\]\s*\([^)]*\)\s*\{", setup))
     assert callbacks, "review the compositor callbacks if their declaration changes"
     for callback in callbacks:
@@ -31,12 +33,8 @@ def execution_closure(source):
         yield "callback", block(setup, callback.start())[0]
 
 
-def assert_no_costly_enqueue_work(source, *, lease_allowed=False):
+def assert_no_costly_enqueue_work(source):
     clean = code_only(source)
-    if lease_allowed:
-        leases = re.findall(r"\bstd::make_shared\s*<\s*Lease\s*>\s*\(", clean)
-        assert len(leases) <= 1, "at most one frame-lease allocation per enqueue"
-        clean = re.sub(r"\bstd::make_shared\s*<\s*Lease\s*>\s*\(", "accepted_lease(", clean)
     forbidden = (
         r"\b(?:wait\w*|daxa_dvc_wait\w*|vk\w*Wait\w*)\s*\(",
         r"\b(?:create_\w+|destroy_\w+|allocate|upload|readback|inspect|gpu_ms|shader|register_buffer|add_task|complete|submit|submit_commands)\s*\(",
@@ -50,7 +48,7 @@ def assert_no_costly_enqueue_work(source, *, lease_allowed=False):
 
 def test_project_and_graph_callbacks_do_not_allocate_planes_transfer_or_wait():
     for name, implementation in execution_closure(SOURCE.read_text()):
-        assert_no_costly_enqueue_work(implementation, lease_allowed=name == "project")
+        assert_no_costly_enqueue_work(implementation)
 
 
 @pytest.mark.parametrize("operation", (
@@ -66,22 +64,24 @@ def test_project_and_graph_callbacks_do_not_allocate_planes_transfer_or_wait():
 def test_guard_rejects_expensive_operations_moved_into_either_execution_scope(operation):
     for name, implementation in execution_closure(SOURCE.read_text()):
         with pytest.raises(AssertionError):
-            assert_no_costly_enqueue_work(operation + implementation, lease_allowed=name == "project")
+            assert_no_costly_enqueue_work(operation + implementation)
 
 
-def test_lease_exception_does_not_allow_callback_allocations():
+def test_no_frame_lease_allocation_is_allowed():
     with pytest.raises(AssertionError):
         assert_no_costly_enqueue_work("std::make_shared<Lease>(Lease{});")
 
 
 def test_enqueue_polls_completion_and_reclaims_daxa_recorder_pools_before_execution():
     source = SOURCE.read_text()
-    project = block(source, source.index("DaxaView::Frame DaxaView::project("))[0]
-    assert project.index("collect_garbage()") < project.index("oldest_pending_submit_index()") < project.index("execute({})")
-    # Missing either half permits overwriting live output or uncompleted commands.
-    before_execute = code_only(project[:project.index("execute({})")])
-    assert "lease.expired()" in before_execute and re.search(r"s\.submit\s*>=\s*pending", before_execute)
-    assert "e.slots.size()" in before_execute
+    for name, project in execution_closure(source):
+        if name != "project":continue
+        assert project.index("oldest_pending_submit_index()") < project.index("execute({})")
+        assert project.index("collect_garbage()") < project.index("execute({})")
+        # Both retained consumers and uncompleted submissions prevent reuse.
+        before_execute = code_only(project[:project.index("execute({})")])
+        assert "s.use_count()==1" in before_execute and "s->submit<pending" in before_execute
+        assert "for(auto& s:e.slots)" in before_execute
 
 
 def assert_readback_not_retained(source):
@@ -107,16 +107,20 @@ def test_guard_rejects_original_persistently_retained_readback_allocation():
 def test_gpu_timestamp_uses_actual_queue_capabilities_availability_and_valid_bits():
     source = code_only(SOURCE.read_text())
     assert "daxa_dvc_get_vk_queue(" in source and "timestampValidBits" in source
+    for method in ("start_tick", "end_tick"):
+        timing = block(source, source.index("uint64_t DaxaView::Frame::"+method+"("))[0]
+        assert timing.index("oldest_pending_submit_index()") < timing.index("daxa_timeline_query_pool_query_results(")
+        assert "slot_->submit<owner_->context->device.oldest_pending_submit_index()" in timing
+        assert "values[1]" in timing and "values[3]" in timing
+        assert "slot_->queries.get(),0,2,values.data()" in timing
     timing = block(source, source.index("double DaxaView::Frame::gpu_ms("))[0]
-    assert timing.index("oldest_pending_submit_index()") < timing.index("get_query_results(")
-    assert re.search(r"lease_->submit\s*<\s*e.context.device.oldest_pending_submit_index\(\)", timing)
-    assert "values[1]" in timing and "values[3]" in timing
     assert "timestamp_bits==64" in timing and "&mask" in timing and "timestamp_period" in timing
+    assert "end_tick()-start_tick()" in timing
 
 
 def test_timestamps_follow_scheduled_callbacks_instead_of_reorderable_pass_numbers():
     source = SOURCE.read_text()
-    setup = block(source, source.index("void DaxaView::Impl::setup("))[0]
+    setup = block(source, source.index("void DaxaView::Impl::setup_slots("))[0]
     compute = list(re.finditer(r"\.executes\(\s*\[[^\]]*\]\s*\([^)]*\)\s*\{", setup))
     for callback in compute:
         assert "write_timestamp(" not in code_only(block(setup, callback.start())[0]), "an independent reordered pass cannot define the whole graph timing boundary"
@@ -124,10 +128,10 @@ def test_timestamps_follow_scheduled_callbacks_instead_of_reorderable_pass_numbe
     post = block(setup, setup.index(".post_task_callback="))[0]
     assert "visited++==0" in code_only(pre) and ".query_index=0" in pre
     assert "++timed_slot->finished==8" in code_only(post) and ".query_index=1" in post
-    project = block(source, source.index("DaxaView::Frame DaxaView::project("))[0]
-    assert project.index("s.visited=0") < project.index("execute({})")
-    assert project.index("s.finished=0") < project.index("execute({})")
-    assert "s.visited==8&&s.finished==8" in code_only(project), "changed task count must fail instead of publishing incomplete timing"
+    for name, project in execution_closure(source):
+        if name != "project":continue
+        assert project.index("s->visited=s->finished=0") < project.index("execute({})")
+        assert "s->visited==8&&s->finished==8" in code_only(project), "changed task count must fail instead of publishing incomplete timing"
 
 
 def test_benchmark_keeps_upload_setup_dumps_and_query_readout_outside_cpu_enqueue():

@@ -223,7 +223,7 @@ The optional C++/Daxa path now connects packed YUYV capture leases to original
 RGB, rectified RGB/luma and stereo on one GPU context. A repeated synthetic
 720p-per-eye fixture measures **0.45 ms preprocessing host wall**, or **16.08 ms
 including one-reference D128/four-path stereo** (30 samples, three warmups).
-Original RGB is retained for later wide-view integration. Full-size exact
+Original RGB is retained separately for wide-view synthesis. Full-size exact
 preprocessing/integer checks and core/synchronization validation pass.
 
 These measurements include staged upload and host waits, but exclude live
@@ -244,7 +244,7 @@ queue span / 32.12 ms host wall** (30 samples, three warmups, two slots), includ
 staged upload and completion but excluding RGB-D synthesis. The complete nine
 observation planes and six raw stereo planes match the frozen GPU reference
 byte for byte. This exceeds the 16.67 ms frame budget; live 60 Hz, wide RGB-D
-integration and temporal/adaptive processing remain open. See the
+physical/live qualification and native temporal/adaptive processing remain open. See the
 [depth contract](docs/daxa-depth-contract.md) and
 [validation and measurements](docs/daxa-depth-evidence.md).
 
@@ -296,3 +296,26 @@ currently measures roughly 22–25 ms; this is not yet a 60 Hz camera pipeline.
 New code is Apache-2.0. The [license evaluation](docs/license-evaluation.md) clears
 public source publication; bundled binaries require a separate review. See
 [dependency notices](third_party/README.md) and [NOTICE](NOTICE).
+
+
+## Experimental retained native depth-to-view pipeline
+
+The optional Daxa View now consumes retained native depth frames on the same
+Vulkan device. Strict/preview synthesis keeps rectified metric observations and
+full original RGB in separate geometry spaces. Perspective output declares axial
+Z; cylindrical output declares ray range. Preview-only RGB remains approximate
+and metric-invalid. No intermediate full-frame CPU readback is required.
+
+The repaired lifetime path passes native core/synchronization checks, 12
+synthetic geometry profiles in both modes (all eleven output planes), and a
+300+3-frame 720p synchronization-validation stress run. Perspective numerical
+controls use the frozen RHI compositor, whose own validation remains unqualified;
+cylindrical checks use independent known-point expectations.
+
+Repeated static 720p-per-eye/D128/four-path/two-slot measurements of the combined
+independent stereo and View path give **33.98–35.85 ms GPU / 34.44–36.32 ms host**
+(ranges of four run means, 100 samples plus 20 warmups each). View itself takes
+about **2 ms**. Requested chain buffers total **1,032,292,504 bytes**; driver peak
+memory is not measured. These results exceed the 16.67 ms target. Native temporal/
+adaptive integration, physical accuracy and sustained fresh-camera 60 Hz remain
+open. See [depth-to-view evidence and commands](docs/daxa-view-depth-evidence.md).

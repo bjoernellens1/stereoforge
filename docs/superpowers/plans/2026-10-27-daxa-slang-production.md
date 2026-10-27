@@ -130,7 +130,7 @@ Verified 2026-10-27: the immutable resident-view POC passes exact eleven-plane e
 
 - [ ] Test identity views, planes, near/far overlap, thin foregrounds, exposure changes, occlusion, absent depth, distorted lens coverage, virtual translation and cylindrical boundaries. Repeat exact GPU metadata checks through a downstream Daxa GPU consumer and exported CPU views.
 - [ ] Wire strict/preview outputs using the established operation/visibility/seam/exposure contract. Preview may fill unsupported RGB using explicitly marked infinity directions; it must preserve invalid depth, ID −1, age 0 and zero confidence/provenance. Never blend incompatible surfaces or fabricate disocclusion depth.
-- [ ] Report requested FOV, observed RGB coverage and measured depth coverage separately; no doubled-FOV promise. Record synthesis's incremental cost with RGB disabled in the primary stereo comparison. Close this task's geometry/mask/performance gate before starting Tasks 7's temporal/adaptive production work.
+- [ ] Report requested FOV, observed RGB coverage and measured depth coverage separately; no doubled-FOV promise. Record synthesis's incremental cost with RGB disabled in the primary stereo comparison. Close this task's geometry/mask correctness gates and record transfer-inclusive performance before starting Task 7's temporal/adaptive production work. The measured 60 Hz performance gate remains open if it fails; known-motion and adaptive development may then proceed toward that unchanged acceptance target. This sequencing does not mark Task 6 complete or waive full strict/preview/peripheral and sustained fresh-frame acceptance.
 
 ## Task 7: Known-motion temporal processing and adaptive ablations
 
@@ -875,3 +875,70 @@ error/coverage measures. No production candidate or default change is justified
 by these probes alone. Record the full tradeoffs in
 [boundary study](../../daxa-stereo-boundary-study.md); resume the already approved
 Task 6 native wide-view integration while retaining the independent-SGM default.
+
+### Rectification-free matching and fused sampling research
+
+User steering (2026-10-27): investigate matching directly with camera models to
+avoid a rectification stage. This research does not interrupt the frozen Task 6
+qualification or change its calibrated rectified-depth input contract.
+
+Direct matching is established: Khomutenko/Garcia/Martinet's
+[direct fisheye SGM](https://www-sop.inria.fr/members/Philippe.Martinet/publis/2016/ICARCV16bogdan.pdf)
+samples curved epipolar paths under an enhanced unified camera model without
+undistortion/rectification. Hane et al.'s
+[camera-model plane sweep](https://people.inf.ethz.ch/~pomarc/pubs/Haene3DV14.pdf)
+avoids stereo rectification, but its published implementation still preprocesses
+radial/tangential distortion. Neither establishes a speedup on our AMD/Vulkan
+implementation, and their camera models cannot replace the actual ZED calibration
+without validation. ETH's [PlaneSweepLib](https://cvg.ethz.ch/research/planeSweepLib)
+is C++/CUDA and GPLv3; it remains a literature/reference implementation, not a
+new runtime dependency or imported source.
+
+Verified retained-fixture ABBA reports in
+`artifacts/daxa-depth-derived-20261027/` put combined rectification/gray/support
+GPU means at 0.235887–0.242426 ms, with roughly 19.1 ms derived or 31.5 ms
+independent depth queue spans (720p/D128/P4/W32, 100 samples/20 warmups,
+validation/readback off). Even perfect removal of that entire combined pass
+would leave approximately 18.9 ms for the derived path; this is an ideal upper
+bound, not a predicted direct-matcher runtime or live FPS measurement.
+
+- [ ] First benchmark fused rectified sampling/gray/Census as an optional
+  optimization after current qualification. Keep logical rectified coordinates
+  and existing SGM/right-score reuse; preserve actual RGB interpolation then
+  gray conversion, effective map phases, descriptor borders and support rules.
+  Account for rectified RGB still needed by selected RGB-D outputs. Do not
+  recompute model projection or a full patch at every disparity unnecessarily.
+- [ ] Treat raw-camera depth/inverse-depth matching as a separate estimator
+  experiment: explicit ray unprojection, rig transform and target-camera
+  projection; geometry-aware patches; proper depth sampling and triangulation;
+  reprojected LR/occlusion checks; native-ray depth conventions. Horizontal
+  disparity and the current `xL=xR+d` derived-score gather are not unchanged
+  contracts on raw distorted images. Compare error, valid overlap/FOV, memory
+  and transfer-inclusive latency at matched quality before adopting it.
+
+Calibration remains mandatory, and neither route measures depth in regions
+seen by only one camera without another valid geometric observation.
+
+
+### Task 6 qualification continuation and ordering decision (2026-10-27)
+
+Native typed core/synchronization contracts and repeated actual stereo-to-view
+benchmarks ran, but the legacy retained-frame teardown test found a real
+assignment-order regression. Its original failing log and debugger trace remain
+in the ignored Task 6 artifacts. The minimal lifetime repair requires a new
+source/binary freeze and independent functional/performance review before root
+reruns the complete relevant GPU gates. Do not promote pre-repair measurements
+as qualification of the repaired binary.
+
+The preserved RHI numerical control emits Vulkan validation diagnostics when
+validation is activated. The comparator retains the original both-child
+`--validation` behavior; an explicit `--validation --native-only-validation`
+request may qualify the native child and exact numerical comparisons separately.
+Every executed child still fails on diagnostics. The control is never described
+as validation-qualified, and the original failed validation run is preserved.
+
+Once geometry/mask/lifetime correctness is qualified and actual combined
+performance is measured, develop known-motion temporal processing before
+adaptive search while retaining the failed 60 Hz gate as open. Starting that development does not establish or relax the required
+end-to-end quality, fresh-frame throughput, frame-age/drop/backpressure, physical
+geometry or sustained live 720p/60 Hz acceptance.

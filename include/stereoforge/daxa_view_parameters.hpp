@@ -43,6 +43,13 @@ struct ViewParameters {
     uint32_t field_preview_enabled{};
     uint32_t field_exposure_enabled{};
 };
+struct DepthViewParameters {
+    ViewParameters view;
+    uint64_t rectified_right_rgb=0,original_left_rgb=0,original_right_rgb=0;
+    uint32_t original_width=0,original_height=0;
+};
+static_assert(sizeof(DepthViewParameters)==408);
+static_assert(offsetof(DepthViewParameters,rectified_right_rgb)==376);
 static_assert(sizeof(ViewParameters)==376);
 static_assert(offsetof(ViewParameters,field_src_width)==200);
 static_assert(offsetof(ViewParameters,field_source_to_virtual_left)==240);
