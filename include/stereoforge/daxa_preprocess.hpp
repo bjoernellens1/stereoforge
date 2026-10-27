@@ -1,7 +1,9 @@
 #pragma once
 #include <stereoforge/daxa_frame.hpp>
+#include <stereoforge/daxa_calibration.hpp>
 #include <stereoforge/daxa_stereo.hpp>
 #include <filesystem>
+#include <optional>
 #include <vector>
 namespace stereoforge {
 inline constexpr const char* daxa_preprocess_profile="opencv414_yuyv20_remap32_rte_rgb_halfup_gray15";
@@ -10,6 +12,8 @@ struct DaxaRectification {
     uint32_t eye_width=0,source_height=0,stride_bytes=0,width=0,height=0;
     std::string original_identity,rectified_identity;
     std::array<std::vector<float>,4> maps; // Lx,Ly,Rx,Ry; finite CV_32FC1, source pixel coordinates.
+    std::optional<DaxaRectifiedGeometry> geometry; // Optional for 2D processing; required for metric admission.
+    MetricCalibration metric_calibration()const; // Setup only; binds identity/dimensions.
     uint64_t requested_bytes(unsigned slots)const;
     void validate(unsigned slots=1)const;void validate_source(const CaptureFrame&)const;
 };
@@ -22,10 +26,15 @@ struct DaxaPreprocessReadback {std::array<std::vector<uint32_t>,8> planes;};
 std::string daxa_preprocess_file_sha256(const std::filesystem::path&);
 DaxaPreprocessReadback load_daxa_preprocess_expected(const std::filesystem::path&);
 DaxaPreprocessReadback daxa_preprocess_reference(const CaptureFrame&,const DaxaRectification&);
-struct DaxaPreprocessTiming {double upload_ms=0,decode_ms=0,rectify_ms=0,total_ms=0;};
+struct DaxaPreprocessTiming {
+    double upload_ms=0,decode_ms=0,rectify_ms=0,total_ms=0;
+    uint64_t start_tick=0,end_tick=0;
+    double timestamp_period=0; // Nanoseconds per tick on this shared queue.
+    uint32_t timestamp_bits=0;
+};
 class DaxaPreprocess {
     struct Impl;std::shared_ptr<Impl> impl_;
-    friend class DaxaPreprocessStereo;
+    friend class DaxaPreprocessStereo;friend class DaxaDepthPipeline;
     DaxaFrame enqueue_at(CaptureLease,uint64_t oldest);size_t collect_completed_sources_at(uint64_t oldest);
 public:
     DaxaPreprocess(DaxaRectification,unsigned slots,std::shared_ptr<DaxaFoundation>);

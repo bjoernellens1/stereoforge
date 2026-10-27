@@ -193,8 +193,9 @@ At 1280×720/D128/four paths, packed penalties and specialized arithmetic reduce
 one-reference GPU time from about 43.5 ms to 15.3 ms while preserving the frozen
 RHI output bytes. Requested retained buffers fall from 984 MB to 159 MB.
 See [stereo evidence](docs/daxa-stereo-evidence.md) for comparisons and limits.
-Dual-reference consistency, live preprocessing and complete 60 Hz operation
-remain open, as does the scalar compound floating-point reference gate.
+The combined dual-reference depth path is described below. Live integration and
+complete 60 Hz operation remain open, as does the scalar compound floating-point
+reference gate.
 
 ```bash
 cmake --preset daxa -DSTEREOFORGE_DAXA_STEREO=ON
@@ -213,7 +214,7 @@ full GPU stereo CTests retain that stricter gate and are currently unqualified.
 True right-reference disparity is also available for `packed-specialized` via
 `--reference right`. It matches an independent mirrored frozen-RHI oracle
 exactly and measures about **15.1 ms GPU** separately at 720p/D128/four paths.
-LR consistency and metric right-depth integration remain open. See
+The combined depth path adds LR consistency and calibrated metric observations. See
 [right-reference evidence](docs/daxa-stereo-right-evidence.md).
 
 ## Experimental native preprocessing
@@ -230,6 +231,22 @@ acquisition, the second stereo reference/LR checks and RGB-D synthesis. They do
 not qualify complete 60 Hz operation. Enable `STEREOFORGE_DAXA_PREPROCESS=ON`
 alongside `STEREOFORGE_DAXA_STEREO=ON`; both remain optional. See the
 [preprocessing evidence and commands](docs/daxa-preprocess-evidence.md).
+
+## Experimental combined native depth
+
+The optional `STEREOFORGE_DAXA_DEPTH=ON` path connects preprocessing, both stereo
+references, symmetric LR checks and calibrated depth/confidence/provenance on
+one GPU context. It retains original RGB and GPU outputs through bounded frame
+leases. Missing or inconsistent calibration blocks metric processing.
+
+At 720p per eye/D128/four paths, a repeated-record run measures mean **31.68 ms GPU
+queue span / 32.12 ms host wall** (30 samples, three warmups, two slots), including
+staged upload and completion but excluding RGB-D synthesis. The complete nine
+observation planes and six raw stereo planes match the frozen GPU reference
+byte for byte. This exceeds the 16.67 ms frame budget; live 60 Hz, wide RGB-D
+integration and temporal/adaptive processing remain open. See the
+[depth contract](docs/daxa-depth-contract.md) and
+[validation and measurements](docs/daxa-depth-evidence.md).
 
 ## Standalone C++ runtime
 

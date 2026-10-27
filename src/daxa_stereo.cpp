@@ -210,6 +210,7 @@ DaxaStereo::Frame DaxaStereo::process_at(const DaxaFrame* input,uint64_t oldest)
         slot->generation=e.next_generation++;slot->started=0;slot->finished=0;try{slot->graph->execute({});}catch(...){slot->submit=d.latest_queue_submit_index(daxa::QUEUE_MAIN);throw;}require(slot->started==e.stages&&slot->finished==e.stages,"stereo graph callback count changed");slot->submit=d.latest_queue_submit_index(daxa::QUEUE_MAIN);return Frame(impl_,slot);
     }throw std::runtime_error("Daxa stereo slots retained or still in flight");
 }
+std::shared_ptr<const DaxaRectification> DaxaStereo::Frame::calibration_owner()const{validate();return owner_->calibration;}
 CaptureLease DaxaStereo::Frame::source()const{validate();return slot_->source;}const std::string& DaxaStereo::Frame::calibration_identity()const{validate();require(bool(owner_->calibration),"retained-fixture stereo has no calibrated source metadata");return owner_->calibration->rectified_identity;}
 
 void DaxaStereo::Frame::wait()const{validate();auto& d=owner_->context->device;d.wait_on_submit({.queue=daxa::QUEUE_MAIN,.queue_submit_index=slot_->submit,.timeout=30'000'000'000ull});}

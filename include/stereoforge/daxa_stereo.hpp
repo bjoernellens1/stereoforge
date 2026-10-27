@@ -47,7 +47,7 @@ class DaxaStereo {
     struct Impl;
     struct Slot;
     std::shared_ptr<Impl> impl_;
-    friend class DaxaPreprocessStereo;
+    friend class DaxaPreprocessStereo;friend class DaxaDepthPipeline;
 public:
     class Frame {
         std::shared_ptr<Impl> owner_;
@@ -56,6 +56,7 @@ public:
         friend class DaxaStereo;
         Frame(std::shared_ptr<Impl>,std::shared_ptr<Slot>);
         void validate()const;
+        friend class DaxaDepthPipeline;std::shared_ptr<const DaxaRectification> calibration_owner()const;
     public:
         Frame()=default;
         Frame(const Frame&)=default;

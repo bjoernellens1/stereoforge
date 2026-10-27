@@ -173,3 +173,109 @@ not a claim to have completed those stages. Profiling begins in the first POC an
 minimal implementation, an independent performance review before GPU validation,
 validation/measurement, and a scoped reviewable commit. Do not stop at an API
 scaffold or infer completion from numerical fixtures alone.
+
+## Task 5 continuation: calibrated dual-reference observations
+
+This continues the existing approved production task at `404b42a`; it does not
+replace wide RGB-D, temporal/adaptive work or sustained 60 Hz qualification.
+
+### 5a. Retain validated setup geometry
+
+Files: new `include/stereoforge/daxa_calibration.hpp`,
+`src/daxa_calibration.cpp`, `tests/daxa_calibration.cpp`; extend only setup parsing
+in `src/daxa_preprocess.cpp`, its header and optional CMake file.
+
+Interface: `DaxaCameraModel` retains dimensions, double fx/fy/cx/cy and distortion;
+`DaxaStereoCalibration` retains two models and a double row-major right-to-left
+pose. `DaxaRectifiedGeometry` retains original/rectified calibrations, R1/R2/P1/P2
+and both identity strings. `DaxaRectification::geometry` is optional value data
+inside the existing immutable owner. `metric_calibration()` validates the complete
+binding and returns float MetricCalibration at setup; absence rejects metric
+processing while existing manually supplied 2D maps remain supported.
+
+- [x] Watch missing-payload and inconsistent-geometry CPU tests fail first.
+- [x] Validate proper rotations, R1*R*R2^T=I, R1*t=(baseline,0,0), rectified
+  horizontal positive-x pose, zero rectified distortion, compatible epipolar
+  intrinsics, P pinholes, P1 last column zero and P2 x translation=-fx*baseline.
+  Retain existing JSON hashes, dimensions and rigid-pose bounds; publish explicit
+  comparison tolerances rather than silently accepting nominal parameters.
+- [x] Load all geometry without changing calibration serialization/IDs/maps.
+  No per-frame matrix validation or allocations. Test nonidentity original
+  rotation, nonzero principal offset, malicious rebound matrices, float overflow,
+  missing geometry and manually supplied 2D configurations.
+- [x] CPU/offline build only; independent review and performance pass before GPU.
+
+### 5b. Shared-context dual stereo, LR and metric materialization
+
+Files: new `include/stereoforge/daxa_depth.hpp`, `src/daxa_depth.cpp`,
+`python/stereoforge/shaders/ops/stereo_observation.slang`,
+`python/stereoforge/shaders/daxa/depth.slang`, `cmake/DaxaDepth.cmake`,
+`tests/daxa_depth.cpp`, `apps/daxa_depth_benchmark.cpp`. The preprocessing CMake
+owner adds the optional include hook after this interface is ready.
+
+Interface: `DaxaDepthConfig` contains StereoConfig, lr_tolerance=1.0, slots and
+required subgroup size. `DaxaDepthPipeline` owns preprocessing, left/right
+PackedSpecialized engines and one bounded observation materialization graph on
+one shared DaxaFoundation. It consumes CaptureLease and returns a retained typed
+frame with completion, calibration owner and original source metadata. Original
+RGB remains GPU-resident. No RHI BufferView reinterpretation or second device.
+
+- [x] Watch CPU LR/metric/metadata and lifetime tests fail before implementation.
+- [x] Preserve positive disparity x_left-x_right. Left LR uses
+  floor(x-dL+0.5), right LR uses floor(x+dR+0.5), target bounds before loads,
+  target validity and absolute disparity difference <= tolerance. Right symmetric
+  checking is an explicit additional source-layer policy. No confidence threshold.
+- [x] Keep LR validity/disparity/confidence separate from metric validity. LR
+  rejection writes canonical NaN disparity and zero stereo confidence. Metric Z
+  is axial metres: fx*baseline/(d-(cxL-cxR)), finite and positive only.
+- [x] Explicit strict metric-support policy additionally requires source remap
+  support and nearest-correspondence remap support. It does not modify matching
+  or the raw LR mask. Report the policy; no silent comparison with the older
+  pipeline's less restrictive metric mask.
+- [x] Final metric-invalid depth is canonical NaN, confidence/provenance zero,
+  source ID -1 and age zero. Valid fresh observations retain exact signed-int64
+  CaptureLease ID, provenance STEREO=1, age zero. Reject IDs>INT64_MAX rather than
+  truncating; retain clocks/timestamps/control/IMU associations without pose claims.
+- [x] Concatenate left then right observational planes for later DaxaView intake.
+  Keep original and rectified RGB accessible through the retained preprocessing
+  frame; do not combine rectified depth with raw rays.
+- [x] Allocate slots/graphs/parameters at setup. Do not retain constructor
+  prototypes. Whole-chain admission rejects a retained/full output ring before
+  uploading/dispatching another source. Producer RGB/stereo leases remain owned
+  through consumers; collect complete unleased output inputs, then stereo inputs,
+  then preprocessing sources before next capture/admission. No intermediate CPU
+  wait/readback or image processing, no per-frame application heap allocation.
+- [x] Native GPU tests (root only) isolate LR using literal supplied float arrays,
+  including half rounding, tolerance equality/nextafter, NaNs, missing support,
+  occlusion and principal-offset planes. Exact integer/masks/64-bit metadata and
+  canonical invalid defaults are mandatory. No blanket CPU compound-float
+  tolerance. Use exactly representable planes and independent frozen GPU depth
+  arithmetic; keep unresolved general scalar float qualification explicitly open.
+- [x] Test dynamic different-content/same-ID inputs, wrong contexts/owners/reference
+  labels, source pairing, full rings, delayed consumers and producer destruction.
+- [x] Measure actual combined upload/preprocess/two references/LR/depth/metadata
+  graph cost and host wall; include CPU collection/query/waits. RGB synthesis
+  stays disabled. A sum of separate-reference medians is not the result.
+
+### 5c. Qualification and subsequent integration
+
+Independent functional and performance passes precede root GPU execution. Bind
+all sources, compiler, binaries, SPIR-V, fixtures and reports. Preserve previously
+qualified 25 stereo and two preprocessing SPIR-V files if unchanged; qualify any
+necessary change explicitly. Run core/synchronization and bounded lifetime stress,
+then 720p measurements. Commit/push only the demonstrated envelope. Next, extend
+the existing DaxaView to accept this typed shared-context frame, then implement
+rectified-to-raw calibrated depth/ray conversion for complete original RGB
+coverage. Full live qualification and the original seven-stage scope stay open.
+
+Verified 2026-10-27 for this bounded slice: independent functional/performance
+reviews clear; native CPU contracts 4/4 and Python tests 812 pass. Native GPU
+core/synchronization contracts, dynamic profile checks and 300+3 static stress
+pass. Independent frozen-RHI comparison is exact for all nine observation and
+six raw stereo planes on small core/sync, 720p core/sync and dynamic P8/wave64
+cases. Actual 720p/D128/P4/wave32/two-slot queue span is 31.683 ms mean and host
+wall is 32.116 ms mean (30+3, no validation/readback). Requested combined buffers
+are 840,500,528 bytes. This is not live 60 Hz or general scalar compound-float
+qualification. See [depth evidence](../../daxa-depth-evidence.md). Task 6 shared
+context/compositor intake and correct association of rectified geometry with
+original RGB remain next; the full goal stays active.
