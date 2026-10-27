@@ -1,4 +1,6 @@
 #include <stereoforge/geometry.hpp>
+#include <stereoforge/runtime.hpp>
+#include <stereoforge/native_device.hpp>
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
@@ -11,7 +13,11 @@ int main(int argc, char**) {
     try {
         const bool validation = argc > 1;
         GeometryConfig config{3, 1, 3, 1};
-        NativeGeometry engine(config, STEREOFORGE_SHADER_DIRECTORY, validation);
+        NativeDevice shared(validation);
+        NativeGeometry engine(config, STEREOFORGE_SHADER_DIRECTORY, shared);
+        NativeStereo stereo({5,5,4,4,8,32,false},std::string(STEREOFORGE_SHADER_DIRECTORY)+"/stereo",shared);
+        require(engine.device_id()==shared.id()&&stereo.device_id()==shared.id(),"engines did not share context identity");
+        require(shared.rhi_device()!=nullptr&&shared.rhi_queue()!=nullptr,"shared native context access missing");
         std::vector<float> depth{1,4,NAN, NAN,NAN,NAN}, confidence(6,.8f);
         std::vector<std::uint32_t> rgb{1,2,3,4,5,6}, provenance(6,1);
         std::vector<Ray3> rays{{0,0,1},{1,0,1},{2,0,1},{0,0,1},{1,0,1},{2,0,1}};
@@ -32,6 +38,26 @@ int main(int argc, char**) {
         require(actual.rgb[0]==1 && actual.rgb[1]==2,"identity RGB");
         close(actual.depth[0],1);close(actual.depth[1],4);
         require(actual.source_ids[0]==ids[0] && actual.age_ns[0]==7,"64-bit projection ownership");
+        auto uploaded=engine.upload_sources(sources);
+        require(uploaded.completion.device_id()==shared.id(),"upload completion context");
+        auto invalid_device=uploaded;invalid_device.depth.device_id=shared.id()+1;
+        bool invalid_resident=false;
+        try{auto ignored=engine.project(invalid_device,view);}catch(const std::invalid_argument&){invalid_resident=true;}
+        require(invalid_resident,"resident foreign context accepted");
+        for(int field=0;field<3;++field){
+            auto malformed=uploaded;
+            if(field==0)malformed.depth.size_bytes-=4;
+            if(field==1)malformed.depth.offset_bytes=4;
+            if(field==2)malformed.depth.stride_bytes=8;
+            invalid_resident=false;try{auto ignored=engine.project(malformed,view);}catch(const std::invalid_argument&){invalid_resident=true;}
+            require(invalid_resident,"resident size/offset/stride accepted");
+        }
+        // Do not wait on upload: one shared queue orders producer and consumer.
+        auto resident=engine.project(uploaded,view);uploaded={};
+        require(resident.source_ids.native&&resident.age_ns.native,"resident final metadata planes missing");
+        auto resident_result=engine.readback(resident);
+        require(resident_result.source_ids[0]==ids[0]&&resident_result.age_ns[0]==7,"resident GPU metadata gather lost 64-bit fields");
+        require(resident_result.rgb==actual.rgb&&resident_result.validity==actual.validity,"resident projection differs from host source path");resident={};
         auto second=engine.project(sources,view);
         bool full=false;
         try { auto ignored=engine.project(sources,view); } catch(const std::runtime_error&) { full=true; }
@@ -92,6 +118,11 @@ int main(int argc, char**) {
             require(actual.validity==std::vector<std::uint32_t>({0,0,0})&&actual.source==std::vector<std::uint32_t>({1,1,2}),"preview created metric observations");
             require(actual.owner[2]==5&&actual.source_ids==std::vector<std::int64_t>({-1,-1,-1})&&actual.age_ns==std::vector<std::int64_t>({0,0,0}),"preview RGB owner leaked metric identity");
             for(float value:actual.depth)require(std::isnan(value),"preview hallucinated metric depth");preview={};
+            auto preview_upload=engine.upload_sources(full);
+            auto resident_preview=engine.project(preview_upload,composite);preview_upload={};
+            auto resident_preview_result=engine.readback(resident_preview);
+            require(resident_preview_result.source_ids==std::vector<std::int64_t>({-1,-1,-1})&&resident_preview_result.age_ns==std::vector<std::int64_t>({0,0,0}),"resident preview leaked metric metadata");
+            require(resident_preview_result.approximate==std::vector<std::uint32_t>({1,1,1}),"resident preview masks");resident_preview={};
             mapping={0,0xffffffff,0xffffffff,0xffffffff,0xffffffff,0xffffffff};
             auto holes=engine.project(full,composite);actual=engine.readback(holes);
             require(actual.rgb_validity==std::vector<std::uint32_t>({1,0,0})&&actual.approximate==std::vector<std::uint32_t>({1,0,0}),"unsupported preview holes filled");holes={};

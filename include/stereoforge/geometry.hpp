@@ -1,5 +1,6 @@
 #pragma once
 #include <stereoforge/contracts.hpp>
+#include <stereoforge/native_device.hpp>
 #include <array>
 #include <optional>
 #include <span>
@@ -36,6 +37,16 @@ struct GeometrySources {
     // 0xffffffff for unsupported directions. Required in Preview mode.
     std::span<const std::uint32_t> preview_indices;
 };
+// Resident sources belong to one NativeDevice context and are submitted on its
+// shared queue. Each BufferView owns its allocation and completion lifetime.
+// Producers may update contents through that queue; calibration maps must retain
+// the same validated per-eye bounds contract as GeometrySources.preview_indices.
+struct GeometryDeviceSources {
+    BufferView depth,confidence,rgb,provenance,rays,source_ids,age_ns,preview_indices;
+    std::int64_t timestamp_ns=0;
+    std::string calibration_id;
+    CompletionToken completion; // upload_sources convenience; views also own it.
+};
 // Rectified pinhole geometry; all arrays have source_width*source_height elements.
 struct TemporalInput {
     std::span<const float> depth, confidence, disparity;
@@ -63,6 +74,7 @@ struct GeometryFrame {
     std::string calibration_id;
     std::shared_ptr<const GeometryMetadata> metadata;
     BufferView rgb_validity,approximate; // Project only; metric validity remains separate.
+    BufferView source_ids,age_ns; // Final GPU metadata for resident Project only.
 };
 struct GeometryReadback {
     std::vector<float> depth,confidence,disparity;
@@ -78,7 +90,13 @@ class NativeGeometry {
     std::shared_ptr<Impl> impl_;
 public:
     NativeGeometry(GeometryConfig config,const std::string& shader_directory,bool vulkan_validation=false);
+    NativeGeometry(GeometryConfig config,const std::string& shader_directory,NativeDevice device);
+    // Validate/copy one host snapshot into independently owned resident buffers.
+    // GPU producers must preserve metadata and calibration invariants on updates.
+    GeometryDeviceSources upload_sources(const GeometrySources& sources);
     GeometryFrame project(const GeometrySources& sources,const VirtualView& view);
+    // O(fields) validation; same-queue producer ordering, no host waits/uploads.
+    GeometryFrame project(const GeometryDeviceSources& sources,const VirtualView& view);
     GeometryFrame reproject(const TemporalInput& previous,Pinhole camera,const Pose4& previous_to_current,
         std::int64_t timestamp_ns,std::optional<MetricDisparity> metric=std::nullopt);
     GeometryFrame fuse(const TemporalInput& current,const TemporalInput& prediction,

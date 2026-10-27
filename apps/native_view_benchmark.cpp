@@ -24,7 +24,7 @@ static std::string quote(const std::string& value){
     for(unsigned char c:value){if(c=='"'||c=='\\')out<<'\\'<<c;else if(c<32)out<<"\\u"<<std::hex<<std::setw(4)<<std::setfill('0')<<unsigned(c)<<std::dec;else out<<c;}
     out<<'"';return out.str();
 }
-struct Options {fs::path fixture,output,dump;unsigned frames=5,warmup=2;std::string mode="strict",readback="gpu";};
+struct Options {fs::path fixture,output,dump;unsigned frames=5,warmup=2;std::string mode="strict",readback="gpu",input="host";};
 static unsigned number(const std::string& text,const char* name,bool positive){
     std::size_t used=0;unsigned long value;
     try{value=std::stoul(text,&used);}catch(...){throw std::invalid_argument(std::string("invalid ")+name);}
@@ -34,15 +34,16 @@ static unsigned number(const std::string& text,const char* name,bool positive){
 static Options options(int argc,char** argv){
     Options out;
     for(int i=1;i<argc;++i){std::string key=argv[i];
-        if(key!="--fixture"&&key!="--output"&&key!="--dump-prefix"&&key!="--frames"&&key!="--warmup"&&key!="--mode"&&key!="--readback")throw std::invalid_argument("unknown argument: "+key);
+        if(key!="--fixture"&&key!="--output"&&key!="--dump-prefix"&&key!="--frames"&&key!="--warmup"&&key!="--mode"&&key!="--readback"&&key!="--input")throw std::invalid_argument("unknown argument: "+key);
         if(++i==argc)throw std::invalid_argument("missing value for "+key);
         std::string value=argv[i];
         if(key=="--fixture")out.fixture=value;else if(key=="--output")out.output=value;else if(key=="--dump-prefix")out.dump=value;
         else if(key=="--frames")out.frames=number(value,"frames",true);else if(key=="--warmup")out.warmup=number(value,"warmup",false);
-        else if(key=="--mode")out.mode=value;else if(key=="--readback")out.readback=value;
+        else if(key=="--mode")out.mode=value;else if(key=="--readback")out.readback=value;else if(key=="--input")out.input=value;
     }
     if(out.mode!="strict"&&out.mode!="preview")throw std::invalid_argument("mode must be strict or preview");
     if(out.readback!="gpu"&&out.readback!="cpu")throw std::invalid_argument("readback must be gpu or cpu");
+    if(out.input!="host"&&out.input!="resident")throw std::invalid_argument("input must be host or resident");
     if(out.fixture.empty()||out.output.empty())throw std::invalid_argument("--fixture and --output are required");
     return out;
 }
@@ -102,10 +103,18 @@ int main(int argc,char** argv){try{
     input.view.mode=opt.mode=="preview"?ViewMode::Preview:ViewMode::Strict;
     const auto init_start=Clock::now();NativeGeometry engine(input.config,STEREOFORGE_SHADER_DIRECTORY);const auto init_end=Clock::now();
     const auto sources=input.sources();
-    for(unsigned i=0;i<opt.warmup;++i){auto frame=engine.project(sources,input.view);frame.completion.wait();if(opt.readback=="cpu")engine.readback(frame);}
+    std::optional<GeometryDeviceSources> resident;
+    double initial_upload_enqueue_ms=0,initial_upload_wait_ms=0;
+    if(opt.input=="resident"){
+        const auto begin=Clock::now();resident=engine.upload_sources(sources);const auto submitted=Clock::now();
+        resident->completion.wait();const auto completed=Clock::now();
+        initial_upload_enqueue_ms=ms(begin,submitted);initial_upload_wait_ms=ms(submitted,completed);
+    }
+    const auto project=[&](){return resident?engine.project(*resident,input.view):engine.project(sources,input.view);};
+    for(unsigned i=0;i<opt.warmup;++i){auto frame=project();frame.completion.wait();if(opt.readback=="cpu")engine.readback(frame);}
     std::vector<Sample> samples;samples.reserve(opt.frames);std::optional<GeometryFrame> last;GeometryReadback last_cpu;
     for(unsigned i=0;i<opt.frames;++i){
-        last.reset();const auto start=Clock::now();last=engine.project(sources,input.view);const auto submitted=Clock::now();
+        last.reset();const auto start=Clock::now();last=project();const auto submitted=Clock::now();
         last->completion.wait();const auto completed=Clock::now();
         if(opt.readback=="cpu")last_cpu=engine.readback(*last);
         const auto readback=Clock::now();samples.push_back({ms(start,submitted),ms(submitted,completed),opt.readback=="cpu"?ms(completed,readback):0.,ms(start,readback)});
@@ -117,9 +126,9 @@ int main(int argc,char** argv){try{
     if(!opt.output.parent_path().empty())fs::create_directories(opt.output.parent_path());
     std::ofstream out(opt.output);if(!out)throw std::runtime_error("cannot create report");out<<std::setprecision(12);
     out<<"{\"schema\":1,\"runtime\":\"C++20 Slang RHI Vulkan\",\"python_interpreter_used\":false,\"fixture\":"<<quote(opt.fixture.string())<<",\"mode\":"<<quote(opt.mode)<<",\"readback\":"<<quote(opt.readback)
-       <<",\"device\":"<<quote(engine.device_name())<<",\"source_width\":"<<input.config.source_width<<",\"source_height\":"<<input.config.source_height<<",\"target_width\":"<<input.config.target_width<<",\"target_height\":"<<input.config.target_height
+       <<",\"input\":"<<quote(opt.input)<<",\"initial_upload_enqueue_ms\":"<<initial_upload_enqueue_ms<<",\"initial_upload_wait_ms\":"<<initial_upload_wait_ms<<",\"initial_upload_total_ms\":"<<(initial_upload_enqueue_ms+initial_upload_wait_ms)<<",\"device\":"<<quote(engine.device_name())<<",\"source_width\":"<<input.config.source_width<<",\"source_height\":"<<input.config.source_height<<",\"target_width\":"<<input.config.target_width<<",\"target_height\":"<<input.config.target_height
        <<",\"timestamp_ns\":"<<input.timestamp<<",\"calibration_id\":"<<quote(input.calibration)<<",\"warmup\":"<<opt.warmup<<",\"frames\":"<<opt.frames<<",\"fixture_load_ms\":"<<ms(load_start,load_end)<<",\"initialization_ms\":"<<ms(init_start,init_end)
-       <<",\"scope\":\"Fusion with host source uploads; GPU case waits for completion without output readback. Excludes stereo, camera, display and initialization.\",\"timing_contract\":\"enqueue includes input validation, metadata copies, host uploads and submission; completion_wait starts at project return; cpu readback includes full output planes and metric identity gathering.\""
+       <<",\"scope\":\"Static retained fixture; host input uploads every iteration, resident input uploads once before warmup. GPU output mode waits for completion without output readback. Excludes stereo, camera, display, initialization and one-time resident upload; not full 60Hz pipeline proof.\",\"timing_contract\":\"enqueue includes submission and applicable validation; host input additionally includes metadata copies and uploads, resident input consumes retained GPU buffers. completion_wait starts at project return; cpu readback includes full output planes and metric identity gathering.\""
        <<",\"dump_readback_after_measurement_ms\":"<<final_dump_readback<<",\"dump_prefix\":"<<quote(opt.dump.string())<<",\"summary_ms\":{\"enqueue\":";summary(out,samples,&Sample::enqueue);
     out<<",\"completion_wait\":";summary(out,samples,&Sample::wait);out<<",\"readback\":";summary(out,samples,&Sample::readback);out<<",\"total\":";summary(out,samples,&Sample::total);out<<"},\"samples_ms\":[";
     for(std::size_t i=0;i<samples.size();++i){if(i)out<<',';const auto& s=samples[i];out<<"{\"enqueue\":"<<s.enqueue<<",\"completion_wait\":"<<s.wait<<",\"readback\":"<<s.readback<<",\"total\":"<<s.total<<'}';}

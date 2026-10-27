@@ -1,5 +1,6 @@
 #pragma once
 #include <stereoforge/contracts.hpp>
+#include <stereoforge/native_device.hpp>
 #include <span>
 #include <optional>
 #include <string>
@@ -29,6 +30,8 @@ class NativeStereo {
 public:
     explicit NativeStereo(StereoConfig config, const std::string& shader_directory, bool vulkan_validation = false,
         std::optional<MetricCalibration> metric_calibration = std::nullopt);
+    NativeStereo(StereoConfig config,const std::string& shader_directory,NativeDevice device,
+        std::optional<MetricCalibration> metric_calibration=std::nullopt);
     NativeFrame enqueue(std::span<const std::uint32_t> left, std::span<const std::uint32_t> right);
     StereoReadback readback(const NativeFrame& frame) const;
     std::uint64_t device_id() const;

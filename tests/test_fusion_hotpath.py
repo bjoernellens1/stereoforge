@@ -101,12 +101,17 @@ def test_native_project_encodes_once_without_midstage_host_completion():
     source=(ROOT.parents[1]/'src'/'geometry.cpp').read_text()
     project=_cpp_body(source,'GeometryFrame NativeGeometry::project(')
     assert project.count('createCommandEncoder(')==1 and project.count('e.submit(')==1
-    assert not any(call in project for call in ('waitForFences(','waitOnHost(','readBuffer(','readback('))
+    forbidden=('waitForFences(','waitOnHost(','readBuffer(','readback(','.wait(')
+    assert not any(call in project for call in forbidden)
+    assert project.count('e.encode_project(slot,encoder,view);')==1
+    helper=_cpp_body(source,'void encode_project(')
+    assert not any(call in helper for call in forbidden+('createCommandEncoder(','.submit('))
     stages=['clear','clear_layers','splat_layer_depth','splat_layer_owner',
             'histogram_ratios','reduce_ratios','resolve_layers']
     import re
-    assert re.findall(r'e\.dispatch\(encoder,slot,"project\.([^"]+)"',project)==stages
-    assert 'e.buffer(slot,"ratio_histogram",3*4096)' in project
+    assert re.findall(r'dispatch\(encoder,slot,"project\.([^"]+)"',helper)==stages+['gather_project_metadata']
+    assert re.search(r'if\(resident\)\s*dispatch\(encoder,slot,"project\.gather_project_metadata"',helper)
+    assert 'buffer(slot,"ratio_histogram",3*4096)' in helper
     assert 'std::array<Slot,2> slots' in source
     allocator=_cpp_body(source,'rhi::IBuffer* buffer(')
     assert allocator.index('if(!slot.buffers.contains(name))')<allocator.index('createBuffer(')

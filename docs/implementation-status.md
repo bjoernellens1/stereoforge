@@ -110,3 +110,20 @@ checks do not qualify the production chain or physical depth accuracy.
 Standalone follow-up: **230 Python tests pass**, standalone CTest 4/4, and
 standalone stereo/geometry core-validation runs emit zero diagnostics across
 both streams. The benchmark executes under invalid PYTHONHOME/empty PYTHONPATH.
+
+
+Resident native follow-up: **265 Python tests pass**, standalone CTest **5/5**,
+and CPU CTest **1/1**. Native stages now share an explicit `NativeDevice` context
+and queue. Geometry accepts retained GPU source planes and materializes selected
+metric identity/age on the GPU. Matched 720p static fusion measures **1.427 ms
+strict / 1.468 ms preview p50**, excluding one-time upload and CPU output readback.
+All eleven final planes match the host-input path exactly. A three-frame actual
+GPU stereo → bridge → compositor → downstream consumer fixture checks fresh
+64-bit IDs/colors, metric masks and invalid defaults using only 16-byte final
+counter downloads, including producer-slot reuse after high-level owners drop.
+Stereo, geometry/temporal and handoff fixtures pass positive Khronos core
+validation with zero diagnostics across both streams. These results do not
+qualify synchronization validation, full native live capture/rectification/LR
+consistency/temporal integration, or sustained 60 Hz operation. See
+[native-resident-evidence.md](native-resident-evidence.md) for commands, hashes,
+setup cost, p95 and the precise evidence boundary.

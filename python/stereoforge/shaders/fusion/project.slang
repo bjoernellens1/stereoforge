@@ -265,3 +265,20 @@ void pack_readback(uint3 tid:SV_DispatchThreadID)
         ((output_provenance[t]&255)<<16);
     packed_readback[t]=uint4(output_rgb[t],asuint(output_depth[t]),asuint(output_confidence[t]),flags);
 }
+
+// Native resident metadata ABI. int64 values are carried as little-endian
+// low/high uint pairs; no CPU snapshot or intermediate readback participates.
+StructuredBuffer<uint2> source_ids;
+StructuredBuffer<uint2> source_ages;
+RWStructuredBuffer<uint2> output_source_ids;
+RWStructuredBuffer<uint2> output_age_ns;
+[shader("compute")]
+[numthreads(64,1,1)]
+void gather_project_metadata(uint3 tid:SV_DispatchThreadID)
+{
+    uint t=tid.x;if(t>=target_width*target_height)return;
+    uint index=owner[t];
+    bool valid=output_valid[t]!=0&&index!=0xffffffff&&index<src_width*src_height*2;
+    output_source_ids[t]=valid?source_ids[index]:uint2(0xffffffff,0xffffffff);
+    output_age_ns[t]=valid?source_ages[index]:uint2(0,0);
+}

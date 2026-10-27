@@ -14,7 +14,8 @@ def body(source,marker):
 def test_measured_gpu_case_has_only_completion_and_conditional_cpu_readback():
     source=(ROOT/'apps/native_view_benchmark.cpp').read_text()
     measured,end=body(source,'for(unsigned i=0;i<opt.frames;++i)')
-    assert measured.count('engine.project(sources,input.view)')==1
+    assert measured.count('last=project()')==1
+    assert source.count('resident?engine.project(*resident,input.view):engine.project(sources,input.view)')==1
     assert measured.count('completion.wait()')==1
     assert measured.count('engine.readback(')==1
     assert 'if(opt.readback=="cpu")last_cpu=engine.readback(*last);' in measured
@@ -22,8 +23,8 @@ def test_measured_gpu_case_has_only_completion_and_conditional_cpu_readback():
     assert measured.index('completion.wait()')<measured.index('samples.push_back(')
     assert 'dump(' not in measured
     assert 'if(opt.readback=="gpu")last_cpu=engine.readback(*last)' in source[end:]
-    assert 'Fusion with host source uploads' in source
-    assert 'Excludes stereo, camera, display and initialization' in source
+    assert 'host input uploads every iteration, resident input uploads once before warmup' in source
+    assert 'Excludes stereo, camera, display, initialization and one-time resident upload' in source
 
 
 def test_warmup_and_initialization_excluded_and_inputs_reused():

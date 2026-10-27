@@ -3,7 +3,8 @@
 #include <slang-rhi.h>
 #include <slang-rhi/shader-cursor.h>
 #include <algorithm>
-#include <atomic>
+#include <fstream>
+#include <iterator>
 #include <cstring>
 #include <limits>
 #include <unordered_map>
@@ -14,7 +15,6 @@ using rhi::ComPtr;
 void checked(SlangResult result,const char* operation) {
     if (SLANG_FAILED(result)) throw std::runtime_error(std::string(operation)+" failed ("+std::to_string(result)+")");
 }
-std::atomic<std::uint64_t> next_geometry_device{1ULL<<63};
 void validate_camera(Pinhole c) {
     if (!std::isfinite(c.fx)||!std::isfinite(c.fy)||!std::isfinite(c.cx)||!std::isfinite(c.cy)||c.fx<=0||c.fy<=0)
         throw std::invalid_argument("positive finite rectified pinhole intrinsics required");
@@ -37,9 +37,30 @@ std::int64_t add_age(std::int64_t age,std::int64_t elapsed) {
 }
 }
 struct GeometryMetadata {
-    enum class Kind { Project,Reproject,Fuse } kind;
+    enum class Kind { Project,ResidentProject,Reproject,Fuse } kind;
     std::vector<std::int64_t> current_ids,current_ages,previous_ids,previous_ages;
     std::int64_t elapsed=0;
+};
+// One owned source upload has its own fence and resources, independent of the
+// geometry output ring. Last-release cleanup may wait; project never waits on it.
+struct GeometryUpload final : CompletionState {
+    NativeDevice context;
+    std::unordered_map<std::string,ComPtr<rhi::IBuffer>> buffers;
+    ComPtr<rhi::ICommandBuffer> commands;
+    ComPtr<rhi::IFence> fence;
+    bool submitted=false;
+    explicit GeometryUpload(NativeDevice device):CompletionState(device.id()),context(std::move(device)){}
+    bool ready()const override {std::uint64_t value=0;checked(fence->getCurrentValue(&value),"query source upload");return value>=1;}
+    void wait()override {rhi::IFence* fences[]={fence};const std::uint64_t value=1;checked(context.rhi_device()->waitForFences(1,fences,&value,true,rhi::kTimeoutInfinite),"wait source upload");}
+    ~GeometryUpload(){
+        if(submitted){
+            std::uint64_t value=0;
+            if(SLANG_FAILED(fence->getCurrentValue(&value))||value<1){
+                rhi::IFence* fences[]={fence};const std::uint64_t target=1;
+                context.rhi_device()->waitForFences(1,fences,&target,true,rhi::kTimeoutInfinite);
+            }
+        }
+    }
 };
 struct NativeGeometry::Impl : std::enable_shared_from_this<NativeGeometry::Impl> {
     struct Slot {
@@ -51,39 +72,39 @@ struct NativeGeometry::Impl : std::enable_shared_from_this<NativeGeometry::Impl>
     struct Lease final : CompletionState {
         std::shared_ptr<Impl> engine;
         std::uint64_t value;
-        Lease(std::shared_ptr<Impl> owner,std::uint64_t v):CompletionState(owner->identity),engine(std::move(owner)),value(v){}
+        std::vector<BufferView> inputs;
+        Lease(std::shared_ptr<Impl> owner,std::uint64_t v,std::vector<BufferView> retained={})
+            :CompletionState(owner->identity),engine(std::move(owner)),value(v),inputs(std::move(retained)){}
         bool ready() const override {std::uint64_t v=0;checked(engine->fence->getCurrentValue(&v),"query geometry completion");return v>=value;}
         void wait() override {rhi::IFence* fences[]={engine->fence};checked(engine->device->waitForFences(1,fences,&value,true,rhi::kTimeoutInfinite),"wait geometry completion");}
     };
     GeometryConfig config;
     std::size_t n,m,output_capacity;
-    const std::uint64_t identity=next_geometry_device.fetch_add(1);
+    NativeDevice context;
+    const std::uint64_t identity;
     ComPtr<rhi::IDevice> device;
     ComPtr<rhi::ICommandQueue> queue;
     ComPtr<rhi::IFence> fence;
     std::unordered_map<std::string,ComPtr<rhi::IComputePipeline>> pipelines;
     std::array<Slot,2> slots;
     std::uint64_t generation=0;
-    Impl(GeometryConfig c,const std::string& shaders,bool validation):config(c) {
+    Impl(GeometryConfig c,const std::string& shaders,NativeDevice shared):config(c),context(std::move(shared)),identity(context.id()) {
         n=std::uint64_t(c.source_width)*c.source_height;m=std::uint64_t(c.target_width)*c.target_height;
         if(!n||!m||n>UINT32_MAX/2||m>UINT32_MAX/2)throw std::invalid_argument("invalid native geometry dimensions");
         output_capacity=std::max(n,m);
-        if(validation)detail::require_vulkan_validation();
-        const std::string fusion=shaders+"/fusion",temporal=shaders+"/temporal";
-        const char* paths[]={fusion.c_str(),temporal.c_str()};
-        rhi::DeviceDesc desc{};desc.deviceType=rhi::DeviceType::Vulkan;desc.enableValidation=true;
-        desc.enableCUDALaunchFromGfx=false;desc.enableRayTracing=false;
-        desc.slang.searchPaths=paths;desc.slang.searchPathCount=2;desc.slang.targetProfile="sm_6_0";
-        checked(rhi::getRHI()->createDevice(desc,device.writeRef()),"create geometry Vulkan device");
-        checked(device->getQueue(rhi::QueueType::Graphics,queue.writeRef()),"get geometry queue");
+        if(!context.rhi_device()||!context.rhi_queue())throw std::invalid_argument("empty native context");
+        device=context.rhi_device();queue=context.rhi_queue();
         checked(device->createFence({},fence.writeRef()),"create geometry fence");
         auto session=device->getSlangSession();
         for(const char* module_name:{"project","history"}) {
             ComPtr<slang::IBlob> diagnostics;
-            ComPtr<slang::IModule> module(session->loadModule(module_name,diagnostics.writeRef()));
+            const auto path=shaders+(std::strcmp(module_name,"project")==0?"/fusion/project.slang":"/temporal/history.slang");
+            std::ifstream input(path);if(!input)throw std::runtime_error("cannot read shared shader "+path);
+            const std::string source((std::istreambuf_iterator<char>(input)),{});
+            ComPtr<slang::IModule> module(session->loadModuleFromSourceString(module_name,path.c_str(),source.c_str(),diagnostics.writeRef()));
             if(!module)throw std::runtime_error(diagnostics?static_cast<const char*>(diagnostics->getBufferPointer()):"geometry module failed");
             const std::vector<const char*> entry_names=std::strcmp(module_name,"project")==0
-                ?std::vector<const char*>{"clear","clear_layers","splat_layer_depth","splat_layer_owner","histogram_ratios","reduce_ratios","resolve_layers"}
+                ?std::vector<const char*>{"clear","clear_layers","splat_layer_depth","splat_layer_owner","histogram_ratios","reduce_ratios","resolve_layers","gather_project_metadata"}
                 :std::vector<const char*>{"clear","splat_depth","splat_owner","resolve","fuse"};
             for(const char* entry_name:entry_names) {
                 ComPtr<slang::IEntryPoint> entry;checked(module->findEntryPointByName(entry_name,entry.writeRef()),"find geometry entry point");
@@ -129,13 +150,13 @@ struct NativeGeometry::Impl : std::enable_shared_from_this<NativeGeometry::Impl>
     template<class T> static void set(rhi::ShaderCursor cursor,const char* name,const T& value) {
         auto field=cursor[name];if(field.isValid())checked(field.setData(value),name);
     }
-    GeometryFrame submit(Slot& slot,rhi::ICommandEncoder* encoder,std::shared_ptr<GeometryMetadata> metadata,std::uint32_t w,std::uint32_t h) {
+    GeometryFrame submit(Slot& slot,rhi::ICommandEncoder* encoder,std::shared_ptr<GeometryMetadata> metadata,std::uint32_t w,std::uint32_t h,std::vector<BufferView> inputs={}) {
         checked(encoder->finish(slot.commands.writeRef()),"finish geometry commands");
         const auto value=++generation;rhi::ICommandBuffer* commands[]={slot.commands};rhi::IFence* fences[]={fence};
         rhi::SubmitDesc desc{};desc.commandBuffers=commands;desc.commandBufferCount=1;
         desc.signalFences=fences;desc.signalFenceValues=&value;desc.signalFenceCount=1;
         checked(queue->submit(desc),"submit geometry Vulkan work");slot.generation=value;
-        auto lease=std::make_shared<Lease>(shared_from_this(),value);slot.lease=lease;CompletionToken token(lease);
+        auto lease=std::make_shared<Lease>(shared_from_this(),value,std::move(inputs));slot.lease=lease;CompletionToken token(lease);
         auto view=[&](const char* name,std::size_t elements,std::uint32_t stride=4){
             if(!slot.buffers.contains(name))return BufferView{};
             return BufferView{slot.buffers.at(name).get(),0,elements*stride,stride,identity,lease,token};
@@ -147,14 +168,93 @@ struct NativeGeometry::Impl : std::enable_shared_from_this<NativeGeometry::Impl>
         frame.owner=view("owner",count);frame.choose_previous=view("choose_previous",count);
         frame.rgb=view("output_rgb",count);frame.source=view("output_source",count);
         if(metadata->kind==GeometryMetadata::Kind::Project){frame.previous_ids=view("source_ids",2*n,8);frame.previous_ages=view("source_ages",2*n,8);}
-        else {
+        else if(metadata->kind==GeometryMetadata::Kind::ResidentProject){
+            frame.previous_ids=lease->inputs.at(5);frame.previous_ages=lease->inputs.at(6);
+            frame.source_ids=view("output_source_ids",count,8);frame.age_ns=view("output_age_ns",count,8);
+        }else {
             frame.previous_ids=view("previous_ids",n,8);frame.previous_ages=view("previous_ages",n,8);
             if(metadata->kind==GeometryMetadata::Kind::Fuse){frame.current_ids=view("current_ids",n,8);frame.current_ages=view("current_ages",n,8);}
         }
         // Irrelevant outputs are absent, never stale buffers from a prior stage.
-        if(metadata->kind==GeometryMetadata::Kind::Project){frame.disparity={};frame.choose_previous={};frame.rgb_validity=view("output_rgb_valid",count);frame.approximate=view("output_approximate",count);}
+        if(metadata->kind==GeometryMetadata::Kind::Project||metadata->kind==GeometryMetadata::Kind::ResidentProject){frame.disparity={};frame.choose_previous={};frame.rgb_validity=view("output_rgb_valid",count);frame.approximate=view("output_approximate",count);}
         else {frame.rgb={};frame.source={};if(metadata->kind==GeometryMetadata::Kind::Reproject)frame.choose_previous={};else frame.owner={};}
         frame.completion=token;frame.width=w;frame.height=h;frame.metadata=std::move(metadata);return frame;
+    }
+    void encode_project(Slot& slot,rhi::ICommandEncoder* encoder,const VirtualView& view,const GeometryDeviceSources* resident=nullptr) {
+        outputs(slot);
+        for(const char* name:{"layer_z","layer_owner","preview_indices"})buffer(slot,name,2*m);
+        buffer(slot,"ratio_histogram",3*4096);buffer(slot,"exposure_gain",3);
+        if(resident){buffer(slot,"output_source_ids",output_capacity,8);buffer(slot,"output_age_ns",output_capacity,8);}
+        auto parameters=[&](rhi::ShaderCursor cursor){
+            // Explicit resident bindings override any host-source allocations
+            // left in this slot. No upload, metadata copy, or readback occurs.
+            if(resident){
+                const std::pair<const char*,const BufferView*> bindings[]={
+                    {"source_depth",&resident->depth},{"source_confidence",&resident->confidence},{"source_rgb",&resident->rgb},
+                    {"source_provenance",&resident->provenance},{"source_rays",&resident->rays},
+                    {"source_ids",&resident->source_ids},{"source_ages",&resident->age_ns},{"preview_indices",&resident->preview_indices}};
+                for(const auto& [name,view]:bindings)if(view->native){
+                    const auto field=cursor[name];
+                    if(field.isValid())checked(field.setBinding(rhi::Binding(static_cast<rhi::IBuffer*>(view->native),rhi::BufferRange{0,view->size_bytes})),name);
+                }
+            }
+            set(cursor,"src_width",config.source_width);set(cursor,"src_height",config.source_height);
+            set(cursor,"target_width",config.target_width);set(cursor,"target_height",config.target_height);
+            set(cursor,"projection",std::uint32_t(view.projection==Projection::Cylindrical));
+            set(cursor,"fx",view.intrinsics.fx);set(cursor,"fy",view.intrinsics.fy);set(cursor,"cx",view.intrinsics.cx);set(cursor,"cy",view.intrinsics.cy);
+            set(cursor,"hfov_radians",view.hfov_radians);set(cursor,"source_to_virtual_left",view.source_to_virtual_left);set(cursor,"source_to_virtual_right",view.source_to_virtual_right);
+            set(cursor,"preview_enabled",std::uint32_t(view.mode==ViewMode::Preview));set(cursor,"exposure_enabled",std::uint32_t(view.exposure_match));
+        };
+        dispatch(encoder,slot,"project.clear",m,parameters);
+        dispatch(encoder,slot,"project.clear_layers",std::max(2*m,std::size_t(3*4096)),parameters);
+        dispatch(encoder,slot,"project.splat_layer_depth",2*n,parameters);
+        dispatch(encoder,slot,"project.splat_layer_owner",2*n,parameters);
+        dispatch(encoder,slot,"project.histogram_ratios",m,parameters);
+        dispatch(encoder,slot,"project.reduce_ratios",3,parameters,1);
+        dispatch(encoder,slot,"project.resolve_layers",m,parameters);
+        if(resident)dispatch(encoder,slot,"project.gather_project_metadata",m,parameters);
+    }
+    void validate_view(const VirtualView& view,bool has_preview) const {
+        if(view.mode!=ViewMode::Strict&&view.mode!=ViewMode::Preview)throw std::invalid_argument("unsupported native view mode");
+        if(view.mode==ViewMode::Preview&&!has_preview)throw std::invalid_argument("preview requires two target-sized calibration map layers");
+        validate_camera(view.intrinsics);validate_pose(view.source_to_virtual_left);validate_pose(view.source_to_virtual_right);
+        if(view.projection!=Projection::Perspective&&view.projection!=Projection::Cylindrical)throw std::invalid_argument("unsupported native projection");
+        if(!std::isfinite(view.hfov_radians)||view.hfov_radians<=0||view.hfov_radians>=6.28318530718f)throw std::invalid_argument("invalid virtual horizontal FOV");
+    }
+    void validate_host_sources(const GeometrySources& src) const {
+        const auto count=2*n;
+        if(src.timestamp_ns<0||src.calibration_id.empty())throw std::invalid_argument("projection timestamp and calibration identity required");
+        if(!src.preview_indices.empty()&&src.preview_indices.size()!=2*m)
+        throw std::invalid_argument("preview requires two target-sized calibration map layers");
+        for(std::size_t i=0;i<src.preview_indices.size();++i){
+        const auto index=src.preview_indices[i];
+        if(index==0xffffffff)continue;
+        const auto eye=i/m;
+        if(index>=count||index/n!=eye)throw std::invalid_argument("preview source index is out of range or belongs to the wrong eye");
+    }
+        if(src.depth.size()!=count||src.confidence.size()!=count||src.rgb.size()!=count||src.provenance.size()!=count||src.rays.size()!=count||src.source_ids.size()!=count||src.age_ns.size()!=count)
+        throw std::invalid_argument("geometry source dimensions mismatch");
+        for(std::size_t i=0;i<count;++i) {
+        const auto ray=src.rays[i];
+        if(!std::isfinite(ray.x)||!std::isfinite(ray.y)||ray.z!=1||src.age_ns[i]<0)throw std::invalid_argument("unit-Z finite rays and nonnegative ages required");
+        if(std::isfinite(src.depth[i])&&src.depth[i]>0&&(!std::isfinite(src.confidence[i])||src.confidence[i]<0||src.confidence[i]>1||src.provenance[i]==0||src.source_ids[i]<0))
+            throw std::invalid_argument("invalid source confidence, identity, or provenance");
+    }
+    }
+    void validate_device_sources(const GeometryDeviceSources& src) const {
+        if(src.timestamp_ns<0||src.calibration_id.empty())throw std::invalid_argument("projection timestamp and calibration identity required");
+        auto validate=[&](const BufferView& view,std::size_t count,std::size_t stride){
+            view.validate(identity);
+            if(view.offset_bytes!=0||view.size_bytes!=count*stride||view.stride_bytes!=stride)
+                throw std::invalid_argument("resident buffer shape, offset, or stride mismatch");
+            const auto& desc=static_cast<rhi::IBuffer*>(view.native)->getDesc();
+            if(desc.size<view.size_bytes||desc.elementSize!=stride)
+                throw std::invalid_argument("resident buffer allocation layout mismatch");
+        };
+        validate(src.depth,2*n,4);validate(src.confidence,2*n,4);validate(src.rgb,2*n,4);validate(src.provenance,2*n,4);
+        validate(src.rays,2*n,12);validate(src.source_ids,2*n,8);validate(src.age_ns,2*n,8);
+        if(src.preview_indices.native||src.preview_indices.size_bytes||src.preview_indices.owner||src.preview_indices.completion)
+            validate(src.preview_indices,2*m,4);
     }
     void temporal_input(const TemporalInput& f) const {
         if(f.depth.size()!=n||f.confidence.size()!=n||f.disparity.size()!=n||f.validity.size()!=n||f.provenance.size()!=n||f.source_ids.size()!=n||f.age_ns.size()!=n)
@@ -173,65 +273,69 @@ struct NativeGeometry::Impl : std::enable_shared_from_this<NativeGeometry::Impl>
         upload(encoder,slot,name("_provenance").c_str(),f.provenance);upload(encoder,slot,name("_ids").c_str(),f.source_ids);upload(encoder,slot,name("_ages").c_str(),f.age_ns);
     }
 };
-NativeGeometry::NativeGeometry(GeometryConfig config,const std::string& shaders,bool validation):impl_(std::make_shared<Impl>(config,shaders,validation)){}
+NativeGeometry::NativeGeometry(GeometryConfig config,const std::string& shaders,bool validation):NativeGeometry(config,shaders,NativeDevice(validation)){}
+NativeGeometry::NativeGeometry(GeometryConfig config,const std::string& shaders,NativeDevice device):impl_(std::make_shared<Impl>(config,shaders,std::move(device))){}
 std::uint64_t NativeGeometry::device_id()const{return impl_->identity;}
 std::string NativeGeometry::device_name()const{return impl_->device->getInfo().adapterName;}
 GeometryFrame NativeGeometry::project(const GeometrySources& src,const VirtualView& view) {
     auto& e=*impl_;const auto count=2*e.n;
-    if(src.timestamp_ns<0||src.calibration_id.empty())throw std::invalid_argument("projection timestamp and calibration identity required");
-    if(view.mode!=ViewMode::Strict&&view.mode!=ViewMode::Preview)throw std::invalid_argument("unsupported native view mode");
-    if((view.mode==ViewMode::Preview&&src.preview_indices.size()!=2*e.m)||
-        (!src.preview_indices.empty()&&src.preview_indices.size()!=2*e.m))
-        throw std::invalid_argument("preview requires two target-sized calibration map layers");
-    for(std::size_t i=0;i<src.preview_indices.size();++i){
-        const auto index=src.preview_indices[i];
-        if(index==0xffffffff)continue;
-        const auto eye=i/e.m;
-        if(index>=count||index/e.n!=eye)throw std::invalid_argument("preview source index is out of range or belongs to the wrong eye");
-    }
-    validate_camera(view.intrinsics);validate_pose(view.source_to_virtual_left);validate_pose(view.source_to_virtual_right);
-    if(view.projection!=Projection::Perspective&&view.projection!=Projection::Cylindrical)throw std::invalid_argument("unsupported native projection");
-    if(!std::isfinite(view.hfov_radians)||view.hfov_radians<=0||view.hfov_radians>=6.28318530718f)throw std::invalid_argument("invalid virtual horizontal FOV");
-    if(src.depth.size()!=count||src.confidence.size()!=count||src.rgb.size()!=count||src.provenance.size()!=count||src.rays.size()!=count||src.source_ids.size()!=count||src.age_ns.size()!=count)
-        throw std::invalid_argument("geometry source dimensions mismatch");
-    for(std::size_t i=0;i<count;++i) {
-        const auto ray=src.rays[i];
-        if(!std::isfinite(ray.x)||!std::isfinite(ray.y)||ray.z!=1||src.age_ns[i]<0)throw std::invalid_argument("unit-Z finite rays and nonnegative ages required");
-        if(std::isfinite(src.depth[i])&&src.depth[i]>0&&(!std::isfinite(src.confidence[i])||src.confidence[i]<0||src.confidence[i]>1||src.provenance[i]==0||src.source_ids[i]<0))
-            throw std::invalid_argument("invalid source confidence, identity, or provenance");
-    }
+    e.validate_host_sources(src);e.validate_view(view,!src.preview_indices.empty());
     auto& slot=e.acquire();auto encoder=e.queue->createCommandEncoder();if(!encoder)throw std::runtime_error("geometry command encoder failed");
     e.upload(encoder,slot,"source_depth",src.depth);e.upload(encoder,slot,"source_confidence",src.confidence);
     e.upload(encoder,slot,"source_rgb",src.rgb);e.upload(encoder,slot,"source_provenance",src.provenance);
     e.upload(encoder,slot,"source_rays",src.rays);e.upload(encoder,slot,"source_ids",src.source_ids);e.upload(encoder,slot,"source_ages",src.age_ns);
-    e.outputs(slot);
-    for(const char* name:{"layer_z","layer_owner","preview_indices"})e.buffer(slot,name,2*e.m);
-    e.buffer(slot,"ratio_histogram",3*4096);e.buffer(slot,"exposure_gain",3);
     if(!src.preview_indices.empty())e.upload(encoder,slot,"preview_indices",src.preview_indices);
-    auto parameters=[&](rhi::ShaderCursor cursor){
-        e.set(cursor,"src_width",e.config.source_width);e.set(cursor,"src_height",e.config.source_height);
-        e.set(cursor,"target_width",e.config.target_width);e.set(cursor,"target_height",e.config.target_height);
-        e.set(cursor,"projection",std::uint32_t(view.projection==Projection::Cylindrical));
-        e.set(cursor,"fx",view.intrinsics.fx);e.set(cursor,"fy",view.intrinsics.fy);e.set(cursor,"cx",view.intrinsics.cx);e.set(cursor,"cy",view.intrinsics.cy);
-        e.set(cursor,"hfov_radians",view.hfov_radians);e.set(cursor,"source_to_virtual_left",view.source_to_virtual_left);e.set(cursor,"source_to_virtual_right",view.source_to_virtual_right);
-        e.set(cursor,"preview_enabled",std::uint32_t(view.mode==ViewMode::Preview));
-        e.set(cursor,"exposure_enabled",std::uint32_t(view.exposure_match));
-    };
-    e.dispatch(encoder,slot,"project.clear",e.m,parameters);
-    e.dispatch(encoder,slot,"project.clear_layers",std::max(2*e.m,std::size_t(3*4096)),parameters);
-    e.dispatch(encoder,slot,"project.splat_layer_depth",count,parameters);
-    e.dispatch(encoder,slot,"project.splat_layer_owner",count,parameters);
-    e.dispatch(encoder,slot,"project.histogram_ratios",e.m,parameters);
-    // reduce_ratios has numthreads(1,1,1), unlike the 64-thread projection
-    // passes. Three groups are required so every color channel is reduced.
-    e.dispatch(encoder,slot,"project.reduce_ratios",3,parameters,1);
-    e.dispatch(encoder,slot,"project.resolve_layers",e.m,parameters);
+    e.encode_project(slot,encoder,view);
     auto metadata=std::make_shared<GeometryMetadata>();metadata->kind=GeometryMetadata::Kind::Project;
     metadata->previous_ids={src.source_ids.begin(),src.source_ids.end()};metadata->previous_ages={src.age_ns.begin(),src.age_ns.end()};
     auto frame=e.submit(slot,encoder,std::move(metadata),e.config.target_width,e.config.target_height);
     frame.operation=GeometryOperation::Project;
     frame.depth_convention=view.projection==Projection::Perspective?DepthConvention::AxialZ:DepthConvention::RayRange;
     frame.timestamp_ns=src.timestamp_ns;frame.calibration_id=src.calibration_id;return frame;
+}
+GeometryDeviceSources NativeGeometry::upload_sources(const GeometrySources& sources) {
+    auto& e=*impl_;e.validate_host_sources(sources);
+    auto state=std::make_shared<GeometryUpload>(e.context);
+    checked(e.device->createFence({},state->fence.writeRef()),"create source upload fence");
+    auto encoder=e.queue->createCommandEncoder();if(!encoder)throw std::runtime_error("source command encoder failed");
+    auto upload=[&]<class T>(const char* name,std::span<const T> values){
+        if(values.empty())return;
+        rhi::BufferDesc desc{};desc.size=values.size_bytes();desc.elementSize=sizeof(T);desc.label=name;
+        desc.usage=rhi::BufferUsage::ShaderResource|rhi::BufferUsage::UnorderedAccess|rhi::BufferUsage::CopySource|rhi::BufferUsage::CopyDestination;
+        desc.defaultState=rhi::ResourceState::UnorderedAccess;
+        checked(e.device->createBuffer(desc,nullptr,state->buffers[name].writeRef()),"allocate resident source buffer");
+        checked(encoder->uploadBufferData(state->buffers.at(name),0,values.size_bytes(),values.data()),name);
+    };
+    upload("source_depth",sources.depth);upload("source_confidence",sources.confidence);upload("source_rgb",sources.rgb);
+    upload("source_provenance",sources.provenance);upload("source_rays",sources.rays);upload("source_ids",sources.source_ids);
+    upload("source_ages",sources.age_ns);upload("preview_indices",sources.preview_indices);
+    checked(encoder->finish(state->commands.writeRef()),"finish source upload");
+    rhi::ICommandBuffer* commands[]={state->commands};rhi::IFence* fences[]={state->fence};const std::uint64_t value=1;
+    rhi::SubmitDesc submit{};submit.commandBuffers=commands;submit.commandBufferCount=1;
+    submit.signalFences=fences;submit.signalFenceValues=&value;submit.signalFenceCount=1;
+    checked(e.queue->submit(submit),"submit source upload");state->submitted=true;
+    CompletionToken token(state);
+    auto view=[&](const char* name){
+        if(!state->buffers.contains(name))return BufferView{};
+        auto buffer=state->buffers.at(name).get();const auto& desc=buffer->getDesc();
+        return BufferView{buffer,0,std::size_t(desc.size),desc.elementSize,e.identity,state,token};
+    };
+    return {view("source_depth"),view("source_confidence"),view("source_rgb"),view("source_provenance"),view("source_rays"),
+        view("source_ids"),view("source_ages"),view("preview_indices"),sources.timestamp_ns,sources.calibration_id,token};
+}
+GeometryFrame NativeGeometry::project(const GeometryDeviceSources& sources,const VirtualView& view) {
+    auto& e=*impl_;e.validate_device_sources(sources);e.validate_view(view,sources.preview_indices.native!=nullptr);
+    auto& slot=e.acquire();auto encoder=e.queue->createCommandEncoder();if(!encoder)throw std::runtime_error("geometry command encoder failed");
+    // Same-context submissions are ordered by the shared queue. In-flight
+    // producer completion is retained, never waited on by this entry point.
+    e.encode_project(slot,encoder,view,&sources);
+    auto metadata=std::make_shared<GeometryMetadata>();metadata->kind=GeometryMetadata::Kind::ResidentProject;
+    std::vector<BufferView> inputs{sources.depth,sources.confidence,sources.rgb,sources.provenance,sources.rays,sources.source_ids,sources.age_ns};
+    if(sources.preview_indices.native)inputs.push_back(sources.preview_indices);
+    auto frame=e.submit(slot,encoder,std::move(metadata),e.config.target_width,e.config.target_height,std::move(inputs));
+    frame.operation=GeometryOperation::Project;
+    frame.depth_convention=view.projection==Projection::Perspective?DepthConvention::AxialZ:DepthConvention::RayRange;
+    frame.timestamp_ns=sources.timestamp_ns;frame.calibration_id=sources.calibration_id;return frame;
 }
 GeometryFrame NativeGeometry::reproject(const TemporalInput& previous,Pinhole camera,const Pose4& pose,std::int64_t timestamp,std::optional<MetricDisparity> metric) {
     auto& e=*impl_;e.temporal_input(previous);validate_camera(camera);validate_pose(pose);
@@ -280,6 +384,10 @@ GeometryReadback NativeGeometry::readback(const GeometryFrame& frame)const {
     read(frame.validity,result.validity);read(frame.provenance,result.provenance);read(frame.rgb,result.rgb);read(frame.source,result.source);
     read(frame.owner,result.owner);read(frame.choose_previous,result.choose_previous);
     read(frame.rgb_validity,result.rgb_validity);read(frame.approximate,result.approximate);
+    if(frame.metadata->kind==GeometryMetadata::Kind::ResidentProject){
+        if(!frame.source_ids.native||!frame.age_ns.native)throw std::invalid_argument("resident final metadata planes missing");
+        read(frame.source_ids,result.source_ids);read(frame.age_ns,result.age_ns);return result;
+    }
     result.source_ids.assign(count,-1);result.age_ns.assign(count,0);const auto& metadata=*frame.metadata;
     for(std::size_t i=0;i<count;++i) {
         if(metadata.kind==GeometryMetadata::Kind::Fuse) {

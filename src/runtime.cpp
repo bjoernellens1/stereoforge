@@ -3,7 +3,8 @@
 #include <stereoforge/detail/vulkan_validation.hpp>
 #include <slang-rhi/shader-cursor.h>
 #include <array>
-#include <atomic>
+#include <fstream>
+#include <iterator>
 #include <iostream>
 #include <unordered_map>
 
@@ -13,7 +14,6 @@ void check(SlangResult result, const char* operation) {
     if (SLANG_FAILED(result)) throw std::runtime_error(std::string(operation) + " failed (" + std::to_string(result) + ")");
 }
 using rhi::ComPtr;
-std::atomic<std::uint64_t> next_device{1};
 }
 struct NativeStereo::Impl : std::enable_shared_from_this<NativeStereo::Impl> {
     struct Slot {
@@ -39,32 +39,26 @@ struct NativeStereo::Impl : std::enable_shared_from_this<NativeStereo::Impl> {
     };
     StereoConfig config;
     std::optional<MetricCalibration> metric;
-    const std::uint64_t identity = next_device.fetch_add(1);
+    NativeDevice context;
+    const std::uint64_t identity;
     ComPtr<rhi::IDevice> device;
     ComPtr<rhi::ICommandQueue> queue;
     ComPtr<rhi::IFence> fence;
     std::unordered_map<std::string, ComPtr<rhi::IComputePipeline>> pipelines;
     std::array<Slot, 2> slots;
     std::uint64_t generation = 0;
-    Impl(StereoConfig c, const std::string& shader_directory, bool validation, std::optional<MetricCalibration> calibration) : config(c),metric(calibration) {
-        config.validate();
-        if(metric)metric->validate();
-        if (validation) detail::require_vulkan_validation();
-        const char* search[] = {shader_directory.c_str()};
-        rhi::DeviceDesc desc{};
-        desc.deviceType = rhi::DeviceType::Vulkan;
-        desc.enableValidation = true;
-        desc.enableCUDALaunchFromGfx = false;
-        desc.enableRayTracing = false;
-        desc.slang.searchPaths = search;
-        desc.slang.searchPathCount = 1;
-        desc.slang.targetProfile = "sm_6_0";
-        check(rhi::getRHI()->createDevice(desc, device.writeRef()), "create Vulkan device");
-        check(device->getQueue(rhi::QueueType::Graphics, queue.writeRef()), "create Vulkan queue");
+    Impl(StereoConfig c,const std::string& shader_directory,NativeDevice shared,std::optional<MetricCalibration> calibration)
+        :config(c),metric(calibration),context(std::move(shared)),identity(context.id()) {
+        config.validate();if(metric)metric->validate();
+        if(!context.rhi_device()||!context.rhi_queue())throw std::invalid_argument("empty native context");
+        device=context.rhi_device();queue=context.rhi_queue();
         check(device->createFence({}, fence.writeRef()), "create completion fence");
         auto session = device->getSlangSession();
         ComPtr<slang::IBlob> diagnostics;
-        ComPtr<slang::IModule> module(session->loadModule("sgm", diagnostics.writeRef()));
+        const auto path=shader_directory+"/sgm.slang";
+        std::ifstream input(path);if(!input)throw std::runtime_error("cannot read shared shader "+path);
+        const std::string source((std::istreambuf_iterator<char>(input)),{});
+        ComPtr<slang::IModule> module(session->loadModuleFromSourceString("stereoforge_sgm",path.c_str(),source.c_str(),diagnostics.writeRef()));
         if (!module) throw std::runtime_error(diagnostics ? static_cast<const char*>(diagnostics->getBufferPointer()) : "load shared sgm module failed");
         for (const char* name : {"census", "cost", "aggregate", "select", "depth_convert"}) {
             if(std::string(name)=="depth_convert"&&!metric)continue;
@@ -174,7 +168,9 @@ struct NativeStereo::Impl : std::enable_shared_from_this<NativeStereo::Impl> {
     }
 };
 NativeStereo::NativeStereo(StereoConfig config, const std::string& shader_directory, bool validation, std::optional<MetricCalibration> metric)
-    : impl_(std::make_shared<Impl>(config, shader_directory, validation, metric)) {}
+    :NativeStereo(config,shader_directory,NativeDevice(validation),metric) {}
+NativeStereo::NativeStereo(StereoConfig config,const std::string& shader_directory,NativeDevice device,std::optional<MetricCalibration> metric)
+    :impl_(std::make_shared<Impl>(config,shader_directory,std::move(device),metric)) {}
 NativeFrame NativeStereo::enqueue(std::span<const std::uint32_t> left, std::span<const std::uint32_t> right) {
     return impl_->enqueue(left, right);
 }

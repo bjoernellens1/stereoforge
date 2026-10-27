@@ -21,6 +21,7 @@ def executable():
     (['--frames','0'],'frames must be positive'),
     (['--mode','unknown'],'mode must be strict or preview'),
     (['--readback','other'],'readback must be gpu or cpu'),
+    (['--input','other'],'input must be host or resident'),
     (['--surprise'],'unknown argument'),
 ])
 def test_invalid_cli_before_gpu(executable,arguments,message):
