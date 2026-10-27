@@ -27,6 +27,10 @@ context; later Vulkan-only and research-first decisions supersede it.
   configuration, truth-support completeness and common-valid metric accuracy.
 - Native C++ bounded persistent resource slots, asynchronous completion and GPU
   buffer leases, explicit readback, command-line stereo/geometry examples.
+- Standalone source-built Vulkan-only Slang RHI against the matching official
+  Slang SDK, with no Python/SGL discovery or linkage. Matched 720p native fusion
+  separates retained GPU output from CPU readback; see standalone-rhi-comparison.md.
+  It does not yet meet the 16.67 ms frame budget.
 - CPU CI, locked Python dependencies, pinned capture sources/compiler helper
   hashes, runtime capability reporting, hardware/performance evidence.
 
@@ -102,3 +106,7 @@ native Vulkan CTest 4/4 and CPU CTest 1/1. Wheel and source archive build. Posit
 native core validation passes for stereo and geometry/temporal contract fixtures.
 The full requirements audit in requirements-audit.md remains incomplete; these
 checks do not qualify the production chain or physical depth accuracy.
+
+Standalone follow-up: **230 Python tests pass**, standalone CTest 4/4, and
+standalone stereo/geometry core-validation runs emit zero diagnostics across
+both streams. The benchmark executes under invalid PYTHONHOME/empty PYTHONPATH.

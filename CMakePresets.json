@@ -1,9 +1,71 @@
 {
   "version": 3,
   "configurePresets": [
-    {"name": "cpu", "generator": "Ninja", "binaryDir": "${sourceDir}/build/cpu", "cacheVariables": {"CMAKE_BUILD_TYPE": "Release", "BUILD_TESTING": "ON"}},
-    {"name": "vulkan", "inherits": "cpu", "binaryDir": "${sourceDir}/build/vulkan", "cacheVariables": {"STEREOFORGE_RHI": "ON", "Python_EXECUTABLE": "${sourceDir}/.venv/bin/python"}}
+    {
+      "name": "cpu",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/cpu",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "BUILD_TESTING": "ON"
+      }
+    },
+    {
+      "name": "vulkan",
+      "inherits": "cpu",
+      "binaryDir": "${sourceDir}/build/vulkan",
+      "cacheVariables": {
+        "STEREOFORGE_RHI": "ON",
+        "Python_EXECUTABLE": "${sourceDir}/.venv/bin/python",
+        "STEREOFORGE_RHI_PROVIDER": "slangpy"
+      }
+    },
+    {
+      "name": "standalone",
+      "inherits": "cpu",
+      "binaryDir": "${sourceDir}/build/standalone",
+      "cacheVariables": {
+        "STEREOFORGE_RHI": "ON",
+        "STEREOFORGE_RHI_PROVIDER": "standalone",
+        "STEREOFORGE_CAPTURE": "OFF"
+      }
+    }
   ],
-  "buildPresets": [{"name": "cpu", "configurePreset": "cpu"}, {"name": "vulkan", "configurePreset": "vulkan"}],
-  "testPresets": [{"name": "cpu", "configurePreset": "cpu", "output": {"outputOnFailure": true}}, {"name": "vulkan", "configurePreset": "vulkan", "output": {"outputOnFailure": true}}]
+  "buildPresets": [
+    {
+      "name": "cpu",
+      "configurePreset": "cpu"
+    },
+    {
+      "name": "vulkan",
+      "configurePreset": "vulkan"
+    },
+    {
+      "name": "standalone",
+      "configurePreset": "standalone"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "cpu",
+      "configurePreset": "cpu",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "vulkan",
+      "configurePreset": "vulkan",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "standalone",
+      "configurePreset": "standalone",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
 }

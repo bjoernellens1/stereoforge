@@ -157,6 +157,15 @@ SGM work: aggregation remains dense over the configured disparity range.
   layer extracted locally enabled bounded positive core-validation checks; see
   [validation evidence](docs/vulkan-validation-evidence.md).
 
+## Standalone C++ runtime
+
+Build without Python, SlangPy or SGL using `cmake --preset standalone` and
+`cmake --build --preset standalone`. This source-builds pinned Vulkan-only Slang
+RHI against the official Slang SDK. The `vulkan` preset remains an explicit
+research provider. See the [matched 720p comparison](docs/standalone-rhi-comparison.md)
+for commands, output validation and timing boundaries. Native GPU-output fusion
+currently measures roughly 22–25 ms; this is not yet a 60 Hz camera pipeline.
+
 New code is Apache-2.0. The [license evaluation](docs/license-evaluation.md) clears
 public source publication; bundled binaries require a separate review. See
 [dependency notices](third_party/README.md) and [NOTICE](NOTICE).

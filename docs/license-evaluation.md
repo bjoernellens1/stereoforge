@@ -1,5 +1,13 @@
 # License evaluation — public source repository
 
+Standalone follow-up (2026-10-27): the production provider now source-builds
+Slang RHI revision `1a9768741246b1f356116d5dfa305933034ce049` against the official
+Slang 2026.12 SDK. Both archive hashes are pinned in cmake/StandaloneRHI.cmake;
+both actual license files match the retained Apache-2.0 WITH LLVM-exception
+notice byte-for-byte. No new binary/dependency archive is tracked or published.
+Source-publication clearance below remains applicable; binary redistribution
+still requires its separate audit. SlangPy is an optional research provider.
+
 **Decision: GO for public source publication under Apache-2.0**, after the notice
 remediations recorded below. No source-publication license blocker was identified
 in this review. This decision does not approve redistribution of a complete binary

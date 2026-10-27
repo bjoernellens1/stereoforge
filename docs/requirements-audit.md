@@ -30,9 +30,13 @@ differences from the float64 CPU oracle. Exact mask parity at those boundaries
 is not claimed. Python virtual-view identity/age export, the integrated native
 chain, controlled temporal/adaptive quality evidence, sustained throughput,
 physical metric truth, and full pipeline validation remain required open work.
-The latest user priority is a standalone C++/Slang RHI build with no SlangPy
-dependency and a matched 720p benchmark separating GPU completion from CPU
-readback, before further production integration or kernel optimization.
+The standalone C++/Slang RHI build and matched 720p benchmark are now implemented
+and verified without Python/SGL linkage. See standalone-rhi-comparison.md: output
+correctness matches the research implementation, but retained GPU-output wall
+time is still 22–25 ms and complete CPU readback is slower. Next work must remove
+per-frame host inputs/metadata copies and form GPU-to-GPU stage handoff, then
+measure and optimize stereo kernels against the full 16.67 ms frame budget.
+This does not qualify a 60 Hz live pipeline.
 
 ## Requirements matrix
 

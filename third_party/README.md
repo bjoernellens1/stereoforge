@@ -5,13 +5,13 @@ repository for public Apache-2.0 publication. It does not clear a bundled binary
 release. Dependency licenses remain separate from StereoForge's own license.
 
 Python versions/hashes are in `uv.lock`; CMake source revisions/hashes are in
-`cmake/Capture.cmake`. Full notice texts are in [licenses](licenses/).
+`cmake/Capture.cmake` and `cmake/StandaloneRHI.cmake`. Full notice texts are in [licenses](licenses/).
 
 | Component | Actual source license / election | Use |
 |---|---|---|
-| SlangPy 0.43.1 | Apache-2.0 WITH LLVM-exception (actual LICENSE; metadata omits exception) | Python Vulkan; matching native binary/headers |
+| SlangPy 0.43.1 | Apache-2.0 WITH LLVM-exception (actual LICENSE; metadata omits exception) | Python research Vulkan; optional research native provider |
 | Slang 2026.12 | Apache-2.0 WITH LLVM-exception | SPIR-V compiler and fetched helper headers |
-| Slang RHI `1a9768741246b1f356116d5dfa305933034ce049` | Apache-2.0 WITH LLVM-exception | Bundled native resource/dispatch API |
+| Slang RHI `1a9768741246b1f356116d5dfa305933034ce049` | Apache-2.0 WITH LLVM-exception | Source-built standalone native API; optional research provider |
 | ZED Open Capture `93739154903a66c112ee52c3c6fbfd83b7218617` | MIT | Build-local modified capture/sensor sources |
 | hidapi `d6b2a974608dec3b76fb1e36c189f22b9cf3650c` | **BSD-3-Clause elected** from upstream alternatives | Header plus separately obtained system runtime |
 | pybind11 2.13.6 | BSD-3-Clause | Capture binding |
