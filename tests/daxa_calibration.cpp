@@ -25,6 +25,24 @@ int main(int argc,char** argv){try{
     {DaxaPreprocessTiming legacy{1,2,3,4};check(legacy.upload_ms==1&&legacy.decode_ms==2&&legacy.rectify_ms==3&&legacy.total_ms==4&&!legacy.start_tick&&!legacy.end_tick&&!legacy.timestamp_period&&!legacy.timestamp_bits,"appended timestamp payload preserves four-field timing initialization");DaxaPreprocessTiming raw{1,2,3,4,5,6,.5,64};check(raw.start_tick==5&&raw.end_tick==6&&raw.timestamp_period==.5&&raw.timestamp_bits==64,"same-queue raw timing payload has explicit tick scale and width");}
     auto manual=maps();manual.validate();rejects([&]{manual.metric_calibration();},"2D-only maps must not authorize metric depth");
     auto good=geometry();good.validate();auto metric=good.metric_calibration();check(metric.fx==120.f&&metric.baseline_m==.12f&&metric.cx_offset==.75f,"derive calibrated finite float metric units and nonzero principal offset");
+    // Setup association is generic calibration functionality, independent of View.
+    {auto g=good;for(auto& eye:g.original.eyes)eye.distortion.clear();
+     std::array<std::vector<float>,4> maps;
+     for(unsigned eye=0;eye<2;++eye){auto const& r=eye?g.R2:g.R1;auto const& k=g.rectified.eyes[eye];auto const& original=g.original.eyes[eye];
+      for(unsigned y=0;y<k.height;++y)for(unsigned x=0;x<k.width;++x){double rx=(double(x)-k.cx)/k.fx,ry=(double(y)-k.cy)/k.fy;double qx=r[0]*rx+r[3]*ry+r[6],qy=r[1]*rx+r[4]*ry+r[7],qz=r[2]*rx+r[5]*ry+r[8];maps[2*eye].push_back(float(original.fx*(qx/qz)+original.cx));maps[2*eye+1].push_back(float(original.fy*(qy/qz)+original.cy));}}
+     auto spans=[&]{return std::array<std::span<const float>,4>{maps[0],maps[1],maps[2],maps[3]};};
+     g.validate_map_association(spans());check(g.original.eyes[0].fx!=g.original.eyes[1].fx&&g.R1!=g.R2,"association fixture covers unequal original intrinsics and valid distinct rectification rotations");
+     for(unsigned i=0;i<4;++i){auto short_maps=spans();short_maps[i]=short_maps[i].first(short_maps[i].size()-1);rejects([&]{g.validate_map_association(short_maps);},"association rejects each incomplete plane before indexing");}
+     maps[2][9]+=.0625f;rejects([&]{g.validate_map_association(spans());},"association rejects independently rebound map phase");maps[2][9]-=.0625f;
+     maps[0][0]=std::numeric_limits<float>::quiet_NaN();rejects([&]{g.validate_map_association(spans());},"association rejects nonfinite supplied maps");
+    }
+    // Exact phase ties retain the existing nearest-even conversion, not half-up.
+    {auto g=good;g.original.right_to_left=g.rectified.right_to_left;g.R1=g.R2={1,0,0,0,1,0,0,0,1};
+     for(auto& eye:g.rectified.eyes){eye.cx=eye.cy=0;}g.P1[2]=g.P1[6]=g.P2[2]=g.P2[6]=0;g.original.eyes=g.rectified.eyes;
+     for(double offset:{1./64,3./64}){for(auto& eye:g.original.eyes)eye.cx=offset;std::array<std::vector<float>,4> maps;
+      auto quantized=offset==1./64?0.f:2.f/32;for(unsigned eye=0;eye<2;++eye)for(unsigned y=0;y<7;++y)for(unsigned x=0;x<9;++x){maps[eye*2].push_back(float(x)+quantized);maps[eye*2+1].push_back(float(y));}
+      g.validate_map_association({maps[0],maps[1],maps[2],maps[3]});maps[0][0]=1.f/32;rejects([&]{g.validate_map_association({maps[0],maps[1],maps[2],maps[3]});},"phase tie must round to even on both sides");}
+    }
     // Behavioral RED must reject independently rebound matrices, not just parse API.
     {auto g=good;double c=std::cos(-.2),s=std::sin(-.2);g.R1={c,-s,0,s,c,0,0,0,1};c=std::cos(-.07);s=std::sin(-.07);g.R2={c,-s,0,s,c,0,0,0,1};g.original.right_to_left[3]=.12*std::cos(.2);g.original.right_to_left[7]=.12*std::sin(.2);g.validate();check(g.metric_calibration().baseline_m==.12f,"nonidentity R1 rotates offaxis original translation into horizontal baseline");}
     auto bad=good;bad.R2[0]+=.2;rejects([&]{bad.validate();},"inconsistent R2 must reject");

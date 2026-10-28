@@ -35,6 +35,27 @@ void projection(const std::array<double,12>& p,const DaxaCameraModel& c,double b
     }
 }
 }
+namespace detail {
+std::array<double,2> daxa_calibration_distort(DaxaCameraModel const& c,double x,double y){
+    std::array<double,14> k{};std::copy(c.distortion.begin(),c.distortion.end(),k.begin());double r2=x*x+y*y,r4=r2*r2,r6=r4*r2,den=1+k[5]*r2+k[6]*r4+k[7]*r6;require(std::isfinite(den)&&den>0,"nonpositive distortion denominator");double radial=(1+k[0]*r2+k[1]*r4+k[4]*r6)/den;
+    double u=x*radial+2*k[2]*x*y+k[3]*(r2+2*x*x)+k[8]*r2+k[9]*r4,v=y*radial+k[2]*(r2+2*y*y)+2*k[3]*x*y+k[10]*r2+k[11]*r4;
+    if(k[12]!=0||k[13]!=0){double cx=std::cos(k[12]),sx=std::sin(k[12]),cy=std::cos(k[13]),sy=std::sin(k[13]);double a=cy*u+sy*sx*v-sy*cx,b=cx*v+sx,z=sy*u-cy*sx*v+cy*cx;double zz=cy*cx;double px=-sy*cx,py=sx;u=(zz*a-px*z)/z;v=(zz*b-py*z)/z;}
+    require(std::isfinite(u)&&std::isfinite(v),"finite distortion mapping required");return {c.fx*u+c.cx,c.fy*v+c.cy};
+}
+}
+void DaxaRectifiedGeometry::validate_map_association(std::array<std::span<const float>,4> maps)const{
+    validate();
+    auto phase=[](float value){require(std::isfinite(value)&&std::abs(double(value))<32767,"finite bounded remap coordinate required");return std::llrint(value*32.f);};
+    for(unsigned eye=0;eye<2;++eye){auto const& camera=original.eyes[eye];auto const& rect=rectified.eyes[eye];
+        auto coefficients=camera.distortion.size();require(coefficients==0||coefficients==4||coefficients==5||coefficients==8||coefficients==12||coefficients==14,"unsupported OpenCV distortion coefficient count");
+        auto n=uint64_t(rect.width)*rect.height;require(maps[eye*2].size()==n&&maps[eye*2+1].size()==n,"rectification association map extent mismatch");
+        auto const& r=eye?R2:R1;std::array<double,16> rt{1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};for(unsigned i=0;i<3;++i)for(unsigned j=0;j<3;++j)rt[i*4+j]=r[j*3+i];
+        for(uint32_t y=0;y<rect.height;++y)for(uint32_t x=0;x<rect.width;++x){size_t i=size_t(y)*rect.width+x;std::array<double,3> ray{(x-rect.cx)/rect.fx,(y-rect.cy)/rect.fy,1},q{};
+            for(unsigned row=0;row<3;++row)for(unsigned col=0;col<3;++col)q[row]+=rt[row*4+col]*ray[col];
+            require(q[2]>0,"rectified ray outside original camera hemisphere");auto uv=detail::daxa_calibration_distort(camera,q[0]/q[2],q[1]/q[2]);require(phase(float(uv[0]))==phase(maps[eye*2][i])&&phase(float(uv[1]))==phase(maps[eye*2+1][i]),"OpenCV4.14 effective quantized map/model association mismatch");
+        }
+    }
+}
 void DaxaRectifiedGeometry::validate()const{
     require(!original_identity.empty()&&!rectified_identity.empty(),"original and rectified calibration identities required");
     stereo(original);stereo(rectified);double baseline=pose(original.right_to_left),rect_baseline=pose(rectified.right_to_left);rotation(R1);rotation(R2);

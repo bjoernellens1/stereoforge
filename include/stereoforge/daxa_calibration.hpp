@@ -2,6 +2,7 @@
 #include <stereoforge/contracts.hpp>
 #include <array>
 #include <string>
+#include <span>
 #include <vector>
 namespace stereoforge {
 struct DaxaCameraModel {
@@ -25,5 +26,12 @@ struct DaxaRectifiedGeometry {
     // exactly zero; P2 Tx is checked by its ratio to -fx*rectified baseline.
     void validate() const;
     MetricCalibration metric_calibration() const;
+    // Setup-only OpenCV effective float/nearest-even 1/32-pixel association.
+    // Maps are Lx,Ly,Rx,Ry on this geometry's rectified grid.
+    void validate_map_association(std::array<std::span<const float>,4>) const;
 };
+namespace detail {
+// Shared with View preview; preserve the calibrated projection arithmetic.
+std::array<double,2> daxa_calibration_distort(const DaxaCameraModel&,double x,double y);
+}
 }
