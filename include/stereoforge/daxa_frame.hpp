@@ -19,6 +19,7 @@ inline bool available_slot(long references,uint64_t submitted,uint64_t oldest_pe
 }
 class DaxaPreprocess;
 class DaxaRectifiedInput;
+class DaxaDualPreprocess;
 class DaxaDepthPipeline;
 class DaxaStereo;
 class DaxaImageView;
@@ -28,7 +29,7 @@ class DaxaFrame {
     uint64_t generation_=0;
     DaxaFrame(std::shared_ptr<detail::DaxaFrameOwner>,std::shared_ptr<detail::DaxaFrameSlot>);
     void validate()const;
-    friend class DaxaDepthPipeline;friend class DaxaRectifiedInput;friend class DaxaPreprocess;friend class DaxaStereo;friend class DaxaImageView;
+    friend class DaxaDualPreprocess;friend class DaxaDepthPipeline;friend class DaxaRectifiedInput;friend class DaxaPreprocess;friend class DaxaStereo;friend class DaxaImageView;
 public:
     DaxaFrame()=default;
     DaxaFrame(const DaxaFrame&)=default;DaxaFrame(DaxaFrame&&)noexcept=default;
