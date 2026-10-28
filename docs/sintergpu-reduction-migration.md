@@ -72,7 +72,8 @@ The present collector records raw timing triples and fails on bitwise output
 mismatches. If a witness directory is supplied, it saves the first mismatched
 array pair and case/round identity in a uniquely named NPZ file; a future GPU
 executor must require this directory and retain input and source identity too.
-`VulkanStereo.result(debug=True)` does not currently expose right census or
-either census validity mask, so an executor must add explicit access before
-claiming this coverage. The collector does not calculate a performance verdict
+`VulkanStereo.result(debug=True, debug_census=True)` explicitly reads back
+right census and both census validity masks in addition to the existing debug
+outputs. This opt-in incurs three extra host readbacks; the default is unchanged.
+The future executor must request these fields before claiming this coverage. The collector does not calculate a performance verdict
 or establish statistical power. GPU qualification and optimized-default selection remain pending.

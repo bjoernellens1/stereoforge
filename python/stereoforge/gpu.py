@@ -67,7 +67,8 @@ class VulkanStereo:
         self.last_timings={'upload_and_enqueue_ms':(perf_counter()-start)*1000}
         return token
 
-    def result(self,token,debug=False):
+    def result(self,token,debug=False,*,debug_census=False):
+        if debug_census and not debug: raise ValueError('debug_census requires debug=True')
         if self._pending is None or token!=self._pending: raise ValueError("unknown or consumed submission token")
         start=perf_counter();self.device.wait_for_submit(token)
         self._pending=None
@@ -81,6 +82,9 @@ class VulkanStereo:
             out['left_census']=b['ld'].to_numpy().view(np.uint32).reshape(h,w).copy()
             out['cost']=b['costs'].to_numpy().view(np.uint32).reshape(h,w,self.D).copy()
             out['aggregate']=b['sums'].to_numpy().view(np.uint32).reshape(h,w,self.D).copy()
+            if debug_census:
+                for name,buffer in [('right_census','rd'),('left_census_valid','lv'),('right_census_valid','rv')]:
+                    out[name]=b[buffer].to_numpy().view(np.uint32).reshape(h,w).copy()
         self.last_timings['readback_ms']=(perf_counter()-start)*1000
         return out
 
