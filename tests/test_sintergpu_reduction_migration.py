@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import struct
 import numpy as np
 import pytest
 from stereoforge._sintergpu_reduction import reduction_source
@@ -20,6 +21,22 @@ def released():
         if os.environ.get('SINTERGPU_TEST_RELEASED') == '1': pytest.fail('released SinterGPU package required')
         pytest.skip('released SinterGPU package unavailable')
     return sintergpu
+
+
+def spirv_entry_names(blob):
+    assert len(blob)%4==0
+    words=struct.unpack('<'+'I'*(len(blob)//4),blob)
+    assert words[0]==0x07230203
+    names=set();i=5
+    while i<len(words):
+        count=words[i]>>16; opcode=words[i]&0xffff
+        assert count and i+count<=len(words)
+        if opcode==15:
+            assert words[i+1]==5  # GLCompute
+            name=b''.join(struct.pack('<I',w) for w in words[i+3:i+count]).split(b'\0',1)[0].decode('utf-8')
+            names.add(name)
+        i+=count
+    return names
 
 
 def test_default_does_not_load_optional_dependency(monkeypatch):
@@ -83,16 +100,20 @@ def test_baseline_and_shared_compile_with_matching_resource_layout(version,tmp_p
     assert (result.stdout+result.stderr).strip()==version
     monkeypatch.setenv('SINTERGPU_SHARED_REDUCTION','1')
     composed,_=reduction_source(SHADER); new=tmp_path/'new.slang';new.write_text(composed)
-    for kernel in ('census','cost','aggregate'):
-        layouts=[]
-        for index,src in enumerate((BASELINE,new)):
-            spv=tmp_path/f'{kernel}-{index}.spv';reflection=tmp_path/f'{kernel}-{index}.json'
-            p=subprocess.run([compiler,str(src),'-entry',kernel,'-target','spirv','-profile','glsl_460','-o',str(spv),'-reflection-json',str(reflection)],capture_output=True,text=True)
-            assert p.returncode==0,p.stdout+p.stderr
-            data=json.loads(reflection.read_text());entry=data['entryPoints'][0]
-            if kernel=='aggregate': assert entry['threadGroupSize']==[256,1,1]
-            layouts.append((entry['threadGroupSize'],[(x['name'],x['binding']) for x in entry['bindings'] if x['binding'].get('used')==1]))
-        assert layouts[0]==layouts[1]
+    layouts=[]
+    for index,src in enumerate((BASELINE,new)):
+        spv=tmp_path/f'all-{index}.spv';reflection=tmp_path/f'all-{index}.json'
+        # Automatic entry discovery avoids the standalone compiler's collision
+        # between `-entry select` and its built-in select overloads.
+        p=subprocess.run([compiler,str(src),'-target','spirv','-profile','glsl_460','-o',str(spv),'-reflection-json',str(reflection)],capture_output=True,text=True)
+        assert p.returncode==0,p.stdout+p.stderr
+        data=json.loads(reflection.read_text());entries={e['name']:e for e in data['entryPoints']}
+        assert set(entries)=={'census','cost','aggregate','select','depth_convert'}
+        assert spirv_entry_names(spv.read_bytes())==set(entries)
+        assert entries['aggregate']['threadGroupSize']==[256,1,1]
+        assert entries['select']['threadGroupSize']==[256,1,1]
+        layouts.append({name:(entry['threadGroupSize'],[(x['name'],x['binding']) for x in entry['bindings'] if x['binding'].get('used')==1]) for name,entry in entries.items()})
+    assert layouts[0]==layouts[1]
 
 
 def test_engine_compiles_pinned_composed_source_without_hidden_device(monkeypatch):

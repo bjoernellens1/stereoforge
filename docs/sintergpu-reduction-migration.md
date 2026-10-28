@@ -20,7 +20,8 @@ and controlled no-regression qualification before adoption.
 A dedicated GPU runner must be independently reviewed for device identity,
 exclusive locking, synchronization and teardown before any GPU parity run.
 
-Standalone Slang 2026.12/2026.19 compile `census`, `cost`, and `aggregate`
-for both sources. The existing `select` entry is not resolved by these
-standalone compiler commands, even for the unchanged baseline; SlangPy runtime
-compilation of the full pipeline still needs separate qualification.
+Standalone Slang 2026.12/2026.19 compile and reflect all five entry points
+for both sources when entry points are discovered automatically. Explicit
+`-entry select` does not resolve on the unchanged baseline in either compiler;
+automatic discovery preserves the `select` entry name without altering source.
+SlangPy runtime execution of the full pipeline still needs qualification.
