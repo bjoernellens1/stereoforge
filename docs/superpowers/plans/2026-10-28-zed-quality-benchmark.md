@@ -43,17 +43,19 @@ export and Daxa input remain independent optional/runtime boundaries.
 
 ### Task 1: Portable records and frozen policy
 
-**Files:** Create `benchmarks/zed_comparison/__init__.py`, `benchmarks/zed_comparison/schema.py`, `configs/benchmarks/zed_quality_policy.json`, `tests/test_zed_comparison_schema.py`.
+**Files:** Create `benchmarks/zed_comparison/__init__.py`, `benchmarks/zed_comparison/schema.py`, `configs/benchmarks/zed_quality_policy.json`, `tests/test_zed_comparison_schema.py`, `tests/test_zed_schema_io_guard.py`, and `benchmarks/zed_comparison/README.md`.
 **Interfaces:** Consumes relative record paths and policy JSON. Produces `load_record(path: Path) -> dict`, `validate_record(record: dict, root: Path) -> None`, `load_policy(path: Path) -> dict`, `validate_partitions(records: list[dict]) -> None`.
 
-- [ ] RED: add `test_v1_round_trip_hashes`, `test_reject_unsafe_paths_and_changed_hash`, `test_partition_scene_sequence_leakage`, `test_missing_policy_is_unqualified`, `test_calibration_and_clock_identity_required`.
-- [ ] Run `python -m pytest tests/test_zed_comparison_schema.py -q`; expect missing-module/interface failure.
-- [ ] Implement schema version 1: immutable sequence/frame IDs, source/SVO/pixel/calibration hashes, relative files, dimensions/stride/color, timestamp values/domains, settings and implementation identities; missing fields use explicit unavailable status.
-- [ ] Define lossless depth float32 metres (raw little-endian planes are the mandatory interchange; EXR is optional and round-trip tested), original invalid encodings plus metric-valid mask, left reference/frame and axial-Z/range convention; distinguish observed/predicted/historical/approximate pixels. Bind camera/distortion model, pixel centres, stereo transforms and rectified support masks; unknown geometry cannot become all-valid support.
-- [ ] Encode development/held-out scene AND sequence separation and geometry strata; reject mutating canonical export identities.
-- [ ] Store provisional margins above with `frozen=false`; required regions, correctness tolerances, zero-error/uncertainty/statistical procedure must be explicitly frozen before held-out execution.
-- [ ] GREEN: rerun the named command; require all tests pass without SDK installed.
-- [ ] Review schema/policy against spec and commit only Task 1 files: `git add benchmarks/zed_comparison/{__init__,schema}.py configs/benchmarks/zed_quality_policy.json tests/test_zed_comparison_schema.py && git commit -m "feat: define portable ZED comparison records"`.
+- [x] RED: add `test_v1_round_trip_hashes`, `test_reject_unsafe_paths_and_changed_hash`, `test_partition_scene_sequence_leakage`, `test_missing_policy_is_unqualified`, `test_calibration_and_clock_identity_required`.
+- [x] Run `python -m pytest tests/test_zed_comparison_schema.py -q`; expect missing-module/interface failure.
+- [x] Implement schema version 1: immutable sequence/frame IDs, source/SVO/pixel/calibration hashes, relative files, dimensions/stride/color, timestamp values/domains, settings and implementation identities; missing fields use explicit unavailable status.
+- [x] Define lossless depth float32 metres (raw little-endian planes are the mandatory interchange; EXR is optional and round-trip tested), original invalid encodings plus metric-valid mask, left reference/frame and axial-Z/range convention; distinguish observed/predicted/historical/approximate pixels. Bind camera/distortion model, pixel centres, stereo transforms and rectified support masks; unknown geometry cannot become all-valid support.
+- [x] Encode development/held-out scene AND sequence separation and geometry strata; reject mutating canonical export identities.
+- [x] Store provisional margins above with `frozen=false`; required regions, correctness tolerances, zero-error/uncertainty/statistical procedure must be explicitly frozen before held-out execution.
+- [x] GREEN: rerun the named command; require all tests pass without SDK installed.
+- [x] Review schema/policy against spec and commit only Task 1 files: `git add benchmarks/zed_comparison/{__init__,schema}.py benchmarks/zed_comparison/README.md configs/benchmarks/zed_quality_policy.json tests/test_zed_comparison_schema.py tests/test_zed_schema_io_guard.py && git commit -m "feat: define portable ZED comparison records"`.
+
+**Verified 2026-10-28:** 111 focused schema/I/O tests; 1,868 CPU tests passed, 37 GPU/camera tests deselected. Independent functional and offline I/O reviews approved. Source hashing is bounded and deduplicated within one record; Task 2 must batch shared-source verification across frames. Normalized calibration admission and `policy_ready` are structural gates, not SDK, physical accuracy, support-map or 60 FPS qualification.
 
 ### Task 2: Isolated optional SDK export
 

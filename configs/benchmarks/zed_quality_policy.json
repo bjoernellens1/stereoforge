@@ -1,0 +1,20 @@
+{
+  "schema": "stereoforge.zed_comparison.policy.v1",
+  "primary_reference": "NEURAL_LIGHT",
+  "frozen": false,
+  "margins": {
+    "completeness_loss_pp": 2.0,
+    "relative_mae_ratio": 1.1,
+    "false_boundary_excess_pp": 0.0
+  },
+  "required_regions": ["all", "thin", "boundary", "near"],
+  "requested_range_m": [0.3, 8.0],
+  "freeze_parameters": {
+    "correctness": null,
+    "region_definitions": null,
+    "zero_reference_error": null,
+    "uncertainty": null,
+    "statistics": null,
+    "partition_digest": null
+  }
+}
