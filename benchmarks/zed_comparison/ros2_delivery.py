@@ -140,9 +140,20 @@ def _start(event):
     _text(m['source_clock'], 'source clock'); s._require(m['source_clock'] != 'unknown', 'unknown source clock')
     s._require(type(m['offset_ns']) is int and -(1 << 63) <= m['offset_ns'] <= NS_MAX, 'invalid clock offset')
     _int(m['valid_from_ns'], 'valid_from_ns', 1); _int(m['valid_until_ns'], 'valid_until_ns', m['valid_from_ns']); _int(m['max_error_ns'], 'max_error_ns')
-    _capture(c['capture_counters']); s._keys(c['memory'], MEMORY, 'memory')
-    for key in MEMORY - {'export_host_cached', 'storage_accounting_complete'}: _int(c['memory'][key], key)
-    mem=c['memory']; flags=mem['export_memory_property_flags']
+    _capture(c['capture_counters']); mem=c['memory']
+    optional_reason = {'producer_requested_bytes_reason'} if isinstance(mem, dict) and 'producer_requested_bytes_reason' in mem else set()
+    s._keys(mem, MEMORY | optional_reason, 'memory')
+    for key in MEMORY - {'producer_requested_bytes', 'export_host_cached', 'storage_accounting_complete'}: _int(mem[key], key)
+    producer_bytes=mem['producer_requested_bytes']
+    if producer_bytes is None:
+        s._require(bool(optional_reason), 'unavailable producer bytes require reason')
+        _text(mem['producer_requested_bytes_reason'], 'producer_requested_bytes_reason')
+        s._require(mem['producer_requested_bytes_reason'] != 'available' and mem['storage_accounting_complete'] is False,
+                   'unavailable producer bytes cannot claim complete accounting')
+    else:
+        _int(producer_bytes, 'producer_requested_bytes')
+        if optional_reason: s._require(mem['producer_requested_bytes_reason'] == 'available', 'numeric producer bytes require available reason')
+    flags=mem['export_memory_property_flags']
     s._require(type(mem['storage_accounting_complete']) is bool and type(mem['export_host_cached']) is bool and bool(flags & 8) == mem['export_host_cached'] and
                (flags & 6) == 6 and mem['export_memory_type_index'] < 32, 'invalid coherent export memory properties')
 
@@ -280,9 +291,14 @@ def summarize_delivery(events, *, policy=None):
         else:
             start=end=duration=None
         if policy and ((duration is not None and duration < policy['min_duration_s']) or pc['nominal_hz'] != policy['target_hz']): reasons.append('duration_or_nominal_rate')
-        requested_bytes = sum(pc['memory'][k] for k in ('producer_requested_bytes','export_requested_bytes','capture_requested_bytes','ros_requested_bytes')) + pc['memory']['trace_capacity']*pc['memory']['trace_record_bytes']
-        if not pc['memory']['storage_accounting_complete']: reasons.append('requested_storage_accounting_incomplete')
-        if policy and requested_bytes > policy['max_requested_bytes']: reasons.append('requested_memory_exceeds_policy')
+        mem=pc['memory']
+        if mem['producer_requested_bytes'] is None:
+            requested_bytes=None
+            reasons.append('producer_requested_bytes_unavailable')
+        else:
+            requested_bytes = sum(mem[k] for k in ('producer_requested_bytes','export_requested_bytes','capture_requested_bytes','ros_requested_bytes')) + mem['trace_capacity']*mem['trace_record_bytes']
+        if not mem['storage_accounting_complete']: reasons.append('requested_storage_accounting_incomplete')
+        if policy and requested_bytes is not None and requested_bytes > policy['max_requested_bytes']: reasons.append('requested_memory_exceeds_policy')
         first_pending=next((e['pending'] for e in pub[1:-1] if e['kind']=='published' and e['at_ns'] <= pub[-1]['window_end_ns']), 0)
         if policy and (pub[-1]['queued'] - pc['capture_counters']['queued_frames'] > policy['max_queue_growth'] or
                        pub[-1]['pending'] - first_pending > policy['max_queue_growth']): reasons.append('queue_growth')

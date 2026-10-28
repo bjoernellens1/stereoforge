@@ -126,7 +126,9 @@ def test_publisher_records_enqueue_boundaries_without_extra_work():
     src=(ROOT/'apps/ros2_depth_publisher.cpp').read_text()
     loop=body(src,'while(rclcpp::ok()&&!trace_full')
     assert loop.count('index->producer_enqueue_begin=now_ns<steady>()') == 1
-    assert loop.count('index->producer_enqueue_end=now_ns<steady>()') == 2
+    assert loop.count('index->producer_enqueue_end=now_ns<steady>()') == 3
+    dual = loop[loop.index('if(depth&&dual)'):loop.index('else if(depth)')]
+    assert dual.index('dual_preprocess->enqueue(f)') < dual.index('index->producer_enqueue_end=now_ns<steady>()') < dual.index('exporter->enqueue(')
     assert loop.count('index->export_enqueue_end=now_ns<steady>()') == 1
     assert loop.index('index->producer_enqueue_begin=now_ns<steady>()') < loop.index('pipeline->enqueue(f)')
     assert loop.index('index->producer_enqueue_end=now_ns<steady>()') < loop.index('exporter->enqueue(')

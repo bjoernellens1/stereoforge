@@ -2,6 +2,7 @@
 #include "stereo_estimator_metadata.hpp"
 #include <stereoforge/capture.hpp>
 #include <stereoforge/daxa_depth.hpp>
+#include <stereoforge/daxa_dual_preprocess.hpp>
 #include <stereoforge/daxa_refinement.hpp>
 #include <stereoforge/daxa_host_export.hpp>
 #include <stereoforge/ros_delivery_json.hpp>
@@ -56,7 +57,7 @@ unsigned number(const std::string& s,unsigned lo,unsigned hi){size_t n=0;auto v=
 Options parse(int argc,char** argv){
     Options o;
     for(int i=1;i<argc;++i){std::string a=argv[i];
-        if(a=="--help"){std::cout<<"--source camera|replay --manifest FILE --clock-map FILE --frame-id ID --run-id ID --trace FILE [--replay DIR --mode depth|rgb|depth-rgb --duration-seconds N --subscriber-wait-seconds N --max-frames N --warmup N --disparities N --stereo-variant packed-specialized|packed-specialized-overwrite --pipeline full-sgm|experimental-refinement --coarse-manifest FILE --device-id N --depth-topic TOPIC --rgb-topic TOPIC --reliability best_effort|reliable --validation --thread-cpu-timing]\n";std::exit(0);}
+        if(a=="--help"){std::cout<<"--source camera|replay --manifest FILE --clock-map FILE --frame-id ID --run-id ID --trace FILE [--replay DIR --mode depth|rgb|depth-rgb --duration-seconds N --subscriber-wait-seconds N --max-frames N --warmup N --disparities N --stereo-variant packed-specialized|packed-specialized-overwrite --pipeline full-sgm|experimental-refinement|experimental-dual-refinement --coarse-manifest FILE --device-id N --depth-topic TOPIC --rgb-topic TOPIC --reliability best_effort|reliable --validation --thread-cpu-timing]\n";std::exit(0);}
         if(a=="--validation"){o.validation=true;continue;}if(a=="--thread-cpu-timing"){o.thread_cpu_timing=true;continue;}if(i+1>=argc)throw std::invalid_argument("missing option value");std::string v=argv[++i];
         if(a=="--source")o.source=v;else if(a=="--manifest")o.manifest=v;else if(a=="--replay")o.replay=v;else if(a=="--mode")o.mode=v;
         else if(a=="--clock-map")o.map=v;else if(a=="--frame-id")o.frame=v;else if(a=="--run-id")o.run=v;else if(a=="--trace")o.trace=v;
@@ -72,8 +73,8 @@ Options parse(int argc,char** argv){
     auto blank=[](const std::string& s){return s.empty()||std::all_of(s.begin(),s.end(),[](unsigned char c){return std::isspace(c)!=0;});};
     if((o.source!="camera"&&o.source!="replay")||(o.source=="replay")!=!o.replay.empty()||o.manifest.empty()||o.map.empty()||o.trace.empty()||
        blank(o.frame)||blank(o.run)||o.frame.size()>4096||o.run.size()>4096||
-       (o.mode!="depth"&&o.mode!="rgb"&&o.mode!="depth-rgb")||(o.pipeline_mode!="full-sgm"&&o.pipeline_mode!="experimental-refinement")||
-       ((o.pipeline_mode=="experimental-refinement")!=!o.coarse_manifest.empty())||(o.pipeline_mode=="experimental-refinement"&&(o.mode=="rgb"||o.disparities%2!=0))||(o.stereo_variant!="packed-specialized"&&o.stereo_variant!="packed-specialized-overwrite")||(o.reliability!="best_effort"&&o.reliability!="reliable")||
+       (o.mode!="depth"&&o.mode!="rgb"&&o.mode!="depth-rgb")||(o.pipeline_mode!="full-sgm"&&o.pipeline_mode!="experimental-refinement"&&o.pipeline_mode!="experimental-dual-refinement")||
+       ((o.pipeline_mode!="full-sgm")!=!o.coarse_manifest.empty())||(o.pipeline_mode!="full-sgm"&&(o.mode=="rgb"||o.disparities%2!=0))||(o.stereo_variant!="packed-specialized"&&o.stereo_variant!="packed-specialized-overwrite")||(o.reliability!="best_effort"&&o.reliability!="reliable")||
        o.depth_topic.empty()||o.rgb_topic.empty()||o.depth_topic.front()!='/'||o.rgb_topic.front()!='/'||
        (o.mode=="depth-rgb"&&o.depth_topic==o.rgb_topic))throw std::invalid_argument("invalid publisher configuration");
     return o;
@@ -124,7 +125,8 @@ void run(const Options& o, OutputFile& file){
     auto mapping_document=load_map(o.map);auto mapping=mapping_from(mapping_document);
     auto host_clock_id=clock_id();
     auto fixture=load_daxa_preprocess_fixture(o.manifest);auto& maps=fixture.rectification;maps.validate(2);
-    const bool experimental=o.pipeline_mode=="experimental-refinement";
+    const bool dual=o.pipeline_mode=="experimental-dual-refinement";
+    const bool experimental=o.pipeline_mode!="full-sgm";
     DaxaRectification coarse_maps;
     if(experimental){auto coarse_fixture=load_daxa_preprocess_fixture(o.coarse_manifest);coarse_maps=std::move(coarse_fixture.rectification);coarse_maps.validate(2);validate_daxa_refinement_geometry(coarse_maps,maps);}
     if(fixture.record_ordinal>4095)throw std::invalid_argument("reference capture ordinal exceeds runtime setup bound");
@@ -157,19 +159,21 @@ void run(const Options& o, OutputFile& file){
     FreshSourceTracker fresh;fresh.admit(static_cast<std::int64_t>(first->frame_id),first->camera_timestamp_ns,first->camera_clock_domain);
     std::uint64_t last_id=first->frame_id,last_capture=first->camera_timestamp_ns;
     auto context=std::make_shared<DaxaFoundation>(o.validation);
-    std::unique_ptr<DaxaDepthPipeline> pipeline;std::unique_ptr<DaxaPreprocess> preprocess,full_preprocess;std::unique_ptr<DaxaRefinement> refinement;std::unique_ptr<DaxaHostExport> exporter;
+    std::unique_ptr<DaxaDepthPipeline> pipeline;std::unique_ptr<DaxaPreprocess> preprocess,full_preprocess;std::unique_ptr<DaxaRefinement> refinement;std::unique_ptr<DaxaHostExport> exporter;std::unique_ptr<DaxaDualPreprocess> dual_preprocess;
     DaxaRefinementConfig refinement_config;refinement_config.disparities=o.disparities;refinement_config.borrow_full_frame=true;
     DaxaDepthConfig depth_config{StereoConfig{experimental?coarse_maps.width:maps.width,experimental?coarse_maps.height:maps.height,experimental?o.disparities/2:o.disparities,4,8,32,true},1.f,2,32};
     depth_config.stereo_variant=o.stereo_variant=="packed-specialized-overwrite"?DaxaSgmVariant::PackedSpecializedOverwrite:DaxaSgmVariant::PackedSpecialized;
-    if(depth){depth_config.validate();pipeline=std::make_unique<DaxaDepthPipeline>(experimental?coarse_maps:maps,depth_config,context,first);auto prototype=pipeline->enqueue(first);
-        if(experimental){full_preprocess=std::make_unique<DaxaPreprocess>(maps,2,context);auto full=full_preprocess->enqueue(first);refinement=std::make_unique<DaxaRefinement>(context,prototype,full,refinement_config);auto refined=refinement->process(prototype,full);exporter=std::make_unique<DaxaHostExport>(context,refined.observations(),DaxaHostExportConfig{2,true,rgb});refined.wait();refined={};full={};refinement->collect();full_preprocess->collect_completed_sources();}
-        else{exporter=std::make_unique<DaxaHostExport>(context,prototype.observations(),DaxaHostExportConfig{2,true,rgb});prototype.wait();}prototype={};pipeline->collect();}
+    if(depth){depth_config.validate();DaxaDualPreprocess::Frame pair;DaxaDepthPipeline::Frame prototype;
+        if(dual){dual_preprocess=std::make_unique<DaxaDualPreprocess>(maps,coarse_maps,2,context);pair=dual_preprocess->enqueue(first);pipeline=std::make_unique<DaxaDepthPipeline>(depth_config,context,pair.coarse);prototype=pipeline->enqueue_preprocessed(pair.coarse);}
+        else{pipeline=std::make_unique<DaxaDepthPipeline>(experimental?coarse_maps:maps,depth_config,context,first);prototype=pipeline->enqueue(first);}
+        if(experimental){DaxaFrame full;if(dual)full=pair.full;else{full_preprocess=std::make_unique<DaxaPreprocess>(maps,2,context);full=full_preprocess->enqueue(first);}refinement=std::make_unique<DaxaRefinement>(context,prototype,full,refinement_config);auto refined=refinement->process(prototype,full);exporter=std::make_unique<DaxaHostExport>(context,refined.observations(),DaxaHostExportConfig{2,true,rgb});refined.wait();refined={};full={};refinement->collect();if(!dual)full_preprocess->collect_completed_sources();}
+        else{exporter=std::make_unique<DaxaHostExport>(context,prototype.observations(),DaxaHostExportConfig{2,true,rgb});prototype.wait();}prototype={};pair={};pipeline->collect();if(dual)dual_preprocess->collect();}
     else{preprocess=std::make_unique<DaxaPreprocess>(maps,2,context);auto prototype=preprocess->enqueue(first);exporter=std::make_unique<DaxaHostExport>(context,prototype,DaxaHostExportConfig{2,false,true});prototype.wait();prototype={};preprocess->collect_completed_sources();}
     first={};
     auto valid_source=[&](const CaptureLease& f,RosCaptureStamp& stamp){check_source(f);if(f->frame_id<=last_id||f->camera_timestamp_ns<=last_capture)return false;stamp=checked_stamp(f);fresh.admit(static_cast<std::int64_t>(f->frame_id),f->camera_timestamp_ns,f->camera_clock_domain);last_id=f->frame_id;last_capture=f->camera_timestamp_ns;return true;};
     auto warmup_deadline=now_ns<steady>()+30'000'000'000ull;
     for(unsigned i=0;i<o.warmup;){if(now_ns<steady>()>=warmup_deadline)throw std::runtime_error("capture warmup timed out");auto f=capture->read(std::chrono::seconds(1));if(!f){if(!capture->metrics().running)throw std::runtime_error("capture ended during warmup");continue;}RosCaptureStamp ignored;if(!valid_source(f,ignored))continue;
-        if(depth){auto d=pipeline->enqueue(f);DaxaFrame full;DaxaRefinement::Frame refined;if(experimental){full=full_preprocess->enqueue(f);refined=refinement->process(d,full);}auto h=exporter->enqueue(experimental?refined.observations():d.observations());h.wait();h={};refined={};full={};d={};exporter->collect();if(experimental){refinement->collect();full_preprocess->collect_completed_sources();}pipeline->collect();}
+        if(depth){DaxaDualPreprocess::Frame pair;DaxaDepthPipeline::Frame d;DaxaFrame full;DaxaRefinement::Frame refined;if(dual){pair=dual_preprocess->enqueue(f);d=pipeline->enqueue_preprocessed(pair.coarse);full=pair.full;}else{d=pipeline->enqueue(f);if(experimental)full=full_preprocess->enqueue(f);}if(experimental){refined=refinement->process(d,full);}auto h=exporter->enqueue(experimental?refined.observations():d.observations());h.wait();h={};refined={};full={};d={};pair={};exporter->collect();if(experimental){refinement->collect();if(!dual)full_preprocess->collect_completed_sources();}pipeline->collect();if(dual)dual_preprocess->collect();}
         else{auto p=preprocess->enqueue(f);auto h=exporter->enqueue(p);h.wait();h={};p={};exporter->collect();preprocess->collect_completed_sources();}++i;}
     RosDeliveryTrace trace(size_t(o.max_frames)*(unsigned(depth)+unsigned(rgb))+2);std::array<Pending,2> pending{};Counters counters{};
     json outputs=json::object();if(depth)outputs["depth"]=output_descriptor(o.depth_topic,maps.width,maps.height,"32FC1",o.frame);if(rgb)outputs["rgb"]=output_descriptor(o.rgb_topic,maps.width,maps.height,"rgba8",o.frame);
@@ -202,10 +206,11 @@ void run(const Options& o, OutputFile& file){
     json config={{"thread_cpu_timing",o.thread_cpu_timing},{"clock_id",host_clock_id},{"source_mode",o.source},{"nominal_hz",o.fps},{"slots",2},{"capture_queue_capacity",2},{"outputs",outputs},{"qos",qos},
         {"implementation",{{"status","available"},{"value",implementation}}},{"calibration_identity",maps.rectified_identity},{"effective_estimator",estimator},
         {"view_profile",{{"status","unavailable"},{"reason","view is not executed"}}},{"clock_mapping",mapping_document},{"capture_counters",capture_json(baseline)},
-        {"memory",{{"producer_requested_bytes",depth?(pipeline->requested_combined_buffer_bytes()+(experimental?maps.requested_bytes(2)+refinement->requested_buffer_bytes():0)):maps.requested_bytes(2)},{"export_requested_bytes",exporter->requested_bytes()},
+        {"memory",{{"producer_requested_bytes",dual?json(nullptr):json(depth?(pipeline->requested_combined_buffer_bytes()+(experimental?maps.requested_bytes(2)+refinement->requested_buffer_bytes():0)):maps.requested_bytes(2))},{"export_requested_bytes",exporter->requested_bytes()},
             {"capture_requested_bytes",(baseline.pool_capacity+1)*baseline.packed_bytes_per_slot},{"trace_capacity",trace.event_capacity()},{"trace_record_bytes",sizeof(RosDeliveryTraceRecord)},
             {"ros_requested_bytes",depth_image.data.size()+rgb_image.data.size()},{"export_memory_type_index",memory.type_index},{"export_memory_property_flags",memory.property_flags},{"export_host_cached",memory.host_cached},
             {"storage_accounting_complete",false}}}};
+    if(dual)config["memory"]["producer_requested_bytes_reason"]="dual_producer_requested_bytes_unavailable";
     baseline=capture->metrics();config["capture_counters"]=capture_json(baseline);auto started=now_ns<steady>();
     bool trace_full=false;std::string reason="limit",failure;auto deadline=started+static_cast<std::uint64_t>(o.duration*1e9);
     auto count_pending=[&](){unsigned n=0;for(auto const& p:pending)if(p.output)++n;return n;};
@@ -243,7 +248,7 @@ void run(const Options& o, OutputFile& file){
             if(!trace.append(r)){trace_full=true;return;}if(which==RosDeliveryOutput::Depth)++counters.published_depth;else ++counters.published_rgb;
         };
         if(depth)emit(RosDeliveryOutput::Depth,depth_image,depth_pub);if(rgb&&!trace_full)emit(RosDeliveryOutput::Rgb,rgb_image,rgb_pub);
-        p.output={};p.refined={};p.full={};p.depth={};p.rgb={};p.capture={};exporter->collect();if(experimental){refinement->collect();full_preprocess->collect_completed_sources();}if(depth)pipeline->collect();else preprocess->collect_completed_sources();
+        p.output={};p.refined={};p.full={};p.depth={};p.rgb={};p.capture={};exporter->collect();if(experimental){refinement->collect();if(!dual)full_preprocess->collect_completed_sources();}if(depth)pipeline->collect();else preprocess->collect_completed_sources();if(dual)dual_preprocess->collect();
     };
     try{
         while(rclcpp::ok()&&!trace_full&&now_ns<steady>()<deadline&&counters.admitted<o.max_frames){
@@ -261,7 +266,8 @@ void run(const Options& o, OutputFile& file){
             RosCaptureStamp stamp;if(!valid_source(f,stamp)){++counters.identity_rejects;continue;}
             index->capture=f;index->stamp=stamp;index->producer_observed=0;
             index->producer_enqueue_begin=now_ns<steady>();
-            if(depth){index->depth=pipeline->enqueue(f);if(experimental){index->full=full_preprocess->enqueue(f);index->refined=refinement->process(index->depth,index->full);}index->producer_enqueue_end=now_ns<steady>();index->output=exporter->enqueue(experimental?index->refined.observations():index->depth.observations());}
+            if(depth&&dual){auto pair=dual_preprocess->enqueue(f);index->depth=pipeline->enqueue_preprocessed(pair.coarse);index->full=pair.full;index->refined=refinement->process(index->depth,index->full);index->producer_enqueue_end=now_ns<steady>();index->output=exporter->enqueue(index->refined.observations());}
+            else if(depth){index->depth=pipeline->enqueue(f);if(experimental){index->full=full_preprocess->enqueue(f);index->refined=refinement->process(index->depth,index->full);}index->producer_enqueue_end=now_ns<steady>();index->output=exporter->enqueue(experimental?index->refined.observations():index->depth.observations());}
             else{index->rgb=preprocess->enqueue(f);index->producer_enqueue_end=now_ns<steady>();index->output=exporter->enqueue(index->rgb);}
             index->export_enqueue_end=now_ns<steady>();++counters.admitted;
         }
@@ -271,7 +277,7 @@ void run(const Options& o, OutputFile& file){
     try{capture->stop();for(auto& p:pending)retire(p,true);exporter->drain();if(depth)pipeline->drain();else preprocess->collect_completed_sources();}
     catch(const std::exception& e){reason="error";failure=e.what();}
     if(trace_full&&reason!="error")reason="trace_full";
-    auto drain_end=now_ns<steady>();for(auto& p:pending){p.output={};p.refined={};p.full={};p.depth={};p.rgb={};p.capture={};}exporter.reset();refinement.reset();full_preprocess.reset();pipeline.reset();preprocess.reset();
+    auto drain_end=now_ns<steady>();for(auto& p:pending){p.output={};p.refined={};p.full={};p.depth={};p.rgb={};p.capture={};}exporter.reset();refinement.reset();full_preprocess.reset();pipeline.reset();dual_preprocess.reset();preprocess.reset();
     try{context->close();}catch(const std::exception& e){reason="error";failure=e.what();}
     if(context->validation_errors.load()||context->validation_warnings.load()){reason="error";failure="Vulkan validation errors or warnings";}
     json begin={{"schema","stereoforge.ros_delivery_event.v1"},{"kind","start"},{"run_id",o.run},{"role","publisher"},{"at_ns",started},{"config",config}};
