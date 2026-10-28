@@ -253,3 +253,29 @@ target_link_libraries(fp2_pingpong_tiny PRIVATE stereoforge_daxa_foundation)
 target_include_directories(fp2_pingpong_tiny PRIVATE "${CMAKE_CURRENT_BINARY_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/_deps/vma-src/include")
 target_compile_definitions(fp2_pingpong_tiny PRIVATE SF_FP2_SPIRV_PATH="${sf_fp2_spirv}" SF_FP2_SHADER_SHA256="${SF_FP2_SHADER_SHA256}" SF_FP2_HOST_SHA256="${SF_FP2_HOST_SHA256}" SF_FP2_COMPILER_PATH="${SF_DAXA_SLANGC}" SF_FP2_SELECT_SHADER_SHA256="${SF_FP2_SELECT_SHADER_SHA256}" SF_FP2_RESIDENT_TINY_HOST_SHA256="${SF_FP2_PINGPONG_TINY_SHA256}" SF_FP2_NO_PATH_SHADER_SHA256="${SF_FP2_PINGPONG_SHADER_SHA256}" SF_FP2_SUM_RESET_SHADER_SHA256="${SF_FP2_SUM_RESET_SHADER_SHA256}" SF_FP2_LUT_HOST_SHA256="${SF_FP2_LUT_HOST_SHA256}" SF_FP2_SELECT_DIR="${CMAKE_CURRENT_BINARY_DIR}")
 add_dependencies(fp2_pingpong_tiny fp2_prototype_shader fp2_select_shaders fp2_resident_shaders fp2_pingpong_shader)
+
+# Isolated disparity-subgroup scanline experiment.
+set(sf_fp2_subgroup_shader "${CMAKE_CURRENT_SOURCE_DIR}/python/stereoforge/shaders/daxa/fp2_banded_subgroup.slang")
+set(sf_fp2_subgroup_host "${CMAKE_CURRENT_SOURCE_DIR}/apps/fp2_subgroup_fixture.cpp")
+set(sf_fp2_subgroup_tiny "${CMAKE_CURRENT_SOURCE_DIR}/apps/fp2_subgroup_tiny.cpp")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${sf_fp2_subgroup_shader}" "${sf_fp2_subgroup_host}" "${sf_fp2_subgroup_tiny}")
+file(SHA256 "${sf_fp2_subgroup_shader}" SF_FP2_SUBGROUP_SHADER_SHA256)
+file(SHA256 "${sf_fp2_subgroup_host}" SF_FP2_SUBGROUP_HOST_SHA256)
+file(SHA256 "${sf_fp2_subgroup_tiny}" SF_FP2_SUBGROUP_TINY_SHA256)
+add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/fp2-subgroup.spv"
+  COMMAND "${SF_DAXA_SLANGC}" "${sf_fp2_subgroup_shader}" -target spirv -profile spirv_1_5+spvGroupNonUniform+spvGroupNonUniformArithmetic -restrictive-capability-check -matrix-layout-row-major -fvk-use-scalar-layout -O3 -entry aggregate -stage compute -o "${CMAKE_CURRENT_BINARY_DIR}/fp2-subgroup.spv"
+  DEPENDS "${sf_fp2_subgroup_shader}" VERBATIM)
+add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/fp2-subgroup.hpp"
+  COMMAND "${CMAKE_COMMAND}" -DINPUT=${CMAKE_CURRENT_BINARY_DIR}/fp2-subgroup.spv -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/fp2-subgroup.hpp -DSYMBOL=SF_FP2_SUBGROUP_SPIRV_SHA256 -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Fp2ResidentIdentity.cmake"
+  DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/fp2-subgroup.spv" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Fp2ResidentIdentity.cmake" VERBATIM)
+add_custom_target(fp2_subgroup_shader DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/fp2-subgroup.hpp")
+add_executable(fp2_subgroup_fixture apps/fp2_subgroup_fixture.cpp)
+target_link_libraries(fp2_subgroup_fixture PRIVATE stereoforge_daxa_foundation)
+target_include_directories(fp2_subgroup_fixture PRIVATE "${CMAKE_CURRENT_BINARY_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/_deps/vma-src/include")
+target_compile_definitions(fp2_subgroup_fixture PRIVATE SF_FP2_SPIRV_PATH="${sf_fp2_spirv}" SF_FP2_SHADER_SHA256="${SF_FP2_SHADER_SHA256}" SF_FP2_HOST_SHA256="${SF_FP2_HOST_SHA256}" SF_FP2_COMPILER_PATH="${SF_DAXA_SLANGC}" SF_FP2_COST_SPIRV_PATH="${sf_fp2_cost_spirv}" SF_FP2_COST_SHADER_SHA256="${SF_FP2_COST_SHADER_SHA256}" SF_FP2_CENSUS_SPIRV_PATH="${sf_fp2_census_spirv}" SF_FP2_CENSUS_SHADER_SHA256="${SF_FP2_CENSUS_SHADER_SHA256}" SF_FP2_CENSUS_HELPER_SHA256="${SF_FP2_CENSUS_HELPER_SHA256}" SF_FP2_SELECT_SHADER_SHA256="${SF_FP2_SELECT_SHADER_SHA256}" SF_FP2_LUT_HOST_SHA256="${SF_FP2_LUT_HOST_SHA256}" SF_FP2_INTEGRATED_RESET_SHA256="${SF_FP2_INTEGRATED_RESET_SHA256}" SF_FP2_SELECT_DIR="${CMAKE_CURRENT_BINARY_DIR}" SF_FP2_INTEGRATED_SPIRV_PATH="${sf_fp2_integrated_spv}" SF_FP2_RESIDENT_HOST_SHA256="${SF_FP2_SUBGROUP_HOST_SHA256}" SF_FP2_NO_PATH_SHADER_SHA256="${SF_FP2_SUBGROUP_SHADER_SHA256}" SF_FP2_SUM_RESET_SHADER_SHA256="${SF_FP2_SUM_RESET_SHADER_SHA256}")
+add_dependencies(fp2_subgroup_fixture fp2_prototype_shader fp2_image_shader fp2_census_shader fp2_select_shaders fp2_integrated_shader fp2_resident_shaders fp2_subgroup_shader)
+add_executable(fp2_subgroup_tiny apps/fp2_subgroup_tiny.cpp)
+target_link_libraries(fp2_subgroup_tiny PRIVATE stereoforge_daxa_foundation)
+target_include_directories(fp2_subgroup_tiny PRIVATE "${CMAKE_CURRENT_BINARY_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/_deps/vma-src/include")
+target_compile_definitions(fp2_subgroup_tiny PRIVATE SF_FP2_SPIRV_PATH="${sf_fp2_spirv}" SF_FP2_SHADER_SHA256="${SF_FP2_SHADER_SHA256}" SF_FP2_HOST_SHA256="${SF_FP2_HOST_SHA256}" SF_FP2_COMPILER_PATH="${SF_DAXA_SLANGC}" SF_FP2_SELECT_SHADER_SHA256="${SF_FP2_SELECT_SHADER_SHA256}" SF_FP2_RESIDENT_TINY_HOST_SHA256="${SF_FP2_SUBGROUP_TINY_SHA256}" SF_FP2_NO_PATH_SHADER_SHA256="${SF_FP2_SUBGROUP_SHADER_SHA256}" SF_FP2_SUM_RESET_SHADER_SHA256="${SF_FP2_SUM_RESET_SHADER_SHA256}" SF_FP2_LUT_HOST_SHA256="${SF_FP2_LUT_HOST_SHA256}" SF_FP2_SELECT_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+add_dependencies(fp2_subgroup_tiny fp2_prototype_shader fp2_select_shaders fp2_resident_shaders fp2_subgroup_shader)

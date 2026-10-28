@@ -7,7 +7,7 @@ import pytest
 from benchmarks import fp2_matched_timing as m
 
 
-def guard(src):
+def guard(src, work_labels=("'128 lanes and tree reduction per path pixel including inactive candidates'",)):
     for token in ("fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)", "enumerate(('old','new','old'))",
                   'start_new_session=True', 'status=process.wait(timeout=300)',
                   'os.killpg(process.pid,signal.SIGKILL);process.wait();raise',
@@ -16,8 +16,7 @@ def guard(src):
                   'check_result(result,variant,proof,harness,binary,tiny)',
                   "sha(destination/'output/samples.csv')!=result['samples_sha256']",
                   "result.get('sample_count')!=100", "result.get('warmup')!=10",
-                  "'one repeated preuploaded analytic frame; one in-flight slot'",
-                  "'128 lanes and tree reduction per path pixel including inactive candidates'"):
+                  "'one repeated preuploaded analytic frame; one in-flight slot'", *work_labels):
         if token not in src:raise ValueError('orchestrator invariant '+token)
     start=src.index('args=[str(ROOT/');end=src.index('identities=',start)
     args=src[start:end]
