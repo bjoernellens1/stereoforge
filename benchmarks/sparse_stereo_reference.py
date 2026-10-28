@@ -38,7 +38,7 @@ class Result:
     reverse_candidates: int
 
 
-def select_grid(image, support, cell_size=16, *, descriptor=None):
+def select_grid(image, support, cell_size=16, *, descriptor=None, subdivisions=1):
     """Pick the strongest central-difference response per cell, ties row-major.
 
     A zero-response cell yields no anchor. Selection uses only the reference
@@ -53,6 +53,8 @@ def select_grid(image, support, cell_size=16, *, descriptor=None):
         raise ValueError('expected uint8 image and matching bool support')
     if type(cell_size) is not int or cell_size < 1:
         raise ValueError('cell_size must be a positive integer')
+    if type(subdivisions) is not int or not 1 <= subdivisions <= 4:
+        raise ValueError('subdivisions must be an integer from 1 to 4')
     if descriptor is not None:
         descriptor = np.asarray(descriptor)
         if descriptor.shape != image.shape or descriptor.dtype != np.uint32:
@@ -74,13 +76,43 @@ def select_grid(image, support, cell_size=16, *, descriptor=None):
     points = []
     for y in range(0, h, cell_size):
         for x in range(0, w, cell_size):
-            cell = response[y:y + cell_size, x:x + cell_size]
-            ranking = cell if descriptor is None else score[y:y + cell_size, x:x + cell_size]
-            index = int(np.argmax(ranking))
-            if cell.flat[index] > 0:
-                dy, dx = np.unravel_index(index, cell.shape)
-                points.append((y + int(dy), x + int(dx)))
+            # Partition each parent cell into at most subdivisions squared regions.
+            # Gradient footprints are computed globally, including cell borders.
+            y_end, x_end = min(y + cell_size, h), min(x + cell_size, w)
+            for sy in range(subdivisions):
+                y0 = y + (y_end - y) * sy // subdivisions
+                y1 = y + (y_end - y) * (sy + 1) // subdivisions
+                for sx in range(subdivisions):
+                    x0 = x + (x_end - x) * sx // subdivisions
+                    x1 = x + (x_end - x) * (sx + 1) // subdivisions
+                    if y0 == y1 or x0 == x1:
+                        continue
+                    cell = response[y0:y1, x0:x1]
+                    ranking = cell if descriptor is None else score[y0:y1, x0:x1]
+                    index = int(np.argmax(ranking))
+                    if cell.flat[index] > 0:
+                        dy, dx = np.unravel_index(index, cell.shape)
+                        points.append((y0 + int(dy), x0 + int(dx)))
     return points
+
+
+def select_points(image, support, descriptor, cell_size=16, *, selection='gradient'):
+    """Choose deterministic image-only anchors; combined modes deduplicate by pixel.
+
+    The edge mode adds at most sixteen gradient anchors per parent cell. All
+    selectors use the same full-footprint support and require nonzero response.
+    """
+    if selection not in ('gradient', 'descriptor', 'combined', 'combined_edge'):
+        raise ValueError('unknown sparse selection')
+    if selection == 'gradient':
+        return select_grid(image, support, cell_size)
+    if selection == 'descriptor':
+        return select_grid(image, support, cell_size, descriptor=descriptor)
+    points = set(select_grid(image, support, cell_size))
+    points.update(select_grid(image, support, cell_size, descriptor=descriptor))
+    if selection == 'combined_edge':
+        points.update(select_grid(image, support, cell_size, subdivisions=4))
+    return sorted(points)
 
 
 def _search(reference, other, other_support, y, x, sign, disparities, min_margin):
@@ -156,8 +188,8 @@ def sparse_stereo(left, right, left_support, right_support, *, source_id,
     """Compute selected anchors independently for both eyes of one frame."""
     if not isinstance(source_id, str) or not source_id:
         raise ValueError('a non-empty frame source_id is required')
-    if selection not in ('gradient', 'descriptor'):
-        raise ValueError('selection must be gradient or descriptor')
+    if selection not in ('gradient', 'descriptor', 'combined', 'combined_edge'):
+        raise ValueError('unknown sparse selection')
     left, right = np.asarray(left), np.asarray(right)
     left_support, right_support = np.asarray(left_support), np.asarray(right_support)
     if left.shape != right.shape:
@@ -165,8 +197,8 @@ def sparse_stereo(left, right, left_support, right_support, *, source_id,
     lc, rc = census(left, left_support), census(right, right_support)
     results = []
     for eye, image, features in (('left', left, lc), ('right', right, rc)):
-        points = select_grid(image, features.support, cell_size,
-                             descriptor=features.descriptor if selection == 'descriptor' else None)
+        points = select_points(image, features.support, features.descriptor, cell_size,
+                               selection=selection)
         results.append(match_descriptors(lc.descriptor, rc.descriptor, lc.support, rc.support,
                                          points, eye, disparities, min_margin, source_id))
     return Result(source_id, results[0].matches + results[1].matches,

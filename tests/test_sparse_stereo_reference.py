@@ -120,3 +120,52 @@ def test_sparse_selection_default_is_unchanged_and_ablation_is_explicit():
                                      selection='descriptor')
     with pytest.raises(ValueError):
         sparse_stereo(left, right, support, support, source_id='f', selection='unknown')
+
+
+def test_combined_selection_is_exact_sorted_union_and_deduplicated():
+    from benchmarks.sparse_stereo_reference import select_points
+    image = np.random.default_rng(28).integers(0, 256, (23, 37), dtype=np.uint8)
+    support = np.ones_like(image, bool)
+    descriptor = np.random.default_rng(29).integers(0, 1 << 24, image.shape, dtype=np.uint32)
+    gradient = select_grid(image, support, 16)
+    balanced = select_grid(image, support, 16, descriptor=descriptor)
+    combined = select_points(image, support, descriptor, 16, selection='combined')
+    assert combined == sorted(set(gradient) | set(balanced))
+    assert len(combined) < len(gradient) + len(balanced) or set(gradient).isdisjoint(balanced)
+    assert combined == select_points(image.copy(), support.copy(), descriptor.copy(), 16,
+                                     selection='combined')
+
+
+def test_combined_edge_bounds_support_and_matching_work():
+    from benchmarks.sparse_stereo_reference import select_points
+    image = np.random.default_rng(30).integers(0, 256, (33, 35), dtype=np.uint8)
+    support = np.ones_like(image, bool)
+    support[10:14, 10:14] = False
+    descriptor = np.random.default_rng(31).integers(0, 1 << 24, image.shape, dtype=np.uint32)
+    combined = select_points(image, support, descriptor, 16, selection='combined')
+    edge = select_points(image, support, descriptor, 16, selection='combined_edge')
+    assert edge == sorted(set(edge))
+    assert set(combined) <= set(edge)
+    assert len(edge) <= 18 * 3 * 3  # at most two base and 16 extra per cell
+    for y, x in edge:
+        assert support[y, x] and support[y - 1, x] and support[y + 1, x]
+        assert support[y, x - 1] and support[y, x + 1]
+    right = np.roll(image, -3, axis=1)
+    result = sparse_stereo(image, right, support, support, source_id='f',
+                           cell_size=16, disparities=8, selection='combined_edge')
+    assert len(result.matches) <= 2 * 18 * 3 * 3
+    assert result.forward_candidates <= len(result.matches) * 8
+    assert result.reverse_candidates <= len(result.matches) * 8
+    for eye in ('left', 'right'):
+        points = [(m.y, m.x) for m in result.matches if m.eye == eye]
+        assert points == sorted(set(points))
+
+
+def test_subcell_selection_preserves_cross_cell_gradient_footprints():
+    image = np.zeros((8, 8), np.uint8)
+    image[4, 4] = 255
+    support = np.ones_like(image, bool)
+    points = select_grid(image, support, cell_size=8, subdivisions=4)
+    assert (3, 4) in points and (4, 3) in points
+    with pytest.raises(ValueError):
+        select_grid(image, support, subdivisions=5)
