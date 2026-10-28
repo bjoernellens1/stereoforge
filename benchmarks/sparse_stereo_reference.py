@@ -38,11 +38,14 @@ class Result:
     reverse_candidates: int
 
 
-def select_grid(image, support, cell_size=16):
+def select_grid(image, support, cell_size=16, *, descriptor=None):
     """Pick the strongest central-difference response per cell, ties row-major.
 
     A zero-response cell yields no anchor. Selection uses only the reference
-    image; unsupported samples are excluded from the gradient footprint.
+    image; unsupported samples are excluded from the gradient footprint. If
+    supplied, a Census descriptor selects closest popcount to 12 first, then
+    largest gradient, with row-major ties. This is a research ablation, not a
+    claim that balanced descriptors produce better matches.
     """
     image = np.asarray(image)
     support = np.asarray(support)
@@ -50,6 +53,10 @@ def select_grid(image, support, cell_size=16):
         raise ValueError('expected uint8 image and matching bool support')
     if type(cell_size) is not int or cell_size < 1:
         raise ValueError('cell_size must be a positive integer')
+    if descriptor is not None:
+        descriptor = np.asarray(descriptor)
+        if descriptor.shape != image.shape or descriptor.dtype != np.uint32:
+            raise ValueError('descriptor must be a matching uint32 image')
     h, w = image.shape
     response = np.zeros((h, w), np.int16)
     eligible = np.zeros((h, w), bool)
@@ -60,11 +67,16 @@ def select_grid(image, support, cell_size=16):
         eligible[1:-1, 1:-1] = (support[1:-1, 1:-1] & support[1:-1, 2:] &
                                 support[1:-1, :-2] & support[2:, 1:-1] & support[:-2, 1:-1])
     response[~eligible] = 0
+    if descriptor is not None:
+        # Response is at most 510, so 1024 makes bit balance the primary key.
+        balance = 12 - np.abs(np.bitwise_count(descriptor).astype(np.int16) - 12)
+        score = np.where(response > 0, balance.astype(np.int32) * 1024 + response, -32768)
     points = []
     for y in range(0, h, cell_size):
         for x in range(0, w, cell_size):
             cell = response[y:y + cell_size, x:x + cell_size]
-            index = int(np.argmax(cell))
+            ranking = cell if descriptor is None else score[y:y + cell_size, x:x + cell_size]
+            index = int(np.argmax(ranking))
             if cell.flat[index] > 0:
                 dy, dx = np.unravel_index(index, cell.shape)
                 points.append((y + int(dy), x + int(dx)))
@@ -140,18 +152,21 @@ def match_descriptors(left, right, left_support, right_support, points, eye,
 
 
 def sparse_stereo(left, right, left_support, right_support, *, source_id,
-                  cell_size=16, disparities=224, min_margin=1):
+                  cell_size=16, disparities=224, min_margin=1, selection='gradient'):
     """Compute selected anchors independently for both eyes of one frame."""
     if not isinstance(source_id, str) or not source_id:
         raise ValueError('a non-empty frame source_id is required')
+    if selection not in ('gradient', 'descriptor'):
+        raise ValueError('selection must be gradient or descriptor')
     left, right = np.asarray(left), np.asarray(right)
     left_support, right_support = np.asarray(left_support), np.asarray(right_support)
     if left.shape != right.shape:
         raise ValueError('stereo image dimensions must match')
     lc, rc = census(left, left_support), census(right, right_support)
     results = []
-    for eye, image, supported in (('left', left, lc.support), ('right', right, rc.support)):
-        points = select_grid(image, supported, cell_size)
+    for eye, image, features in (('left', left, lc), ('right', right, rc)):
+        points = select_grid(image, features.support, cell_size,
+                             descriptor=features.descriptor if selection == 'descriptor' else None)
         results.append(match_descriptors(lc.descriptor, rc.descriptor, lc.support, rc.support,
                                          points, eye, disparities, min_margin, source_id))
     return Result(source_id, results[0].matches + results[1].matches,

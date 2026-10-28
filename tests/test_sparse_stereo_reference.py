@@ -75,3 +75,48 @@ def test_reverse_search_rejects_a_different_unique_winner():
     assert result.matches[0].disparity == 2
     assert result.matches[0].reason == 'reverse_mismatch'
     assert not result.matches[0].valid
+
+
+def test_descriptor_grid_prefers_balanced_bits_then_gradient_and_row_major():
+    image = np.tile(np.arange(8, dtype=np.uint8), (8, 1))
+    support = np.ones_like(image, bool)
+    descriptor = np.zeros_like(image, np.uint32)
+    descriptor[2, 2] = (1 << 12) - 1
+    descriptor[3, 3] = (1 << 12) - 1
+    descriptor[5, 5] = (1 << 11) - 1
+    # Equal descriptor balance and gradient use row-major order.
+    assert select_grid(image, support, cell_size=8, descriptor=descriptor) == [(2, 2)]
+    # Gradient breaks equal-balance ties, even for a later pixel.
+    image[3, 4] = 100
+    assert select_grid(image, support, cell_size=8, descriptor=descriptor) == [(3, 3)]
+    # A stronger response with less balanced bits is still ranked lower.
+    image[5, 6] = 255
+    assert select_grid(image, support, cell_size=8, descriptor=descriptor) == [(3, 3)]
+    support[2, 2] = False
+    assert select_grid(image, support, cell_size=8, descriptor=descriptor) == [(3, 3)]
+
+
+def test_descriptor_grid_ignores_flat_and_unsupported_footprints():
+    image = np.full((8, 8), 50, np.uint8)
+    support = np.ones_like(image, bool)
+    descriptor = np.full_like(image, (1 << 12) - 1, dtype=np.uint32)
+    assert select_grid(image, support, cell_size=8, descriptor=descriptor) == []
+    image[3, 4] = 100
+    support[:] = False
+    support[3, 3] = True
+    assert select_grid(image, support, cell_size=8, descriptor=descriptor) == []
+
+
+def test_sparse_selection_default_is_unchanged_and_ablation_is_explicit():
+    left = np.random.default_rng(27).integers(0, 256, (16, 32), dtype=np.uint8)
+    right = np.roll(left, -3, axis=1)
+    support = np.ones_like(left, bool)
+    default = sparse_stereo(left, right, support, support, source_id='f', disparities=8)
+    assert default == sparse_stereo(left, right, support, support, source_id='f', disparities=8,
+                                    selection='gradient')
+    selected = sparse_stereo(left, right, support, support, source_id='f', disparities=8,
+                             selection='descriptor')
+    assert selected == sparse_stereo(left, right, support, support, source_id='f', disparities=8,
+                                     selection='descriptor')
+    with pytest.raises(ValueError):
+        sparse_stereo(left, right, support, support, source_id='f', selection='unknown')
