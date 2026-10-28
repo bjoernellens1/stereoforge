@@ -343,6 +343,13 @@ references, LR and depth metadata. Refinement and View are additional work.
 See the [measurement scopes and raw-sample policy](docs/fast60-multiresolution-evidence.md)
 and [Fast60 plan](docs/superpowers/plans/2026-10-28-fast60.md).
 
+An experimental native `DaxaRefinement` now adds independent full-resolution
+local Census matching, LR checks and metric outputs while retaining GPU resources.
+All six radius/subpixel cases pass exact discrete checks and conditional float
+bounds. Initial combined times are approximately 8 ms, but repeated timing is
+incomplete and independent truth exposes poor thin-object recovery. This profile
+is not promoted; see the [refinement evidence and remaining gates](docs/fast60-refinement-evidence.md).
+
 ```bash
 PYTHONPATH=python .venv/bin/python benchmarks/multiresolution_fixture.py \
   --source-manifest DONOR/manifest.json --output FRESH_PROFILE \

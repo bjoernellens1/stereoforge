@@ -236,3 +236,7 @@ if(TARGET stereoforge_daxa_temporal AND TARGET stereoforge_daxa_view)
   target_link_libraries(daxa_temporal_fixture PRIVATE stereoforge_daxa_temporal stereoforge_daxa_view GPUOpen::VulkanMemoryAllocator)
   target_include_directories(daxa_temporal_fixture PRIVATE "$<TARGET_PROPERTY:daxa_depth_benchmark,INCLUDE_DIRECTORIES>")
 endif()
+
+if(TARGET stereoforge_daxa_depth)
+  include(cmake/DaxaRefinement.cmake)
+endif()

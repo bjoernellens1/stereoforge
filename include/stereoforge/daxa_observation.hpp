@@ -1,7 +1,7 @@
 #pragma once
 #include <stereoforge/daxa_frame.hpp>
 namespace stereoforge {
-class DaxaDepthPipeline;class DaxaTemporal;
+class DaxaDepthPipeline;class DaxaTemporal;class DaxaRefinement;
 enum class DaxaObservationPlane:unsigned { Depth,Confidence,Validity,Provenance,SourceIds,AgeNs };
 enum class DaxaObservationImage:unsigned { OriginalLeft,OriginalRight,RectifiedLeft,RectifiedRight };
 enum class DaxaObservationAncestryKind { SingleMeasured, BoundedContributors };
@@ -23,7 +23,7 @@ public:
 class DaxaObservationImageView {
     daxa::BufferId buffer_{};uint32_t width_=0,height_=0;
     DaxaObservationImageView(daxa::BufferId buffer,uint32_t width,uint32_t height):buffer_(buffer),width_(width),height_(height){}
-    friend class DaxaDepthPipeline;friend class DaxaTemporal;
+    friend class DaxaDepthPipeline;friend class DaxaTemporal;friend class DaxaRefinement;
 public:
     DaxaObservationImageView()=default;
     daxa::BufferId buffer()const{return buffer_;}uint32_t width()const{return width_;}uint32_t height()const{return height_;}
@@ -45,7 +45,7 @@ class DaxaObservationFrame {
     DaxaObservationAncestryView ancestry_;
     DaxaObservationFrame(std::shared_ptr<DaxaFoundation>,std::shared_ptr<void> owner,std::shared_ptr<void> lease,const uint64_t* live_generation,uint64_t generation,uint64_t submit,std::shared_ptr<const DaxaRectification>,CaptureLease,std::array<daxa::BufferId,6>,std::array<DaxaObservationImageView,4>,DaxaObservationAncestryView={});
     void validate()const;
-    friend class DaxaDepthPipeline;friend class DaxaTemporal;
+    friend class DaxaDepthPipeline;friend class DaxaTemporal;friend class DaxaRefinement;
 public:
     DaxaObservationFrame()=default;DaxaObservationFrame(const DaxaObservationFrame&)=default;DaxaObservationFrame(DaxaObservationFrame&&)noexcept=default;
     DaxaObservationFrame& operator=(DaxaObservationFrame)noexcept;

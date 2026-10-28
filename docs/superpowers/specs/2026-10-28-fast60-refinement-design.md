@@ -181,4 +181,8 @@ refinement-only build pins the official 2026.19 archive by SHA256. Its compiled
 fast-math or FMA, while 62 existing shader binaries remain unchanged. Coarse and
 refinement compiler identities are reported separately. The tag is unsigned;
 archive-digest verification is not a claim of signed-tag verification. Native
-GPU numerical/mask/lifetime, performance and recovery/ROI gates remain open.
+guided fixtures pass exact discrete checks and conditional operation-specific
+float bounds at all three radii with/without subpixel refinement. Resource/lifetime
+checks and a 303-frame synchronization stress pass. Global arithmetic boundaries,
+repeatable performance, recovery/ROI and useful world quality remain open; see
+the separate refinement evidence for the substantial quality gap against SGM.

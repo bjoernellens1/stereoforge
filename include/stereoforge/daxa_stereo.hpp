@@ -12,8 +12,8 @@ namespace stereoforge {
 // Positive disparity is x_left-x_right. Left compares L(x) with R(x-d);
 // Right compares R(x) with L(x+d). Census planes always retain ordinary L/R order.
 enum class DaxaStereoReference { Left,Right };
-enum class DaxaRightReferenceMode { IndependentSGM,LeftAggregatedSelection };
-enum class DaxaStereoEstimator { IndependentSGM,LeftAggregatedSelection };
+enum class DaxaRightReferenceMode { IndependentSGM,LeftAggregatedSelection,IndependentLocalCensus };
+enum class DaxaStereoEstimator { IndependentSGM,LeftAggregatedSelection,IndependentLocalCensus };
 enum class DaxaLRDependency { IndependentReferences,LeftAggregatedCorrelated };
 // Reserved native observation value; valid derived observations use this on both layers.
 enum class DaxaDepthProvenance : uint32_t { Invalid=0,IndependentStereo=1,LeftAggregatedStereo=5 };

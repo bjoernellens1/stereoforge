@@ -1,0 +1,56 @@
+include_guard(GLOBAL)
+# Refinement-only compiler pin: the old Daxa/SGM/Temporal toolchain remains2026.12.
+# Official tag v2026.19 ->0fb6b7587a94fa33d88141ec9930766eedc6f59a;
+# archive digest is the GitHub release asset SHA256 (not an unverified local SDK).
+include(FetchContent)
+set(SF_REFINEMENT_SLANG_VERSION "2026.19")
+set(SF_REFINEMENT_SLANG_COMMIT "0fb6b7587a94fa33d88141ec9930766eedc6f59a")
+set(SF_REFINEMENT_SLANG_PACKAGE_SHA256 "bd6cfc47b7353b2cffa36a866b1584749f76f4b2dbebf6dda26bc3fb40dc3c0e")
+set(STEREOFORGE_REFINEMENT_SLANG_SDK_ARCHIVE "" CACHE FILEPATH "Cached official2026.19 refinement-only Slang SDK archive")
+set(sf_refinement_slang_url "https://github.com/shader-slang/slang/releases/download/v2026.19/slang-2026.19-linux-x86_64.tar.gz")
+if(STEREOFORGE_REFINEMENT_SLANG_SDK_ARCHIVE)
+  set(sf_refinement_slang_url "${STEREOFORGE_REFINEMENT_SLANG_SDK_ARCHIVE}")
+endif()
+FetchContent_Declare(sf_refinement_slang_sdk URL "${sf_refinement_slang_url}"
+  URL_HASH "SHA256=${SF_REFINEMENT_SLANG_PACKAGE_SHA256}"
+  DOWNLOAD_EXTRACT_TIMESTAMP TRUE SOURCE_SUBDIR no-cmake-project)
+FetchContent_MakeAvailable(sf_refinement_slang_sdk)
+set(SF_REFINEMENT_SLANGC "${sf_refinement_slang_sdk_SOURCE_DIR}/bin/slangc")
+execute_process(COMMAND "${SF_REFINEMENT_SLANGC}" -version
+  OUTPUT_VARIABLE sf_refinement_slang_actual_version ERROR_VARIABLE sf_refinement_slang_actual_version
+  OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
+if(NOT sf_refinement_slang_actual_version STREQUAL SF_REFINEMENT_SLANG_VERSION)
+  message(FATAL_ERROR "Expected refinement Slang${SF_REFINEMENT_SLANG_VERSION}, got${sf_refinement_slang_actual_version}")
+endif()
+file(SHA256 "${SF_REFINEMENT_SLANGC}" SF_REFINEMENT_COMPILER_SHA256)
+message(STATUS "Refinement-only compiler${SF_REFINEMENT_SLANGC}, version${SF_REFINEMENT_SLANG_VERSION}, SHA256${SF_REFINEMENT_COMPILER_SHA256}")
+set(sf_refinement_spirv)
+file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/shaders/daxa/refinement.slang" SF_DAXA_REFINEMENT_WRAPPER_SHA256)
+file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/shaders/ops/refinement.slang" SF_DAXA_REFINEMENT_OPS_SHA256)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS shaders/daxa/refinement.slang shaders/ops/refinement.slang)
+foreach(entry rectify census match lr metric)
+  set(output "${CMAKE_CURRENT_BINARY_DIR}/daxa-refinement-${entry}.spv")
+  add_custom_command(OUTPUT "${output}"
+    COMMAND "${SF_REFINEMENT_SLANGC}" "${CMAKE_CURRENT_SOURCE_DIR}/shaders/daxa/refinement.slang"
+      -target spirv -profile spirv_1_5 -restrictive-capability-check -matrix-layout-row-major -fvk-use-scalar-layout -fp-mode precise -O3
+      -entry "${entry}" -stage compute -o "${output}"
+    DEPENDS shaders/daxa/refinement.slang shaders/ops/refinement.slang shaders/ops/preprocess.slang shaders/ops/stereo_observation.slang VERBATIM)
+  list(APPEND sf_refinement_spirv "${output}")
+endforeach()
+add_custom_target(daxa_refinement_shaders DEPENDS ${sf_refinement_spirv})
+add_library(stereoforge_daxa_refinement src/daxa_refinement.cpp)
+target_link_libraries(stereoforge_daxa_refinement PUBLIC stereoforge_daxa_depth PRIVATE GPUOpen::VulkanMemoryAllocator)
+target_compile_definitions(stereoforge_daxa_refinement PRIVATE SF_REFINEMENT_COMPILER_VERSION="${SF_REFINEMENT_SLANG_VERSION}" SF_REFINEMENT_COMPILER_COMMIT="${SF_REFINEMENT_SLANG_COMMIT}" SF_REFINEMENT_COMPILER_PACKAGE_SHA256="${SF_REFINEMENT_SLANG_PACKAGE_SHA256}" SF_REFINEMENT_COMPILER_SHA256="${SF_REFINEMENT_COMPILER_SHA256}" SF_DAXA_REFINEMENT_SPIRV_DIRECTORY="${CMAKE_CURRENT_BINARY_DIR}" SF_DAXA_REFINEMENT_WRAPPER_SHA256="${SF_DAXA_REFINEMENT_WRAPPER_SHA256}" SF_DAXA_REFINEMENT_OPS_SHA256="${SF_DAXA_REFINEMENT_OPS_SHA256}")
+add_dependencies(stereoforge_daxa_refinement daxa_refinement_shaders)
+if(BUILD_TESTING)
+  add_executable(daxa_refinement_contracts tests/daxa_refinement.cpp)
+  target_link_libraries(daxa_refinement_contracts PRIVATE stereoforge_daxa_refinement stereoforge_daxa_view)
+  add_test(NAME daxa_refinement_cpu_contracts COMMAND daxa_refinement_contracts --cpu-only)
+  add_test(NAME daxa_refinement_gpu_contracts COMMAND daxa_refinement_contracts --gpu)
+  set_tests_properties(daxa_refinement_gpu_contracts PROPERTIES LABELS "vulkan;hardware;daxa")
+endif()
+foreach(app daxa_refinement_fixture daxa_refinement_benchmark)
+  add_executable(${app} apps/${app}.cpp)
+  target_link_libraries(${app} PRIVATE stereoforge_daxa_refinement GPUOpen::VulkanMemoryAllocator)
+  target_include_directories(${app} PRIVATE "$<TARGET_PROPERTY:daxa_depth_benchmark,INCLUDE_DIRECTORIES>")
+endforeach()

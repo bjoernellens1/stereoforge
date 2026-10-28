@@ -33,6 +33,36 @@ notice byte-for-byte. No new binary/dependency archive is tracked or published.
 Source-publication clearance below remains applicable; binary redistribution
 still requires its separate audit. SlangPy is an optional research provider.
 
+Refinement-only toolchain follow-up (2026-10-28):
+`cmake/DaxaRefinement.cmake` separately selects the official Linux x86_64 Slang
+2026.19 SDK, tag `v2026.19` (unsigned), source revision
+`0fb6b7587a94fa33d88141ec9930766eedc6f59a`, archive SHA256
+`bd6cfc47b7353b2cffa36a866b1584749f76f4b2dbebf6dda26bc3fb40dc3c0e`.
+The extracted `build/daxa/_deps/sf_refinement_slang_sdk-src/LICENSE` is
+byte-identical to both the existing 2026.12 SDK LICENSE and the retained
+`slang-Apache-2.0-LLVM-exception.txt`: SHA256
+`b738d98b7725414b534c119ac66126876b8cbd40aa8ae48210db190714b81670`.
+This additional compiler does not change the frozen 2026.12 compiler lane.
+
+Unlike the inspected 2026.12 SDK at `build/standalone/_deps/sf_slang_sdk-src`,
+which has neither directory, the extracted 2026.19 SDK contains seven
+`LICENSES/` files: `Apache-2.0.txt`, `BSL-1.0.txt`, `CC-BY-4.0.txt`,
+`LLVM-exception.txt`, `LicenseRef-UOI-NCSA.txt`, `MIT.txt`, and `Unlicense.txt`;
+and six `third-party-notices/` files: `cmark-COPYING`, `glslang-LICENSE.txt`,
+`lz4-LICENSE`, `miniz-LICENSE`, `spirv-tools-LICENSE`, and
+`unordered_dense-LICENSE`. These are additional notice inventory, not a
+conclusion that every SDK component has only the primary Slang license.
+In particular, `glslang-LICENSE.txt` (SHA256
+`17e70c676e1521ff3e4686f04a2053d93a7e28a33be8de7ec37ab0ff72feb677`)
+includes BSD/MIT/Apache terms, historical GPLv3 text with the Bison exception
+(the notice states Bison was removed), and NVIDIA preprocessor terms permitting
+use, modification and redistribution with retained notices. CC-BY-4.0 also
+introduces attribution terms. No changed primary license or unidentified
+restrictive notice was found in these files. This finding concerns the separately
+fetched compiler used by the published source; any SDK/binary bundle still needs
+component-to-artifact attribution, notice retention and generated-output review.
+No SDK binaries or additional SDK license files are copied into the tracked tree.
+
 **Decision: GO for public source publication under Apache-2.0**, after the notice
 remediations recorded below. No source-publication license blocker was identified
 in this review. This decision does not approve redistribution of a complete binary
@@ -71,6 +101,7 @@ retain their own terms; the project license does not relicense them.
 | Vulkan Memory Allocator `v3.1.0`, source `009ecd192c1289c7529bff248a16cfe896254816` | MIT; actual source LICENSE.txt inspected | Required Daxa implementation dependency (`VMA_IMPLEMENTATION`); preserve full AMD notice. |
 | SlangPy 0.43.1, source `2f6c4625fdd2b3bd812ca6cd2802cf98bd89b248` | Actual LICENSE is **Apache-2.0 WITH LLVM-exception** | Compatible. Metadata's shorter Apache label omits the exception; the license text governs this evaluation. |
 | Slang 2026.12, source `a7fbf1ab0e9ddd18b0a9eaa675ddc95f63532fee` | Apache-2.0 WITH LLVM-exception | Compatible. Includes the two fetched compiler helper headers; retain relevant notices. |
+| Slang 2026.19 refinement-only SDK, source `0fb6b7587a94fa33d88141ec9930766eedc6f59a` | Actual primary LICENSE matches retained Apache-2.0 WITH LLVM-exception text; additional SDK notices inventoried above | Separately fetched offline compiler; this source review does not clear redistribution of its SDK/binaries or all generated outputs. |
 | RHI bundled with SlangPy, source `1a9768741246b1f356116d5dfa305933034ce049` | Apache-2.0 WITH LLVM-exception | Compatible. This is the actual bundled pin, not today's upstream HEAD. |
 | opencv-python-headless 4.14.0.94 | Python packaging MIT; OpenCV core Apache-2.0; wheel components have additional terms | Calling/importing the separately obtained dependency does not block publication of this source. Do not represent the whole wheel as Apache-only. |
 | NumPy 2.5.4, local Python 3.12 | Source/component metadata: BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0 | Compatible source dependency. Bundled numerical runtime binaries need a separate redistribution inventory. |
