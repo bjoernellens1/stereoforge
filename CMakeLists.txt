@@ -295,3 +295,8 @@ endif()
 if(STEREOFORGE_ROS2)
   include(cmake/ROS2.cmake)
 endif()
+
+option(STEREOFORGE_FP2_PROTOTYPE "Build isolated FP2 recurrence correctness prototype" OFF)
+if(STEREOFORGE_FP2_PROTOTYPE)
+  include(cmake/Fp2Prototype.cmake)
+endif()

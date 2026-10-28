@@ -1,0 +1,25 @@
+include_guard(GLOBAL)
+if(NOT TARGET stereoforge_daxa_foundation)
+  message(FATAL_ERROR "FP2 prototype requires STEREOFORGE_DAXA")
+endif()
+set(sf_fp2_shader "${CMAKE_CURRENT_SOURCE_DIR}/python/stereoforge/shaders/daxa/fp2_banded.slang")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${sf_fp2_shader}" "${CMAKE_CURRENT_SOURCE_DIR}/apps/fp2_prototype_fixture.cpp")
+file(SHA256 "${sf_fp2_shader}" SF_FP2_SHADER_SHA256)
+file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/apps/fp2_prototype_fixture.cpp" SF_FP2_HOST_SHA256)
+set(sf_fp2_spirv "${CMAKE_CURRENT_BINARY_DIR}/fp2-banded-aggregate.spv")
+add_custom_command(OUTPUT "${sf_fp2_spirv}"
+  COMMAND "${SF_DAXA_SLANGC}" "${sf_fp2_shader}" -target spirv -profile spirv_1_5 -restrictive-capability-check -matrix-layout-row-major -fvk-use-scalar-layout -O3 -entry aggregate -stage compute -o "${sf_fp2_spirv}"
+  DEPENDS "${sf_fp2_shader}" VERBATIM)
+set(sf_fp2_identity "${CMAKE_CURRENT_BINARY_DIR}/fp2_identity.hpp")
+add_custom_command(OUTPUT "${sf_fp2_identity}"
+  COMMAND "${CMAKE_COMMAND}" -DINPUT=${sf_fp2_spirv} -DOUTPUT=${sf_fp2_identity} -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Fp2Identity.cmake"
+  DEPENDS "${sf_fp2_spirv}" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Fp2Identity.cmake" VERBATIM)
+add_custom_target(fp2_prototype_shader DEPENDS "${sf_fp2_spirv}" "${sf_fp2_identity}")
+add_executable(fp2_prototype_fixture apps/fp2_prototype_fixture.cpp)
+target_link_libraries(fp2_prototype_fixture PRIVATE stereoforge_daxa_foundation)
+target_include_directories(fp2_prototype_fixture PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+target_compile_definitions(fp2_prototype_fixture PRIVATE SF_FP2_SPIRV_PATH="${sf_fp2_spirv}" SF_FP2_SHADER_SHA256="${SF_FP2_SHADER_SHA256}" SF_FP2_HOST_SHA256="${SF_FP2_HOST_SHA256}" SF_FP2_COMPILER_PATH="${SF_DAXA_SLANGC}")
+add_dependencies(fp2_prototype_fixture fp2_prototype_shader)
+if(BUILD_TESTING)
+  add_test(NAME fp2_prototype_cpu_contracts COMMAND fp2_prototype_fixture --cpu-only)
+endif()
