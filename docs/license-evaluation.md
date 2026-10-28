@@ -75,6 +75,38 @@ Reviewed on 2026-10-27 against source commit
 packages. The remediation commit adds notices/documentation and build-time notice
 copying; it does not import dependency implementations or binary artifacts.
 
+## Optional proprietary SDK reference runner
+
+Review dated 2026-10-28: an optional ZED SDK reference runner is planned, not
+implemented. It would be isolated from the core, with no SDK/core linkage and
+default OFF. The [official release page](https://www.stereolabs.com/developers/release)
+currently offers SDK 5.5.1 installers with platform/CUDA/TensorRT choices; the official development image has been downloaded for isolated reference work
+(`stereolabs/zed:5.5-devel-cuda12.8-ubuntu24.04`, manifest digest
+`sha256:0297481b344437ad2874edaef4c32da821491c15cc761187c1d6e0c902148cde`).
+No host-system SDK installer has been executed. Image availability is not
+benchmark execution or a redistribution clearance.
+
+The [sample repository LICENSE](https://raw.githubusercontent.com/stereolabs/zed-sdk/master/LICENSE)
+is MIT, copyright 2021 Stereolabs. That covers the licensed sample source, not
+the proprietary SDK or its models. Section 3.4 of the
+[official Software and Services License Agreement](https://www.stereolabs.com/SoftwareandServicesLicenseAgreement)
+(last modified November 15, 2024) preserves separate open-source component terms.
+Section 3.5(h) restricts access or use to build a competitive product or service
+unless Stereolabs gives express written permission. This is an actual condition
+to resolve for the proposed StereoForge comparison, not merely a redistribution
+notice obligation. The user states that permission is granted for the requested
+task and all benchmarking against the Stereolabs SDK; this authorizes proceeding
+with the isolated benchmark work. This records user-stated authorization, not a
+reviewed vendor permission letter or blanket license clearance. The exact selected
+SDK distribution terms and their applicability remain part of the dependency
+inventory, including the competitive-use condition.
+
+The proposed workflow would redistribute no SDK binaries, models, private SVO
+recordings or camera serial numbers. Independently authored portable export-index
+and evaluator work requiring no SDK can continue under the existing Apache-2.0
+source-publication clearance. That clearance and the historical review scope and
+counts below remain unchanged; external SDK parity remains unqualified.
+
 ## What is being published
 
 The reviewed tree contains 73 tracked files and the history contains 74 distinct

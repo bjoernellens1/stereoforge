@@ -59,6 +59,8 @@ export and Daxa input remain independent optional/runtime boundaries.
 
 ### Task 2: Isolated optional SDK export
 
+**Portable subset verified 2026-10-28:** SDK-free `svo_to_frames.py` indexing and batch `load_records(paths, expected=...)` are implemented. A sealed `export.json` enumerates record SHA256/size descriptors; deterministic `index.json` groups exact input identities and remains quality-unqualified. Shared artifacts are hashed once per batch with file-change checks and per-record mapping cleanup. Independent functional/performance reviews passed; 1,928 CPU tests passed, 37 GPU/camera tests deselected. This does not complete Task 2: optional C++ exporter/CMake isolation, actual SDK settings/calibration export and bounded SVO execution remain open. User explicitly authorized isolated SDK benchmarking; distribution terms and source/model boundaries remain inventoried.
+
 **Files:** Create `benchmarks/zed_comparison/export_sdk.cpp`, `benchmarks/zed_comparison/CMakeLists.txt`, `benchmarks/zed_comparison/svo_to_frames.py`, `tests/test_zed_svo_to_frames.py`; modify root `CMakeLists.txt` optional inclusion and `docs/license-evaluation.md` host/export boundary.
 **Interfaces:** Consumes Task 1 records/policy and local SVO. Produces exporter CLI `export_sdk --svo PATH --output DIR --mode MODE --profile instantaneous`; Python `index_export(root: Path) -> Path` validates/indexes its record without invoking depth algorithms.
 

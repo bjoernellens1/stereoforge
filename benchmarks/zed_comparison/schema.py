@@ -173,36 +173,69 @@ def _descriptor(desc, plane=False):
 
 class _Files:
     """One validation call, bounded hash reads and one hash per relative path."""
-    def __init__(self, root, stack):
+    def __init__(self, root, stack, hashes=None, fingerprints=None):
         self.root = Path(root).resolve()
         self.stack = stack
-        self.hashes = {}
+        self.hashes = {} if hashes is None else hashes
+        self.fingerprints = {} if fingerprints is None else fingerprints
         self.json = {}
 
-    def check(self, desc, json_object=False):
-        relative = desc["path"]
+    def _stat(self, relative):
         path = self.root
         try:
             for part in relative.split("/"):
                 path = path / part
                 _require(not path.is_symlink(), "symlink component forbidden")
             _require(path.is_relative_to(self.root), "file escapes record root")
-            _require(stat.S_ISREG(path.stat().st_mode), "not a regular file")
-            if relative not in self.hashes:
-                digest = sha256()
-                size = 0
+            info = path.stat()
+            _require(stat.S_ISREG(info.st_mode), "not a regular file")
+            return path, (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+        except OSError as exc:
+            raise ValueError(f"cannot validate file: {relative}") from exc
+
+    def _unchanged(self, relative, fingerprint):
+        _require(self._stat(relative)[1] == fingerprint, f"file changed during validation: {relative}")
+
+    def _hash(self, relative):
+        path, fingerprint = self._stat(relative)
+        if relative in self.hashes:
+            _require(self.fingerprints[relative] == fingerprint,
+                     f"file changed during validation: {relative}")
+        else:
+            digest = sha256()
+            size = 0
+            try:
                 with path.open("rb") as stream:
                     while chunk := stream.read(HASH_CHUNK_BYTES):
                         digest.update(chunk)
                         size += len(chunk)
-                self.hashes[relative] = (digest.hexdigest(), size)
-            _require(self.hashes[relative] == (desc["sha256"], desc["size_bytes"]),
-                     f"hash/size mismatch: {relative}")
-            if json_object and relative not in self.json:
-                self.json[relative] = _read_json(path)
-            return path
-        except OSError as exc:
-            raise ValueError(f"cannot validate file: {relative}") from exc
+            except OSError as exc:
+                raise ValueError(f"cannot validate file: {relative}") from exc
+            self._unchanged(relative, fingerprint)
+            self.hashes[relative] = (digest.hexdigest(), size)
+            self.fingerprints[relative] = fingerprint
+        return path
+
+    def read_json(self, relative):
+        path = self._hash(relative)
+        fingerprint = self.fingerprints[relative]
+        self._unchanged(relative, fingerprint)
+        value = _read_json(path)
+        self._unchanged(relative, fingerprint)
+        return value
+
+    def check(self, desc, json_object=False):
+        relative = desc["path"]
+        path = self._hash(relative)
+        _require(self.hashes[relative] == (desc["sha256"], desc["size_bytes"]),
+                 f"hash/size mismatch: {relative}")
+        if json_object and relative not in self.json:
+            self.json[relative] = self.read_json(relative)
+        return path
+
+    def recheck(self):
+        for relative, fingerprint in self.fingerprints.items():
+            self._unchanged(relative, fingerprint)
 
     def plane(self, desc):
         path = self.check(desc)
@@ -455,6 +488,45 @@ def load_record(path):
     record = _read_json(path)
     validate_record(record, path.parent)
     return record
+
+
+def load_records(paths: list[Path], *, expected=None) -> list[dict]:
+    """Fully validate one batch from a common export directory, then partitions.
+
+    Hashes and stat fingerprints are local to this call; arrays close after each
+    record. Fingerprint checks detect observed changes, not an atomic filesystem
+    snapshot or protection against a writer racing after the final checks.
+    Optional ordered FileDescs bind the parsed record JSON to an export index.
+    """
+    _require(type(paths) is list and bool(paths), "record paths must be a nonempty list")
+    normalized = []
+    for value in paths:
+        path = Path(value)
+        _require(".." not in path.parts, "unsafe record path traversal")
+        path = path.absolute()
+        for component in (path, *path.parents):
+            _require(not component.is_symlink(), "symlink component forbidden")
+        normalized.append(path)
+    root = normalized[0].parent
+    _require(all(path.parent == root for path in normalized), "record paths must share an export root")
+    _require(len(set(normalized)) == len(normalized), "duplicate record path")
+    if expected is not None:
+        _require(type(expected) is list and len(expected) == len(paths), "expected record descriptors length mismatch")
+        for path, desc in zip(normalized, expected):
+            _descriptor(desc)
+            _require(desc["path"] == path.name, "expected record descriptor path mismatch")
+    hashes, fingerprints, records = {}, {}, []
+    for index, path in enumerate(normalized):
+        with ExitStack() as stack:
+            files = _Files(root, stack, hashes, fingerprints)
+            record = files.read_json(path.name)
+            if expected is not None:
+                files.check(expected[index])
+            _validate(record, files)
+            records.append(record)
+    validate_partitions(records)
+    files.recheck()
+    return records
 
 
 def validate_partitions(records):
