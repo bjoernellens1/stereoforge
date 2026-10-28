@@ -120,3 +120,23 @@ add_dependencies(fp2_selection_fixture fp2_prototype_shader fp2_select_shaders)
 if(BUILD_TESTING)
   add_test(NAME fp2_selection_cpu_contracts COMMAND fp2_selection_fixture --cpu-only)
 endif()
+
+set(sf_fp2_integrated_host "${CMAKE_CURRENT_SOURCE_DIR}/apps/fp2_integrated_fixture.cpp")
+set(sf_fp2_integrated_reset "${CMAKE_CURRENT_SOURCE_DIR}/python/stereoforge/shaders/daxa/fp2_integrated_reset.slang")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${sf_fp2_integrated_host}" "${sf_fp2_integrated_reset}")
+file(SHA256 "${sf_fp2_integrated_host}" SF_FP2_INTEGRATED_HOST_SHA256)
+file(SHA256 "${sf_fp2_integrated_reset}" SF_FP2_INTEGRATED_RESET_SHA256)
+set(sf_fp2_integrated_spv "${CMAKE_CURRENT_BINARY_DIR}/fp2-integrated-reset.spv")
+add_custom_command(OUTPUT "${sf_fp2_integrated_spv}"
+  COMMAND "${SF_DAXA_SLANGC}" "${sf_fp2_integrated_reset}" -target spirv -profile spirv_1_5 -restrictive-capability-check -matrix-layout-row-major -fvk-use-scalar-layout -O3 -entry reset_cost -stage compute -o "${sf_fp2_integrated_spv}"
+  DEPENDS "${sf_fp2_integrated_reset}" VERBATIM)
+set(sf_fp2_integrated_identity "${CMAKE_CURRENT_BINARY_DIR}/fp2_integrated_identity.hpp")
+add_custom_command(OUTPUT "${sf_fp2_integrated_identity}"
+  COMMAND "${CMAKE_COMMAND}" -DINPUT=${sf_fp2_integrated_spv} -DOUTPUT=${sf_fp2_integrated_identity} -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Fp2IntegratedIdentity.cmake"
+  DEPENDS "${sf_fp2_integrated_spv}" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Fp2IntegratedIdentity.cmake" VERBATIM)
+add_custom_target(fp2_integrated_shader DEPENDS "${sf_fp2_integrated_spv}" "${sf_fp2_integrated_identity}")
+add_executable(fp2_integrated_fixture apps/fp2_integrated_fixture.cpp)
+target_link_libraries(fp2_integrated_fixture PRIVATE stereoforge_daxa_foundation)
+target_include_directories(fp2_integrated_fixture PRIVATE "${CMAKE_CURRENT_BINARY_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/_deps/vma-src/include")
+target_compile_definitions(fp2_integrated_fixture PRIVATE SF_FP2_SPIRV_PATH="${sf_fp2_spirv}" SF_FP2_SHADER_SHA256="${SF_FP2_SHADER_SHA256}" SF_FP2_HOST_SHA256="${SF_FP2_HOST_SHA256}" SF_FP2_COMPILER_PATH="${SF_DAXA_SLANGC}" SF_FP2_COST_SPIRV_PATH="${sf_fp2_cost_spirv}" SF_FP2_COST_SHADER_SHA256="${SF_FP2_COST_SHADER_SHA256}" SF_FP2_CENSUS_SPIRV_PATH="${sf_fp2_census_spirv}" SF_FP2_CENSUS_SHADER_SHA256="${SF_FP2_CENSUS_SHADER_SHA256}" SF_FP2_CENSUS_HELPER_SHA256="${SF_FP2_CENSUS_HELPER_SHA256}" SF_FP2_SELECT_SHADER_SHA256="${SF_FP2_SELECT_SHADER_SHA256}" SF_FP2_LUT_HOST_SHA256="${SF_FP2_LUT_HOST_SHA256}" SF_FP2_INTEGRATED_HOST_SHA256="${SF_FP2_INTEGRATED_HOST_SHA256}" SF_FP2_INTEGRATED_RESET_SHA256="${SF_FP2_INTEGRATED_RESET_SHA256}" SF_FP2_SELECT_DIR="${CMAKE_CURRENT_BINARY_DIR}" SF_FP2_INTEGRATED_SPIRV_PATH="${sf_fp2_integrated_spv}")
+add_dependencies(fp2_integrated_fixture fp2_prototype_shader fp2_image_shader fp2_census_shader fp2_select_shaders fp2_integrated_shader)
