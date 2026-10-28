@@ -5,6 +5,7 @@ option(STEREOFORGE_DAXA "Build the independent pinned Daxa + Slang foundation" O
 option(STEREOFORGE_RHI "Build the pinned Slang RHI Vulkan native stereo runtime" OFF)
 set(STEREOFORGE_RHI_PROVIDER "standalone" CACHE STRING "RHI provider: standalone production or slangpy research")
 set_property(CACHE STEREOFORGE_RHI_PROVIDER PROPERTY STRINGS standalone slangpy)
+option(STEREOFORGE_BUILD_ZED_REFERENCE "Build optional ZED SDK reference exporter" OFF)
 option(STEREOFORGE_CAPTURE "Build ZED Open Capture adapter" OFF)
 option(STEREOFORGE_NATIVE_CAPTURE "Build independent C++ capture" OFF)
 option(STEREOFORGE_DAXA_STEREO "Build native Daxa stereo experiments" OFF)
@@ -239,4 +240,8 @@ endif()
 
 if(TARGET stereoforge_daxa_depth)
   include(cmake/DaxaRefinement.cmake)
+endif()
+
+if(STEREOFORGE_BUILD_ZED_REFERENCE)
+  add_subdirectory(benchmarks/zed_comparison)
 endif()

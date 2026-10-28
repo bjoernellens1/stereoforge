@@ -1,8 +1,9 @@
 # Portable ZED comparison records (v1)
 
 This source-checkout module validates offline benchmark records without the SDK
-or a GPU. Batch validation and offline export indexing are implemented; the SDK
-exporter and native rectified adapter remain unimplemented.
+or a GPU. Batch validation, offline export indexing, and an optional SDK
+diagnostic exporter are implemented. Canonical SDK record export and the native
+rectified adapter remain open.
 See the [implementation plan](../../docs/superpowers/plans/2026-10-28-zed-quality-benchmark.md)
 and [schema contract](schema.py) for the remaining work and exact required keys.
 
@@ -46,7 +47,8 @@ rechecks all files before returning. Array mappings close after each record,
 including on failure. Separate calls rehash files; there is no global cache.
 These checks detect observed changes; they are not an atomic filesystem snapshot.
 
-Index only an immutable, completed export. Its `ROOT/export.json` is strict JSON
+Index only an immutable, completed canonical export; diagnostic captures below
+are not index inputs. Its `ROOT/export.json` is strict JSON
 with exactly `schema: "stereoforge.zed_comparison.export.v1"` and `records`, a
 nonempty list of FileDescs. Record paths must be unique flat `.json` basenames,
 excluding `export.json` and `index.json`; traversal and symlinks reject.
@@ -76,7 +78,8 @@ Raw/rectified calibration files are normalized JSON objects, each with exact key
 Supported models are `none` (0 coefficients), `brown_conrady` (4 or 5:
 `k1,k2,p1,p2[,k3]`), and `rational_polynomial` (8:
 `k1,k2,p1,p2,k3,k4,k5,k6`). Other models/counts reject; actual SDK normalization
-has not been implemented or qualified. `resolved_file` retains opaque vendor bytes.
+for canonical records has not been implemented or qualified. `resolved_file`
+retains opaque vendor bytes.
 `right_to_left` is a finite homogeneous proper rigid 4×4 transform with a nonzero
 translation. Both translation norms agree with the declared baseline within
 relative `1e-6` or absolute `1e-9 m`: a representation admission tolerance, not a
@@ -108,3 +111,38 @@ A complete frozen policy returns only `policy_ready`: structural readiness, not
 executed quality, SDK parity, physical accuracy or sustained 60 FPS qualification.
 Correctness, regions, zero-reference handling, uncertainty, statistics and the
 partition digest must be explicitly frozen; see the schema docstring for shapes.
+
+The optional reference exporter builds in an isolated directory with SDK 5.5.0,
+CUDA Toolkit, and OpenSSL 3 development files installed. CMake fetches the pinned
+nlohmann JSON dependency. This reference-only target leaves production Vulkan
+unchanged:
+
+```sh
+cmake -S . -B build/zed-reference -DBUILD_TESTING=OFF -DSTEREOFORGE_BUILD_ZED_REFERENCE=ON
+cmake --build build/zed-reference --target export_sdk
+```
+
+For a bounded diagnostic capture, supply an existing output parent directory and
+a fresh output directory path:
+
+```sh
+timeout --kill-after=10s 120s build/zed-reference/benchmarks/zed_comparison/export_sdk \
+  --operation capture-diagnostic --svo /private/input.svo \
+  --output /private/fresh-diagnostic --mode NONE --frames 2 \
+  --settings-dir /private/settings
+```
+
+The diagnostic preserves the source and captures all four native BGRA8 image
+views as exact decoded rows, with full calibration, timestamps, stride metadata,
+and hashes. Optional depth and confidence retain F32 bits; their availability is
+not evidence that SDK depth execution has been qualified. Alpha is not a validity
+mask. Known raw-pose and rectification-support gates remain open. Diagnostic
+capture produces no canonical `export.json` or index and establishes no support
+or qualification claim. CPU readback and file I/O form an explicit diagnostic
+boundary; capture timings are not real-time pipeline or FPS measurements.
+
+The `sdk_geometry` helpers `fit_ray_rotation` and `compare_rig_hypotheses` are
+for offline analysis only. Proper-rotation Q admission remains strict at `1e-10`;
+SDK input float representation uses a separate `1e-6` budget, with projection
+residuals reported. These representation checks do not establish physical
+calibration accuracy.
