@@ -316,12 +316,16 @@ Repeated static 720p-per-eye/D128/four-path/two-slot measurements of the combine
 independent stereo and View path give **33.98–35.85 ms GPU / 34.44–36.32 ms host**
 (ranges of four run means, 100 samples plus 20 warmups each). View itself takes
 about **2 ms**. Requested chain buffers total **1,032,292,504 bytes**; driver peak
-memory is not measured. These results exceed the 16.67 ms target. Native temporal/
-adaptive integration, physical accuracy and sustained fresh-camera 60 Hz remain
-open. See [depth-to-view evidence and commands](docs/daxa-view-depth-evidence.md).
+memory is not measured. These results exceed the 16.67 ms target. Adaptive integration, physical
+accuracy and sustained fresh-camera 60 Hz remain open. See [depth-to-view evidence and commands](docs/daxa-view-depth-evidence.md).
 
 The common [observation lease](docs/daxa-observation-contract.md) now lets the
 renderer consume retained metric/RGB buffers independently of the producer.
 [Its qualification](docs/daxa-observation-evidence.md) preserves exact outputs
-and bounded ownership. The new CPU temporal reference covers timed known motion
-and complete bounded ancestry; native temporal GPU execution remains next.
+and bounded ownership. The native temporal stage now supports timed known motion and complete bounded
+ancestry, with retained GPU observations. Its bounded qualification passes 46
+exact comparisons and a 303-frame synchronization stress run. Static 720p/D128
+Depth → Temporal → View GPU means are **36.67–37.73 ms**; general floating-point
+reference gates and live/physical quality remain open. See the
+[temporal contract](docs/daxa-temporal-contract.md) and
+[measurements and limitations](docs/daxa-temporal-evidence.md).

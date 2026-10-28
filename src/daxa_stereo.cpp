@@ -198,7 +198,7 @@ struct DaxaStereo::Impl {
     ~Impl(){auto& d=context->device;d.wait_idle();paired.reset();slots.clear();pipelines={};for(auto b:owned)if(d.is_id_valid(b))d.destroy_buffer(b);d.collect_garbage();memory.clear();}
     daxa::BufferId allocate(size_t size,const std::string& name,bool host=false){auto& d=context->device;daxa::BufferInfo info{.size=size,.name=name};daxa::BufferId b;if(host){auto m=d.create_memory({.requirements=context->coherent_readback_requirements(info),.flags=daxa::MemoryFlagBits::HOST_ACCESS_RANDOM});b=d.create_buffer_from_memory_block({.buffer_info=info,.memory_block=m});memory.push_back(std::move(m));}else b=d.create_buffer(info);owned.push_back(b);allocated+=size;return b;}
     void setup(std::span<const uint32_t> left,std::span<const uint32_t> right,unsigned count,const DaxaFrame* prototype=nullptr,bool shared_census=false,const Impl* descriptor_owner=nullptr);
-    void completed(Frame const& f)const{f.validate();require(f.slot_->submit<context->device.oldest_pending_submit_index(),"GPU completion required before query access");}
+    void completed(Frame const& f)const{f.validate();require(detail::completed_submission(f.slot_->submit,context->device.oldest_pending_submit_index()),"GPU completion required before query access");}
 };
 void DaxaStereo::Impl::setup(std::span<const uint32_t> left,std::span<const uint32_t> right,unsigned count,const DaxaFrame* prototype,bool shared_census,const Impl* descriptor_owner){
     bool derived=right_mode==DaxaRightReferenceMode::LeftAggregatedSelection;bool selector_only=derived&&reference==DaxaStereoReference::Right;if(selector_only){stages=1;query_count=4;}

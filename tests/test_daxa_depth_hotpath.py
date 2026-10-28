@@ -161,7 +161,7 @@ namespace daxa {using BufferId=uint64_t;constexpr int QUEUE_MAIN=0;}
 struct CaptureFrame {uint64_t frame_id=0;std::vector<uint8_t> packed_yuyv;};using CaptureLease=std::shared_ptr<const CaptureFrame>;
 struct Maps {std::string rectified_identity="rect";void validate_source(const CaptureFrame& f)const{require(f.packed_yuyv.size()==1280ull*2*720*2,"bad input");}};
 struct Parameters {std::array<uint64_t,8> inputs{};uint64_t source_id=0;};
-struct Device {uint64_t oldest=1,latest=0,snapshots=0,gc=0,uploads=0;auto oldest_pending_submit_index(){++snapshots;return oldest;}auto latest_queue_submit_index(int){return latest;}void collect_garbage(){++gc;}
+struct Device {uint64_t oldest=0,latest=0,snapshots=0,gc=0,uploads=0;auto oldest_pending_submit_index(){++snapshots;return oldest;}auto latest_queue_submit_index(int){return latest;}void collect_garbage(){++gc;}
  struct Address{uint64_t id;void* value(){return reinterpret_cast<void*>(id);}};Address buffer_host_address(uint64_t id){return {id};}
  struct DeviceAddress{uint64_t id;uint64_t value(){return id;}};DeviceAddress device_address(uint64_t id){return {id};}};
 struct Context{Device device;};
@@ -209,7 +209,7 @@ int main(){try{
  for(unsigned eye=0;eye<2;++eye){auto engine=std::make_unique<DaxaStereo>();engine->impl_=std::make_shared<StereoImpl>();engine->impl_->context=context;engine->impl_->reference=eye?DaxaStereoReference::Right:DaxaStereoReference::Left;for(unsigned i=0;i<2;++i)engine->impl_->slots.push_back(std::make_shared<StereoSlot>());(eye?e->right:e->left)=std::move(engine);}
  for(unsigned i=0;i<2;++i){auto s=std::make_shared<DaxaDepthPipeline::Slot>();s->parameters=reinterpret_cast<uintptr_t>(&s->data);s->graph=std::make_unique<Graph>(Graph{&context->device,false});e->slots.push_back(std::move(s));}
  auto owned=std::make_shared<CaptureFrame>();owned->frame_id=INT64_MAX;owned->packed_yuyv.resize(1280*2*720*2,173);CaptureLease source=owned;DaxaDepthPipeline pipeline;pipeline.impl_=e;
- auto complete=[&]{context->device.oldest=context->device.latest+1;};
+ auto complete=[&]{context->device.oldest=context->device.latest;};
  auto first=pipeline.enqueue(source);complete();auto second=pipeline.enqueue(source);complete();first.validate();second.validate();
  auto uploads=context->device.uploads,latest=context->device.latest;bool caught=false;try{auto third=pipeline.enqueue(source);}catch(const std::runtime_error&){caught=true;}
  check(caught&&context->device.uploads==uploads&&context->device.latest==latest,"full output ring uploaded/submitted");

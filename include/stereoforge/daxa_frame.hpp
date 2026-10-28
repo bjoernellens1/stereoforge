@@ -11,7 +11,10 @@ enum class DaxaPlaneFormat { Rgba8PackedUint32,Gray8InUint32,SupportUint32 };
 namespace detail {
 struct DaxaFrameOwner {std::shared_ptr<DaxaFoundation> context;virtual ~DaxaFrameOwner()=default;};
 struct DaxaFrameSlot {std::array<daxa::BufferId,8> planes{};uint64_t generation=0,submit=0;CaptureLease source;std::shared_ptr<const DaxaRectification> calibration;virtual ~DaxaFrameSlot()=default;};
-inline bool completed_submission(uint64_t submitted,uint64_t oldest_pending){return !submitted||submitted<oldest_pending;}
+// Pinned Daxa 00761e80: oldest_pending_submit_index() returns the minimum
+// INCLUSIVE completed global ticket across pending queues, or UINT64_MAX when
+// idle. Each queue signals the globally assigned submission ticket unchanged.
+inline bool completed_submission(uint64_t submitted,uint64_t oldest_pending){return !submitted||submitted<=oldest_pending;}
 inline bool available_slot(long references,uint64_t submitted,uint64_t oldest_pending){return references==1&&completed_submission(submitted,oldest_pending);}
 }
 class DaxaPreprocess;

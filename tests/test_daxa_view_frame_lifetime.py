@@ -1,3 +1,4 @@
+import pytest
 """Exercise the actual Frame special members with CPU-only owner/slot children."""
 from pathlib import Path
 import shutil
@@ -8,15 +9,17 @@ from test_daxa_depth_hotpath import definition
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_actual_frame_assignment_releases_children_before_context(tmp_path):
+@pytest.mark.parametrize("stage", ["view", "temporal"])
+def test_actual_frame_assignment_releases_children_before_context(tmp_path, stage):
     compiler = shutil.which('c++')
     assert compiler, 'CPU lifetime regression requires a C++ compiler'
-    header = (ROOT/'include/stereoforge/daxa_view.hpp').read_text()
+    header = (ROOT/f'include/stereoforge/daxa_{stage}.hpp').read_text()
     start = header.index('    class Frame {')
     frame = header[start:header.index('\n    };', start)+7]
-    source = (ROOT/'src/daxa_view.cpp').read_text()
-    methods = definition(source, 'DaxaView::Frame::Frame(')
-    signature = 'DaxaView::Frame& DaxaView::Frame::operator=('
+    source = (ROOT/f'src/daxa_{stage}.cpp').read_text()
+    class_name = 'Daxa' + stage.capitalize()
+    methods = definition(source, class_name + '::Frame::Frame(')
+    signature = class_name + '::Frame& ' + class_name + '::Frame::operator=('
     if signature in source:
         methods += definition(source, signature)
     program = r'''
@@ -29,6 +32,7 @@ def test_actual_frame_assignment_releases_children_before_context(tmp_path):
 #include <iostream>
 namespace daxa {struct BufferId{};}
 namespace stereoforge {
+class DaxaObservationFrame;class DaxaObservationAncestryView;struct DaxaTemporalTiming;
 struct GeometryConfig{};struct CaptureFrame{};using CaptureLease=std::shared_ptr<CaptureFrame>;
 enum class DepthConvention{AxialZ};
 struct State{unsigned violations=0,closed=0,slots_destroyed=0;};
@@ -62,6 +66,7 @@ int main(){try{
  return 0;
  }catch(std::exception const& e){std::cerr<<e.what()<<'\n';return 1;}}
 '''
+    program = program.replace('DaxaView', class_name)
     cpp=tmp_path/'frame_lifetime.cpp';cpp.write_text(program)
     binary=tmp_path/'frame_lifetime'
     compiled=subprocess.run([compiler,'-std=c++20','-O2','-Wall','-Wextra','-Werror',str(cpp),'-o',str(binary)],capture_output=True,text=True)

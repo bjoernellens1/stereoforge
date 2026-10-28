@@ -35,6 +35,7 @@ public:
         std::string calibration_id() const;
         GeometryConfig config() const;
         CaptureLease source()const;
+        DaxaObservationFrame source_observations()const;
         DepthConvention depth_convention()const;
         uint64_t start_tick()const;uint64_t end_tick()const;
     };

@@ -274,7 +274,7 @@ int main(){using namespace stereoforge;DaxaStereo engine;engine.impl_=std::make_
  if(engine.collect_completed_inputs_at(5)!=2||output0->input||output1->input||capture_pool[0].expired()||capture_pool[1].expired()){std::cerr<<"GPU input must retire while retained output metadata survives";return 1;}
  output0.reset();output1.reset();engine.collect_completed_inputs_at(5);
  if(!capture_pool[0].expired()||!capture_pool[1].expired()){std::cerr<<"completed unleased output metadata keeps Capture pool slots pinned";return 2;}
- auto source=std::make_shared<CaptureFrame>();capture_pool[0]=source;engine.impl_->slots[0]->source=std::move(source);engine.impl_->slots[0]->submit=5;engine.collect_completed_inputs_at(5);
+ auto source=std::make_shared<CaptureFrame>();capture_pool[0]=source;engine.impl_->slots[0]->source=std::move(source);engine.impl_->slots[0]->submit=6;engine.collect_completed_inputs_at(5);
  if(capture_pool[0].expired()){std::cerr<<"inflight metadata retired before completion";return 3;}
 }
 '''.replace('HELPER', helper).replace('RETIREMENT', retirement)
@@ -339,18 +339,18 @@ int main(int argc,char** argv){try{
   CaptureFrame frame;frame.source_width=c.eye_width*2;frame.height=c.source_height;frame.stride_bytes=c.stride_bytes;frame.calibration_identity=c.original_identity;frame.packed_yuyv.resize(size_t(c.stride_bytes)*c.source_height);
   std::ifstream f(argv[7],std::ios::binary);f.read(reinterpret_cast<char*>(frame.packed_yuyv.data()),frame.packed_yuyv.size());for(auto& map:c.maps){map.resize(size_t(c.width)*c.height);f.read(reinterpret_cast<char*>(map.data()),map.size()*sizeof(float));}require(bool(f),"fixture data read");auto out=daxa_preprocess_reference(frame,c);for(const auto& plane:out.planes)std::cout.write(reinterpret_cast<const char*>(plane.data()),plane.size()*4);return 0;
  }
- require(detail::available_slot(1,0,0)&&detail::available_slot(1,5,6),"free completed slot");
- require(!detail::available_slot(2,0,99)&&!detail::available_slot(1,5,5)&&!detail::available_slot(1,6,5),"retained or inflight slot");
+ require(detail::available_slot(1,0,0)&&detail::available_slot(1,5,5),"free completed slot");
+ require(!detail::available_slot(2,5,5)&&!detail::available_slot(1,6,5),"retained or inflight slot");
  DaxaPreprocess e;e.impl_=std::make_shared<Impl>();auto& impl=*e.impl_;impl.context=std::make_shared<Context>();impl.calibration=std::make_shared<DaxaRectification>();auto& c=*impl.calibration;c.eye_width=1280;c.source_height=720;c.stride_bytes=5120;c.width=1280;c.height=720;
  require(c.requested_bytes(1)==66355328&&c.requested_bytes(2)==103219456,"count-dependent retained maps/staging/planes memory budget");
  std::array<std::vector<uint8_t>,2> staging;for(unsigned i=0;i<2;++i){staging[i].resize(size_t(c.stride_bytes)*c.source_height);impl.context->device.address[i]=staging[i].data();auto slot=std::make_shared<Slot>();slot->buffers[Staging]=i;slot->graph=std::make_unique<Graph>();slot->graph->device=&impl.context->device;impl.slots.push_back(std::move(slot));}
  auto source=std::make_shared<CaptureFrame>();source->source_width=2560;source->height=720;source->stride_bytes=5120;source->calibration_identity=c.original_identity;source->packed_yuyv.resize(5120*720,173);source->controls_json=std::string(4096,'x');source->imu_samples.resize(128);
  auto rejected=[&](CaptureLease input,uint64_t oldest){auto submitted=impl.context->device.submitted;bool threw=false;try{e.enqueue_at(std::move(input),oldest);}catch(const std::exception&){threw=true;}require(threw&&impl.context->device.submitted==submitted,"rejected admission cannot submit work");};
  auto bad=std::make_shared<CaptureFrame>(*source);bad->calibration_identity="other";rejected(bad,1);bad->calibration_identity=c.original_identity;bad->stride_bytes+=1;rejected(bad,1);bad->stride_bytes=c.stride_bytes;bad->packed_yuyv.pop_back();rejected(bad,1);rejected({},1);
- auto one=[&]{auto oldest=impl.context->device.submitted+1;e.collect_completed_sources_at(oldest);auto frame=e.enqueue_at(source,oldest);require(frame.slot->source.get()==source.get(),"source metadata must use the original CaptureLease");auto& copied=staging[frame.slot->buffers[Staging]];asm volatile("" : : "r"(copied.data()) : "memory");require(copied.back()==173,"copied payload");};
+ auto one=[&]{auto oldest=impl.context->device.submitted;e.collect_completed_sources_at(oldest);auto frame=e.enqueue_at(source,oldest);require(frame.slot->source.get()==source.get(),"source metadata must use the original CaptureLease");auto& copied=staging[frame.slot->buffers[Staging]];asm volatile("" : : "r"(copied.data()) : "memory");require(copied.back()==173,"copied payload");};
  for(unsigned i=0;i<16;++i)one();allocations=0;tracking=true;auto start=std::chrono::steady_clock::now();for(unsigned i=0;i<256;++i)one();auto ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();tracking=false;
- {auto first=e.enqueue_at(source,impl.context->device.submitted+1);auto second=e.enqueue_at(source,impl.context->device.submitted+1);require(e.collect_completed_sources_at(impl.context->device.submitted+1)==0,"retained GPU slots cannot retire source");rejected(source,impl.context->device.submitted+1);}
- rejected(source,0);require(e.collect_completed_sources_at(impl.context->device.submitted+1)==2,"released completed slots retire in bounded scan");
+ {auto first=e.enqueue_at(source,impl.context->device.submitted);auto second=e.enqueue_at(source,impl.context->device.submitted);require(e.collect_completed_sources_at(impl.context->device.submitted)==0,"retained GPU slots cannot retire source");rejected(source,impl.context->device.submitted);}
+ rejected(source,0);require(e.collect_completed_sources_at(impl.context->device.submitted)==2,"released completed slots retire in bounded scan");
  std::cout<<"{\"frames\":256,\"bytes_per_frame\":"<<source->packed_yuyv.size()<<",\"application_allocations\":"<<allocations<<",\"admission_copy_retirement_mean_ms\":"<<ms/256<<"}\n";
  return 0;
 }catch(const std::exception& e){std::cerr<<e.what();return 1;}}

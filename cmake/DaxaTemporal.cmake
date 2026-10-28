@@ -1,0 +1,27 @@
+include_guard(GLOBAL)
+set(sf_temporal_spirv)
+file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/shaders/daxa/temporal.slang" SF_DAXA_TEMPORAL_WRAPPER_SHA256)
+file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/shaders/ops/temporal.slang" SF_DAXA_TEMPORAL_OPS_SHA256)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS shaders/daxa/temporal.slang shaders/ops/temporal.slang)
+foreach(entry clear splat_z splat_owner gather_fuse)
+  set(output "${CMAKE_CURRENT_BINARY_DIR}/daxa-temporal-${entry}.spv")
+  add_custom_command(OUTPUT "${output}"
+    COMMAND "${SF_DAXA_SLANGC}" "${CMAKE_CURRENT_SOURCE_DIR}/shaders/daxa/temporal.slang"
+      -target spirv -profile spirv_1_5 -restrictive-capability-check -matrix-layout-row-major -fvk-use-scalar-layout -O3
+      -entry "${entry}" -stage compute -o "${output}"
+    DEPENDS shaders/daxa/temporal.slang shaders/ops/temporal.slang VERBATIM)
+  list(APPEND sf_temporal_spirv "${output}")
+endforeach()
+add_custom_target(daxa_temporal_shaders DEPENDS ${sf_temporal_spirv})
+add_library(stereoforge_daxa_temporal src/daxa_temporal.cpp)
+target_link_libraries(stereoforge_daxa_temporal PUBLIC stereoforge_daxa_depth PRIVATE GPUOpen::VulkanMemoryAllocator)
+target_compile_definitions(stereoforge_daxa_temporal PRIVATE SF_DAXA_TEMPORAL_SPIRV_DIRECTORY="${CMAKE_CURRENT_BINARY_DIR}" SF_DAXA_TEMPORAL_WRAPPER_SHA256="${SF_DAXA_TEMPORAL_WRAPPER_SHA256}" SF_DAXA_TEMPORAL_OPS_SHA256="${SF_DAXA_TEMPORAL_OPS_SHA256}")
+add_dependencies(stereoforge_daxa_temporal daxa_temporal_shaders)
+if(BUILD_TESTING)
+  add_executable(daxa_temporal_contracts tests/daxa_temporal.cpp)
+  target_link_libraries(daxa_temporal_contracts PRIVATE stereoforge_daxa_temporal)
+  add_test(NAME daxa_temporal_cpu_contracts COMMAND daxa_temporal_contracts --cpu-only)
+endif()
+add_executable(daxa_temporal_benchmark apps/daxa_temporal_benchmark.cpp)
+target_link_libraries(daxa_temporal_benchmark PRIVATE stereoforge_daxa_temporal stereoforge_daxa_view GPUOpen::VulkanMemoryAllocator)
+target_include_directories(daxa_temporal_benchmark PRIVATE "$<TARGET_PROPERTY:daxa_depth_benchmark,INCLUDE_DIRECTORIES>")

@@ -36,3 +36,5 @@ if(BUILD_TESTING)
   add_test(NAME daxa_depth_gpu_contracts COMMAND daxa_depth_contracts --gpu)
   set_tests_properties(daxa_depth_gpu_contracts PROPERTIES LABELS "vulkan;hardware;daxa")
 endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/DaxaTemporal.cmake")

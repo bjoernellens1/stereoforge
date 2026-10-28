@@ -94,7 +94,7 @@ def test_enqueue_polls_completion_and_reclaims_daxa_recorder_pools_before_execut
         assert project.index("collect_garbage()") < project.index("execute({})")
         # Both retained consumers and uncompleted submissions prevent reuse.
         before_execute = code_only(project[:project.index("execute({})")])
-        assert "s.use_count()==1" in before_execute and "s->submit<pending" in before_execute
+        assert "detail::available_slot(s.use_count(),s->submit,pending)" in before_execute
         assert "for(auto& s:e.slots)" in before_execute
 
 
@@ -124,7 +124,7 @@ def test_gpu_timestamp_uses_actual_queue_capabilities_availability_and_valid_bit
     for method in ("start_tick", "end_tick"):
         timing = block(source, source.index("uint64_t DaxaView::Frame::"+method+"("))[0]
         assert timing.index("oldest_pending_submit_index()") < timing.index("daxa_timeline_query_pool_query_results(")
-        assert "slot_->submit<owner_->context->device.oldest_pending_submit_index()" in timing
+        assert "detail::completed_submission(slot_->submit,owner_->context->device.oldest_pending_submit_index())" in timing
         assert "values[1]" in timing and "values[3]" in timing
         assert "slot_->queries.get(),0,2,values.data()" in timing
     timing = block(source, source.index("double DaxaView::Frame::gpu_ms("))[0]

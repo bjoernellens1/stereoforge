@@ -36,8 +36,8 @@ def check_view_hotpath(source):
     assert 'for(' not in bind and 'while(' not in bind, 'binding is a fixed scalar address update'
     assert 'slot.input=frame' in bind and 'slot.source=frame.source()' in bind and 'slot.timestamp=' in bind
     retire = body(source, 'size_t collect_at(')
-    assert retire.index('slot.use_count()==1') < retire.index('slot->input={}')
-    assert 'slot->submit<pending' in retire and 'slot->source.reset()' in retire
+    assert retire.index('detail::available_slot(slot.use_count(),slot->submit,pending)') < retire.index('slot->input={}')
+    assert 'detail::available_slot(slot.use_count(),slot->submit,pending)' in retire and 'slot->source.reset()' in retire
     assert retire.count('for(') == 1 and 'while(' not in retire
     assert 'oldest_pending_submit_index' not in retire
     admission = body(source, 'bool DaxaView::can_project(')
@@ -47,7 +47,7 @@ def check_view_hotpath(source):
     assert project.count('for(') == 1 and 'while(' not in project, 'only bounded slot admission may loop'
     assert project.count('oldest_pending_submit_index(') == 1 and 'collect_at(pending)' in project
     assert project.index('e.validate_frame(input)') < project.index('oldest_pending_submit_index(') < project.index('e.bind(') < project.index('graph->execute(')
-    assert 's.use_count()==1' in project and 's->submit<pending' in project
+    assert 'detail::available_slot(s.use_count(),s->submit,pending)' in project
     assert 's->generation=e.next_generation++' in project and 's->visited==8&&s->finished==8' in project
 
 
@@ -126,10 +126,13 @@ void* operator new(std::size_t n){if(tracking)++allocations;if(auto p=std::mallo
 void* operator new[](std::size_t n){return ::operator new(n);}void operator delete(void* p)noexcept{std::free(p);}void operator delete[](void* p)noexcept{std::free(p);}void operator delete(void* p,std::size_t)noexcept{std::free(p);}void operator delete[](void* p,std::size_t)noexcept{std::free(p);}
 namespace stereoforge {
 void require(bool b,const char* m){if(!b)throw std::invalid_argument(m);}
+namespace detail{
+SHARED_COMPLETION_HELPERS
+}
 namespace daxa {using BufferId=uint64_t;constexpr int QUEUE_MAIN=0;}
 struct CaptureFrame{uint64_t frame_id=0,host_ingress_timestamp_ns=0;};using CaptureLease=std::shared_ptr<const CaptureFrame>;
 struct Maps{};
-struct Device{uint64_t oldest=1,latest=0,snapshots=0,gc=0;void collect_garbage(){++gc;}void* get(){return this;}uint64_t oldest_pending_submit_index(){++snapshots;return oldest;}uint64_t latest_queue_submit_index(int){return latest;}struct Host{uint64_t id;void* value(){return reinterpret_cast<void*>(id);}};Host buffer_host_address(uint64_t id){return {id};}struct Address{uint64_t id;uint64_t value(){return id;}};Address device_address(uint64_t id){return {id};}};
+struct Device{uint64_t oldest=0,latest=0,snapshots=0,gc=0;void collect_garbage(){++gc;}void* get(){return this;}uint64_t oldest_pending_submit_index(){++snapshots;return oldest;}uint64_t latest_queue_submit_index(int){return latest;}struct Host{uint64_t id;void* value(){return reinterpret_cast<void*>(id);}};Host buffer_host_address(uint64_t id){return {id};}struct Address{uint64_t id;uint64_t value(){return id;}};Address device_address(uint64_t id){return {id};}};
 struct Context{Device device;};
 enum class DaxaObservationPlane{Depth,Confidence,Validity,Provenance,SourceIds,AgeNs};
 enum class DaxaObservationImage{OriginalLeft,OriginalRight,RectifiedLeft,RectifiedRight};
@@ -158,7 +161,7 @@ int main(){try{
  std::array<detail::DepthViewParameters,2> parameters{};
  for(unsigned i=0;i<2;++i){auto slot=std::make_shared<DaxaView::Slot>();for(auto name:{"parameters","source_depth","source_confidence","source_provenance","source_ids","source_ages","source_rgb","rectified_right_rgb","original_left_rgb","original_right_rgb"}){slot->buffers.emplace(name,0);slot->external.emplace(name,External{});}slot->buffers.find("parameters")->second=reinterpret_cast<uintptr_t>(&parameters[i]);slot->graph=std::make_unique<Graph>(Graph{&context->device,&slot->visited,&slot->finished});engine->slots.push_back(std::move(slot));}
  std::array<DaxaObservationFrame,2> inputs;for(unsigned i=0;i<2;++i){auto s=std::make_shared<CaptureFrame>();s->frame_id=7;s->host_ingress_timestamp_ns=100+i;auto in=std::make_shared<Input>();in->context=context;in->maps=engine->maps;in->source=s;in->marker=1000+100*i;inputs[i].owner=context;inputs[i].input=std::move(in);}
- auto complete=[&]{context->device.oldest=context->device.latest+1;};
+ auto complete=[&]{context->device.oldest=context->device.latest;};
  check(view.can_project(),"initial admission failed");auto first=view.project(inputs[0]);complete();auto second=view.project(inputs[1]);complete();check(first.source()==inputs[0].source()&&second.source()==inputs[1].source(),"slot source metadata overwritten");check(first.timestamp_ns()==100&&second.timestamp_ns()==101,"slot timestamp changed");check(first.generation()!=second.generation(),"same source ID generations aliased");
  auto submissions=context->device.latest;unsigned upstream_uploads=0;auto offer=[&]{if(!view.can_project())return false;++upstream_uploads;return true;};check(!offer()&&upstream_uploads==0&&context->device.latest==submissions,"retained ring accepted upstream upload");check(view.collect()==0,"retained input retired");first={};second={};check(view.collect()==2,"completed unleased inputs not retired");for(auto& s:engine->slots)check(!s->input&&!s->source,"retirement kept hidden producer");
  auto inflight=view.project(inputs[0]);inflight={};submissions=context->device.latest;check(bool(engine->slots[0]->input),"inflight producer lost");check(view.collect()==0,"inflight input retired");complete();check(view.collect()==1,"completed producer not retired");
@@ -191,6 +194,9 @@ int main(){try{
     program = program.replace('s->buffers.size()==10&&s->external.size()==10', f's->buffers.size()=={len(names)}&&s->external.size()=={len(names)}')
     program = program.replace(':20,', ':'+str(2*len(names))+',')
     directory = tmp_path_factory.mktemp('view-depth-bookkeeping')
+    frame_source=(ROOT/'include/stereoforge/daxa_frame.hpp').read_text()
+    shared=definition(frame_source,'inline bool completed_submission(')+definition(frame_source,'inline bool available_slot(')
+    program=program.replace('SHARED_COMPLETION_HELPERS',shared)
     code = directory/'probe.cpp';code.write_text(program);binary = directory/'probe'
     result = subprocess.run([compiler, '-std=c++20', '-O3', '-I'+str(ROOT/'include'), str(code), '-o', str(binary)], capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stderr
@@ -218,11 +224,11 @@ def test_actual_view_probe_detects_hot_allocation_and_retained_slot_overwrite(tm
             return source.replace(marker, marker+'auto allocation_guard=std::make_shared<int>(42);', 1)
         if mutation == 'upstream_admission':
             start = source.index('bool DaxaView::can_project(')
-            before = 'slot.use_count()==1&&(!slot->submit||slot->submit<pending)'
+            before = 'detail::available_slot(slot.use_count(),slot->submit,pending)'
             assert before in source[start:]
             return source[:start]+source[start:].replace(before, 'true', 1)
         start = source.index(marker)
-        before = 's.use_count()==1&&(!s->submit||s->submit<pending)'
+        before = 'detail::available_slot(s.use_count(),s->submit,pending)'
         assert before in source[start:]
         return source[:start]+source[start:].replace(before, 'true', 1)
     binary = build_view_probe(tmp_path_factory, transform)

@@ -26,7 +26,7 @@ def test_guard_and_mutations():
     adapter=definition((ROOT/'src/daxa_depth.cpp').read_text(),'DaxaObservationFrame DaxaDepthPipeline::Frame::observations(')
     header=(ROOT/'include/stereoforge/daxa_observation.hpp').read_text()
     assert header.index('context_;') < header.index('owner_,lease_;') < header.index('maps_;')
-    assert header.index('DaxaObservationFrame(std::shared_ptr') < header.index('public:',header.index('class DaxaObservationFrame'))
+    assert header.index('DaxaObservationFrame(std::shared_ptr') < header.index('public:',header.index('class DaxaObservationFrame {'))
     assert 'std::array<daxa::BufferId,6> planes_' in header and 'std::array<DaxaObservationImageView,4> images_' in header
     check_hot(source,adapter)
     for mutation in ['std::make_shared<int>();','ready();','memcpy(a,b,n);']:
@@ -60,7 +60,9 @@ struct DaxaFoundation{Device device;};
 struct DaxaRectification{unsigned width=7,height=5,eye_width=11,source_height=13,stride_bytes=88;std::string original_identity=std::string(200,'c');};
 struct CaptureFrame{unsigned source_width=22,height=13,stride_bytes=88;std::string calibration_identity=std::string(200,'c'),clock=std::string(200,'t');};using CaptureLease=std::shared_ptr<const CaptureFrame>;
 enum class DaxaPlaneFormat{Rgba8PackedUint32};
-namespace detail{bool completed_submission(uint64_t a,uint64_t b){return !a||a<b;}}
+namespace detail{
+SHARED_COMPLETION_HELPERS
+}
 }
 '''+header[header.index('namespace stereoforge {'):]+r'''
 namespace stereoforge {
@@ -93,6 +95,9 @@ int main(){try{
     for name in ('DaxaPreprocessPlane','DaxaPlaneFormat'):
         actual=re.search(r'enum class '+name+r'[^;]+;',frame_header)[0]
         program=re.sub(r'enum class '+name+r'[^;]+;',lambda _:actual,program)
+    frame_source=(ROOT/'include/stereoforge/daxa_frame.hpp').read_text()
+    shared=definition(frame_source,'inline bool completed_submission(')+definition(frame_source,'inline bool available_slot(')
+    program=program.replace('SHARED_COMPLETION_HELPERS',shared)
     code=tmp_path/'probe.cpp';code.write_text(program);binary=tmp_path/'probe'
     built=subprocess.run([compiler,'-std=c++20','-O3',str(code),'-o',str(binary)],capture_output=True,text=True,timeout=60)
     assert built.returncode==0,built.stderr
