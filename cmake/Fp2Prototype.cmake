@@ -92,3 +92,31 @@ target_include_directories(fp2_720p_fixture PRIVATE "${CMAKE_CURRENT_BINARY_DIR}
 target_compile_definitions(fp2_720p_fixture PRIVATE SF_FP2_SPIRV_PATH="${sf_fp2_spirv}" SF_FP2_SHADER_SHA256="${SF_FP2_SHADER_SHA256}" SF_FP2_HOST_SHA256="${SF_FP2_HOST_SHA256}" SF_FP2_COMPILER_PATH="${SF_DAXA_SLANGC}" SF_FP2_COST_SPIRV_PATH="${sf_fp2_cost_spirv}" SF_FP2_COST_SHADER_SHA256="${SF_FP2_COST_SHADER_SHA256}" SF_FP2_CENSUS_SPIRV_PATH="${sf_fp2_census_spirv}" SF_FP2_CENSUS_SHADER_SHA256="${SF_FP2_CENSUS_SHADER_SHA256}" SF_FP2_CENSUS_HELPER_SHA256="${SF_FP2_CENSUS_HELPER_SHA256}" SF_FP2_720_HOST_SHA256="${SF_FP2_720_HOST_SHA256}")
 add_dependencies(fp2_720p_fixture fp2_prototype_shader fp2_image_shader fp2_census_shader)
 target_include_directories(fp2_720p_fixture PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/_deps/vma-src/include")
+
+set(sf_fp2_select_shader "${CMAKE_CURRENT_SOURCE_DIR}/python/stereoforge/shaders/daxa/fp2_selection.slang")
+set(sf_fp2_select_host "${CMAKE_CURRENT_SOURCE_DIR}/apps/fp2_selection_fixture.cpp")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${sf_fp2_select_shader}" "${sf_fp2_select_host}" "${CMAKE_CURRENT_SOURCE_DIR}/apps/fp2_metric_lut.hpp")
+file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/apps/fp2_metric_lut.hpp" SF_FP2_LUT_HOST_SHA256)
+file(SHA256 "${sf_fp2_select_shader}" SF_FP2_SELECT_SHADER_SHA256)
+file(SHA256 "${sf_fp2_select_host}" SF_FP2_SELECT_HOST_SHA256)
+foreach(entry reset_workspace select_packed consistency metric)
+  set(spv "${CMAKE_CURRENT_BINARY_DIR}/fp2-select-${entry}.spv")
+  set(identity "${CMAKE_CURRENT_BINARY_DIR}/fp2-select-${entry}.hpp")
+  string(TOUPPER "${entry}" upper_entry)
+  add_custom_command(OUTPUT "${spv}"
+    COMMAND "${SF_DAXA_SLANGC}" "${sf_fp2_select_shader}" -target spirv -profile spirv_1_5 -restrictive-capability-check -matrix-layout-row-major -fvk-use-scalar-layout -O3 -entry "${entry}" -stage compute -o "${spv}"
+    DEPENDS "${sf_fp2_select_shader}" VERBATIM)
+  add_custom_command(OUTPUT "${identity}"
+    COMMAND "${CMAKE_COMMAND}" -DINPUT=${spv} -DOUTPUT=${identity} -DSYMBOL=SF_FP2_${upper_entry}_SHA256 -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Fp2SelectionIdentity.cmake"
+    DEPENDS "${spv}" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Fp2SelectionIdentity.cmake" VERBATIM)
+  list(APPEND sf_fp2_select_outputs "${spv}" "${identity}")
+endforeach()
+add_custom_target(fp2_select_shaders DEPENDS ${sf_fp2_select_outputs})
+add_executable(fp2_selection_fixture apps/fp2_selection_fixture.cpp)
+target_link_libraries(fp2_selection_fixture PRIVATE stereoforge_daxa_foundation)
+target_include_directories(fp2_selection_fixture PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+target_compile_definitions(fp2_selection_fixture PRIVATE SF_FP2_SPIRV_PATH="${sf_fp2_spirv}" SF_FP2_SHADER_SHA256="${SF_FP2_SHADER_SHA256}" SF_FP2_HOST_SHA256="${SF_FP2_HOST_SHA256}" SF_FP2_COMPILER_PATH="${SF_DAXA_SLANGC}" SF_FP2_SELECT_SHADER_SHA256="${SF_FP2_SELECT_SHADER_SHA256}" SF_FP2_SELECT_HOST_SHA256="${SF_FP2_SELECT_HOST_SHA256}" SF_FP2_LUT_HOST_SHA256="${SF_FP2_LUT_HOST_SHA256}" SF_FP2_SELECT_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+add_dependencies(fp2_selection_fixture fp2_prototype_shader fp2_select_shaders)
+if(BUILD_TESTING)
+  add_test(NAME fp2_selection_cpu_contracts COMMAND fp2_selection_fixture --cpu-only)
+endif()

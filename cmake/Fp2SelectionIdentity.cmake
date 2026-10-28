@@ -1,0 +1,5 @@
+if(NOT EXISTS "${INPUT}" OR NOT DEFINED OUTPUT OR NOT DEFINED SYMBOL)
+  message(FATAL_ERROR "FP2 selection identity missing")
+endif()
+file(SHA256 "${INPUT}" digest)
+file(WRITE "${OUTPUT}" "#pragma once\n#define ${SYMBOL} \"${digest}\"\n")
