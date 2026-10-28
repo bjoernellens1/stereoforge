@@ -350,6 +350,11 @@ separate fresh observations, historical output, motion-aligned error, recovery a
 epipolar diagnostics. Their synthetic contract tests do not qualify physical depth,
 SDK parity or live 60 FPS delivery.
 
+[Matched performance records](docs/matched-performance-records.md) retain raw
+samples and separate cold setup, resident GPU completion, CPU output and opaque
+SDK API timing. Comparisons require qualified inputs and complete interleaving;
+cross-platform results do not become algorithmic speedup ratios.
+
 An experimental native `DaxaRefinement` now adds independent full-resolution
 local Census matching, LR checks and metric outputs while retaining GPU resources.
 All six radius/subpixel cases pass exact discrete checks and conditional float

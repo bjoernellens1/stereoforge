@@ -170,13 +170,15 @@ obsolete-setting warnings.
 **Files:** Create `benchmarks/zed_comparison/performance.py`, `tests/test_zed_performance.py`; extend isolated `export_sdk.cpp` with `--operation benchmark` and narrowly modify `apps/daxa_depth_benchmark.cpp` and `apps/daxa_refinement_benchmark.cpp` report metadata only where missing.
 **Interfaces:** Consumes quality-qualified profile IDs, frozen records and native/SDK timing reports. Produces `validate_timing_lane(record: dict) -> None`, `summarize_timing(records: list[dict]) -> dict`.
 
-- [ ] RED: add `test_reject_mixed_completion_boundaries`, `test_cold_separate_from_warm`, `test_cross_platform_not_speedup`, `test_incomplete_interleaving_unqualified`.
-- [ ] Run `python -m pytest tests/test_zed_performance.py -q`; expect missing interface failure.
-- [ ] Record cold preparation, warmed GPU stages/upload/readback/synchronization/CPU/file-I/O/publication separately; retain raw samples and p50/p95/p99/max, allocation/cache mode and actual resident/host-output completion boundary.
-- [ ] Separate the image/depth export pass from timing: no disk writes, diagnostic image retrieval or unnecessary output requests in a measured compute lane. The SDK benchmark uses the same frozen session/settings as its quality export, with actual completion and replay pacing recorded; its internal preprocessing remains opaque.
-- [ ] Mark unavailable SDK stages unavailable; opaque grab cost is not isolated matching. Same-GPU NVIDIA Vulkan/SDK is a runtime comparison; AMD/NVIDIA are platform operating points.
-- [ ] GREEN: rerun named tests; root admits complete controlled interleaved timing only after quality/policy gates, with source/compiler/SPIR-V/input freezes and before/after contention admission.
-- [ ] Review transfer-inclusive comparability; stage explicit Task 6 files and commit `feat: record matched stereo performance boundaries`.
+- [x] RED: add `test_reject_mixed_completion_boundaries`, `test_cold_separate_from_warm`, `test_cross_platform_not_speedup`, `test_incomplete_interleaving_unqualified`.
+- [x] Run `python -m pytest tests/test_zed_performance.py -q`; expect missing interface failure.
+- [x] Record cold preparation, warmed GPU stages/upload/readback/synchronization/CPU/file-I/O/publication separately; retain raw samples and p50/p95/p99/max, allocation/cache mode and actual resident/host-output completion boundary.
+- [x] Separate the image/depth export pass from timing: no disk writes, diagnostic image retrieval or unnecessary output requests in a measured compute lane. The SDK benchmark uses the same frozen session/settings as its quality export, with actual completion and replay pacing recorded; its internal preprocessing remains opaque.
+- [x] Mark unavailable SDK stages unavailable; opaque grab cost is not isolated matching. Same-GPU NVIDIA Vulkan/SDK is a runtime comparison; AMD/NVIDIA are platform operating points.
+- [ ] GREEN: portable tests pass; root still must admit complete controlled interleaved timing only after quality/policy gates, with source/compiler/SPIR-V/input freezes and before/after contention admission.
+- [x] Review transfer-inclusive comparability; stage explicit Task 6 files and commit `feat: record matched stereo performance boundaries`.
+
+**Software checkpoint 2026-10-28:** Strict raw timing admission, native additive metadata and an isolated SDK timing-only opaque API operation are implemented. 2,507 CPU tests passed, 37 GPU/camera tests deselected, no skips (140.43 s); independent functional/performance reviews passed. Three actual native targets and the optional SDK 5.5.0 target compiled; SDK version query ran without an exposed GPU. Native measured loops are unchanged. SDK sampling skips diagnostic buffers, retrieval and file I/O. Synthetic ABBA exercises and retained old-report rejection are software evidence, not executed matched GPU/SDK performance. Quality-qualified SDK/canonical inputs, frozen physical/held-out policy and actual complete interleaved measurements remain open. [Usage, limits and reproduction](../../matched-performance-records.md).
 
 ### Task 7: Sustained delivery, ROS 2 and final report
 

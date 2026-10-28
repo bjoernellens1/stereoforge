@@ -22,7 +22,9 @@ set(sf_zed_export_source "${CMAKE_CURRENT_SOURCE_DIR}/export_sdk.cpp")
 file(SHA256 "${sf_zed_export_source}" SF_ZED_EXPORT_SOURCE_SHA256)
 set(sf_zed_export_io "${CMAKE_CURRENT_SOURCE_DIR}/export_io.hpp")
 file(SHA256 "${sf_zed_export_io}" SF_ZED_EXPORT_IO_SHA256)
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${sf_zed_export_source}" "${sf_zed_export_io}")
+set(sf_zed_export_benchmark "${CMAKE_CURRENT_SOURCE_DIR}/sdk_benchmark.hpp")
+file(SHA256 "${sf_zed_export_benchmark}" SF_ZED_EXPORT_BENCHMARK_SHA256)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${sf_zed_export_source}" "${sf_zed_export_io}" "${sf_zed_export_benchmark}")
 set(SF_ZED_EXPORT_COMMIT "unavailable")
 set(SF_ZED_EXPORT_DIRTY "unavailable")
 find_package(Git QUIET)
@@ -43,6 +45,7 @@ if(GIT_FOUND)
   endif()
 endif()
 target_compile_definitions(export_sdk PRIVATE
+  SF_ZED_EXPORT_BENCHMARK_SHA256="${SF_ZED_EXPORT_BENCHMARK_SHA256}"
   SF_ZED_EXPORT_IO_SHA256="${SF_ZED_EXPORT_IO_SHA256}"
   SF_ZED_EXPORT_SOURCE_SHA256="${SF_ZED_EXPORT_SOURCE_SHA256}"
   SF_ZED_EXPORT_COMMIT="${SF_ZED_EXPORT_COMMIT}"

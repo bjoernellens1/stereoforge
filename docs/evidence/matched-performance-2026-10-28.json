@@ -1,0 +1,626 @@
+{
+  "cases": {
+    "cross_platform": {
+      "comparisons": [
+        {
+          "kind": "operating_points",
+          "phase": "warm",
+          "profiles": [
+            "bf57ba63889361dc0d594583b4cd8e007533e3b6ee454f85cd2af135775d6c45",
+            "d849c2b18fa5fc942b13fc1807a664bb693a05a8878b6f5f8ca0438c7d8c1614"
+          ],
+          "qualified": false,
+          "ratio": null,
+          "ratio_scope": "A_complete_wall_mean_over_B_complete_wall_mean",
+          "reasons": [
+            "cross_platform_operating_points"
+          ],
+          "session_id": "session"
+        }
+      ],
+      "populations": [
+        {
+          "profile_id": "bf57ba63889361dc0d594583b4cd8e007533e3b6ee454f85cd2af135775d6c45",
+          "run_count": 4,
+          "statistics": {
+            "samples": {
+              "complete_wall_ms": {
+                "count": 12,
+                "max_ms": 4,
+                "mean_ms": 3.0,
+                "p50_ms": 3,
+                "p95_ms": 4,
+                "p99_ms": 4,
+                "tail_guarantee": false
+              },
+              "cpu_query_ms": {
+                "count": 12,
+                "max_ms": 0.1,
+                "mean_ms": 0.1,
+                "p50_ms": 0.1,
+                "p95_ms": 0.1,
+                "p99_ms": 0.1,
+                "tail_guarantee": false
+              },
+              "cpu_submit_ms": {
+                "count": 12,
+                "max_ms": 0.3,
+                "mean_ms": 0.19999999999999998,
+                "p50_ms": 0.2,
+                "p95_ms": 0.3,
+                "p99_ms": 0.3,
+                "tail_guarantee": false
+              },
+              "cpu_wait_ms": {
+                "count": 12,
+                "max_ms": 3,
+                "mean_ms": 2.0,
+                "p50_ms": 2,
+                "p95_ms": 3,
+                "p99_ms": 3,
+                "tail_guarantee": false
+              },
+              "gpu_total_ms": {
+                "count": 12,
+                "max_ms": 3,
+                "mean_ms": 2.0,
+                "p50_ms": 2,
+                "p95_ms": 3,
+                "p99_ms": 3,
+                "tail_guarantee": false
+              },
+              "gpu_upload_ms": {
+                "count": 12,
+                "max_ms": 0.1,
+                "mean_ms": 0.1,
+                "p50_ms": 0.1,
+                "p95_ms": 0.1,
+                "p99_ms": 0.1,
+                "tail_guarantee": false
+              }
+            },
+            "stages": {}
+          }
+        },
+        {
+          "profile_id": "d849c2b18fa5fc942b13fc1807a664bb693a05a8878b6f5f8ca0438c7d8c1614",
+          "run_count": 4,
+          "statistics": {
+            "samples": {
+              "complete_wall_ms": {
+                "count": 12,
+                "max_ms": 4,
+                "mean_ms": 3.0,
+                "p50_ms": 3,
+                "p95_ms": 4,
+                "p99_ms": 4,
+                "tail_guarantee": false
+              },
+              "cpu_query_ms": {
+                "count": 12,
+                "max_ms": 0.1,
+                "mean_ms": 0.1,
+                "p50_ms": 0.1,
+                "p95_ms": 0.1,
+                "p99_ms": 0.1,
+                "tail_guarantee": false
+              },
+              "cpu_submit_ms": {
+                "count": 12,
+                "max_ms": 0.3,
+                "mean_ms": 0.19999999999999998,
+                "p50_ms": 0.2,
+                "p95_ms": 0.3,
+                "p99_ms": 0.3,
+                "tail_guarantee": false
+              },
+              "cpu_wait_ms": {
+                "count": 12,
+                "max_ms": 3,
+                "mean_ms": 2.0,
+                "p50_ms": 2,
+                "p95_ms": 3,
+                "p99_ms": 3,
+                "tail_guarantee": false
+              },
+              "gpu_total_ms": {
+                "count": 12,
+                "max_ms": 3,
+                "mean_ms": 2.0,
+                "p50_ms": 2,
+                "p95_ms": 3,
+                "p99_ms": 3,
+                "tail_guarantee": false
+              },
+              "gpu_upload_ms": {
+                "count": 12,
+                "max_ms": 0.1,
+                "mean_ms": 0.1,
+                "p50_ms": 0.1,
+                "p95_ms": 0.1,
+                "p99_ms": 0.1,
+                "tail_guarantee": false
+              }
+            },
+            "stages": {}
+          }
+        }
+      ],
+      "qualified_admission_count": 8,
+      "run_count": 8,
+      "sample_count": 24
+    },
+    "incomplete_abba": {
+      "comparisons": [
+        {
+          "kind": "same_device_runtime",
+          "phase": "warm",
+          "profiles": [
+            "bf57ba63889361dc0d594583b4cd8e007533e3b6ee454f85cd2af135775d6c45",
+            "d849c2b18fa5fc942b13fc1807a664bb693a05a8878b6f5f8ca0438c7d8c1614"
+          ],
+          "qualified": false,
+          "ratio": null,
+          "ratio_scope": "A_complete_wall_mean_over_B_complete_wall_mean",
+          "reasons": [
+            "incomplete_interleaving",
+            "invalid_abba_order"
+          ],
+          "session_id": "session"
+        }
+      ],
+      "populations": [
+        {
+          "profile_id": "bf57ba63889361dc0d594583b4cd8e007533e3b6ee454f85cd2af135775d6c45",
+          "run_count": 3,
+          "statistics": {
+            "samples": {
+              "complete_wall_ms": {
+                "count": 9,
+                "max_ms": 4,
+                "mean_ms": 3.0,
+                "p50_ms": 3,
+                "p95_ms": 4,
+                "p99_ms": 4,
+                "tail_guarantee": false
+              },
+              "cpu_query_ms": {
+                "count": 9,
+                "max_ms": 0.1,
+                "mean_ms": 0.1,
+                "p50_ms": 0.1,
+                "p95_ms": 0.1,
+                "p99_ms": 0.1,
+                "tail_guarantee": false
+              },
+              "cpu_submit_ms": {
+                "count": 9,
+                "max_ms": 0.3,
+                "mean_ms": 0.2,
+                "p50_ms": 0.2,
+                "p95_ms": 0.3,
+                "p99_ms": 0.3,
+                "tail_guarantee": false
+              },
+              "cpu_wait_ms": {
+                "count": 9,
+                "max_ms": 3,
+                "mean_ms": 2.0,
+                "p50_ms": 2,
+                "p95_ms": 3,
+                "p99_ms": 3,
+                "tail_guarantee": false
+              },
+              "gpu_total_ms": {
+                "count": 9,
+                "max_ms": 3,
+                "mean_ms": 2.0,
+                "p50_ms": 2,
+                "p95_ms": 3,
+                "p99_ms": 3,
+                "tail_guarantee": false
+              },
+              "gpu_upload_ms": {
+                "count": 9,
+                "max_ms": 0.1,
+                "mean_ms": 0.1,
+                "p50_ms": 0.1,
+                "p95_ms": 0.1,
+                "p99_ms": 0.1,
+                "tail_guarantee": false
+              }
+            },
+            "stages": {}
+          }
+        },
+        {
+          "profile_id": "d849c2b18fa5fc942b13fc1807a664bb693a05a8878b6f5f8ca0438c7d8c1614",
+          "run_count": 4,
+          "statistics": {
+            "samples": {
+              "complete_wall_ms": {
+                "count": 12,
+                "max_ms": 4,
+                "mean_ms": 3.0,
+                "p50_ms": 3,
+                "p95_ms": 4,
+                "p99_ms": 4,
+                "tail_guarantee": false
+              },
+              "cpu_query_ms": {
+                "count": 12,
+                "max_ms": 0.1,
+                "mean_ms": 0.1,
+                "p50_ms": 0.1,
+                "p95_ms": 0.1,
+                "p99_ms": 0.1,
+                "tail_guarantee": false
+              },
+              "cpu_submit_ms": {
+                "count": 12,
+                "max_ms": 0.3,
+                "mean_ms": 0.19999999999999998,
+                "p50_ms": 0.2,
+                "p95_ms": 0.3,
+                "p99_ms": 0.3,
+                "tail_guarantee": false
+              },
+              "cpu_wait_ms": {
+                "count": 12,
+                "max_ms": 3,
+                "mean_ms": 2.0,
+                "p50_ms": 2,
+                "p95_ms": 3,
+                "p99_ms": 3,
+                "tail_guarantee": false
+              },
+              "gpu_total_ms": {
+                "count": 12,
+                "max_ms": 3,
+                "mean_ms": 2.0,
+                "p50_ms": 2,
+                "p95_ms": 3,
+                "p99_ms": 3,
+                "tail_guarantee": false
+              },
+              "gpu_upload_ms": {
+                "count": 12,
+                "max_ms": 0.1,
+                "mean_ms": 0.1,
+                "p50_ms": 0.1,
+                "p95_ms": 0.1,
+                "p99_ms": 0.1,
+                "tail_guarantee": false
+              }
+            },
+            "stages": {}
+          }
+        }
+      ],
+      "qualified_admission_count": 7,
+      "run_count": 7,
+      "sample_count": 21
+    },
+    "missing_quality": {
+      "comparisons": [
+        {
+          "kind": "same_device_runtime",
+          "phase": "warm",
+          "profiles": [
+            "bf57ba63889361dc0d594583b4cd8e007533e3b6ee454f85cd2af135775d6c45",
+            "d849c2b18fa5fc942b13fc1807a664bb693a05a8878b6f5f8ca0438c7d8c1614"
+          ],
+          "qualified": false,
+          "ratio": null,
+          "ratio_scope": "A_complete_wall_mean_over_B_complete_wall_mean",
+          "reasons": [
+            "missing_quality"
+          ],
+          "session_id": "session"
+        }
+      ],
+      "populations": [
+        {
+          "profile_id": "bf57ba63889361dc0d594583b4cd8e007533e3b6ee454f85cd2af135775d6c45",
+          "run_count": 4,
+          "statistics": {
+            "samples": {
+              "complete_wall_ms": {
+                "count": 12,
+                "max_ms": 4,
+                "mean_ms": 3.0,
+                "p50_ms": 3,
+                "p95_ms": 4,
+                "p99_ms": 4,
+                "tail_guarantee": false
+              },
+              "cpu_query_ms": {
+                "count": 12,
+                "max_ms": 0.1,
+                "mean_ms": 0.1,
+                "p50_ms": 0.1,
+                "p95_ms": 0.1,
+                "p99_ms": 0.1,
+                "tail_guarantee": false
+              },
+              "cpu_submit_ms": {
+                "count": 12,
+                "max_ms": 0.3,
+                "mean_ms": 0.19999999999999998,
+                "p50_ms": 0.2,
+                "p95_ms": 0.3,
+                "p99_ms": 0.3,
+                "tail_guarantee": false
+              },
+              "cpu_wait_ms": {
+                "count": 12,
+                "max_ms": 3,
+                "mean_ms": 2.0,
+                "p50_ms": 2,
+                "p95_ms": 3,
+                "p99_ms": 3,
+                "tail_guarantee": false
+              },
+              "gpu_total_ms": {
+                "count": 12,
+                "max_ms": 3,
+                "mean_ms": 2.0,
+                "p50_ms": 2,
+                "p95_ms": 3,
+                "p99_ms": 3,
+                "tail_guarantee": false
+              },
+              "gpu_upload_ms": {
+                "count": 12,
+                "max_ms": 0.1,
+                "mean_ms": 0.1,
+                "p50_ms": 0.1,
+                "p95_ms": 0.1,
+                "p99_ms": 0.1,
+                "tail_guarantee": false
+              }
+            },
+            "stages": {}
+          }
+        },
+        {
+          "profile_id": "d849c2b18fa5fc942b13fc1807a664bb693a05a8878b6f5f8ca0438c7d8c1614",
+          "run_count": 4,
+          "statistics": {
+            "samples": {
+              "complete_wall_ms": {
+                "count": 12,
+                "max_ms": 4,
+                "mean_ms": 3.0,
+                "p50_ms": 3,
+                "p95_ms": 4,
+                "p99_ms": 4,
+                "tail_guarantee": false
+              },
+              "cpu_query_ms": {
+                "count": 12,
+                "max_ms": 0.1,
+                "mean_ms": 0.1,
+                "p50_ms": 0.1,
+                "p95_ms": 0.1,
+                "p99_ms": 0.1,
+                "tail_guarantee": false
+              },
+              "cpu_submit_ms": {
+                "count": 12,
+                "max_ms": 0.3,
+                "mean_ms": 0.19999999999999998,
+                "p50_ms": 0.2,
+                "p95_ms": 0.3,
+                "p99_ms": 0.3,
+                "tail_guarantee": false
+              },
+              "cpu_wait_ms": {
+                "count": 12,
+                "max_ms": 3,
+                "mean_ms": 2.0,
+                "p50_ms": 2,
+                "p95_ms": 3,
+                "p99_ms": 3,
+                "tail_guarantee": false
+              },
+              "gpu_total_ms": {
+                "count": 12,
+                "max_ms": 3,
+                "mean_ms": 2.0,
+                "p50_ms": 2,
+                "p95_ms": 3,
+                "p99_ms": 3,
+                "tail_guarantee": false
+              },
+              "gpu_upload_ms": {
+                "count": 12,
+                "max_ms": 0.1,
+                "mean_ms": 0.1,
+                "p50_ms": 0.1,
+                "p95_ms": 0.1,
+                "p99_ms": 0.1,
+                "tail_guarantee": false
+              }
+            },
+            "stages": {}
+          }
+        }
+      ],
+      "qualified_admission_count": 0,
+      "run_count": 8,
+      "sample_count": 24
+    },
+    "synthetic_same_device": {
+      "comparisons": [
+        {
+          "kind": "same_device_runtime",
+          "phase": "warm",
+          "profiles": [
+            "bf57ba63889361dc0d594583b4cd8e007533e3b6ee454f85cd2af135775d6c45",
+            "d849c2b18fa5fc942b13fc1807a664bb693a05a8878b6f5f8ca0438c7d8c1614"
+          ],
+          "qualified": true,
+          "ratio": 1.0,
+          "ratio_scope": "A_complete_wall_mean_over_B_complete_wall_mean",
+          "reasons": [],
+          "session_id": "session"
+        }
+      ],
+      "populations": [
+        {
+          "profile_id": "bf57ba63889361dc0d594583b4cd8e007533e3b6ee454f85cd2af135775d6c45",
+          "run_count": 4,
+          "statistics": {
+            "samples": {
+              "complete_wall_ms": {
+                "count": 12,
+                "max_ms": 4,
+                "mean_ms": 3.0,
+                "p50_ms": 3,
+                "p95_ms": 4,
+                "p99_ms": 4,
+                "tail_guarantee": false
+              },
+              "cpu_query_ms": {
+                "count": 12,
+                "max_ms": 0.1,
+                "mean_ms": 0.1,
+                "p50_ms": 0.1,
+                "p95_ms": 0.1,
+                "p99_ms": 0.1,
+                "tail_guarantee": false
+              },
+              "cpu_submit_ms": {
+                "count": 12,
+                "max_ms": 0.3,
+                "mean_ms": 0.19999999999999998,
+                "p50_ms": 0.2,
+                "p95_ms": 0.3,
+                "p99_ms": 0.3,
+                "tail_guarantee": false
+              },
+              "cpu_wait_ms": {
+                "count": 12,
+                "max_ms": 3,
+                "mean_ms": 2.0,
+                "p50_ms": 2,
+                "p95_ms": 3,
+                "p99_ms": 3,
+                "tail_guarantee": false
+              },
+              "gpu_total_ms": {
+                "count": 12,
+                "max_ms": 3,
+                "mean_ms": 2.0,
+                "p50_ms": 2,
+                "p95_ms": 3,
+                "p99_ms": 3,
+                "tail_guarantee": false
+              },
+              "gpu_upload_ms": {
+                "count": 12,
+                "max_ms": 0.1,
+                "mean_ms": 0.1,
+                "p50_ms": 0.1,
+                "p95_ms": 0.1,
+                "p99_ms": 0.1,
+                "tail_guarantee": false
+              }
+            },
+            "stages": {}
+          }
+        },
+        {
+          "profile_id": "d849c2b18fa5fc942b13fc1807a664bb693a05a8878b6f5f8ca0438c7d8c1614",
+          "run_count": 4,
+          "statistics": {
+            "samples": {
+              "complete_wall_ms": {
+                "count": 12,
+                "max_ms": 4,
+                "mean_ms": 3.0,
+                "p50_ms": 3,
+                "p95_ms": 4,
+                "p99_ms": 4,
+                "tail_guarantee": false
+              },
+              "cpu_query_ms": {
+                "count": 12,
+                "max_ms": 0.1,
+                "mean_ms": 0.1,
+                "p50_ms": 0.1,
+                "p95_ms": 0.1,
+                "p99_ms": 0.1,
+                "tail_guarantee": false
+              },
+              "cpu_submit_ms": {
+                "count": 12,
+                "max_ms": 0.3,
+                "mean_ms": 0.19999999999999998,
+                "p50_ms": 0.2,
+                "p95_ms": 0.3,
+                "p99_ms": 0.3,
+                "tail_guarantee": false
+              },
+              "cpu_wait_ms": {
+                "count": 12,
+                "max_ms": 3,
+                "mean_ms": 2.0,
+                "p50_ms": 2,
+                "p95_ms": 3,
+                "p99_ms": 3,
+                "tail_guarantee": false
+              },
+              "gpu_total_ms": {
+                "count": 12,
+                "max_ms": 3,
+                "mean_ms": 2.0,
+                "p50_ms": 2,
+                "p95_ms": 3,
+                "p99_ms": 3,
+                "tail_guarantee": false
+              },
+              "gpu_upload_ms": {
+                "count": 12,
+                "max_ms": 0.1,
+                "mean_ms": 0.1,
+                "p50_ms": 0.1,
+                "p95_ms": 0.1,
+                "p99_ms": 0.1,
+                "tail_guarantee": false
+              }
+            },
+            "stages": {}
+          }
+        }
+      ],
+      "qualified_admission_count": 8,
+      "run_count": 8,
+      "sample_count": 24
+    }
+  },
+  "legacy_report": {
+    "raw_sample_count": 1,
+    "reason": "missing timing_metadata",
+    "report_path": "artifacts/zed-task4/native-executed-v1/full_sgm.json",
+    "report_sha256": "540a2a0a2474af779a5a2e153fba3e4bb399063d7d645039addebaea9df368b8",
+    "source": "retained legacy report; not a new measurement",
+    "status": "unqualified"
+  },
+  "new_native_or_sdk_measurements": false,
+  "physical_qualified": false,
+  "qualification_scope": "synthetic admission contract only; fixture quality is not vendor evidence",
+  "quality_parity_verified": false,
+  "schema": "stereoforge.matched_performance_cpu_evidence.v1",
+  "source_sha256": {
+    "benchmarks/zed_comparison/evaluate_temporal.py": "89e95c7208677775675c2758c3d943be11d3fb720eb8f21b3ba50f3afb53fbeb",
+    "benchmarks/zed_comparison/native_input.py": "43a9b74f9ee626543ef5309ec867f9a7d6ada312ae1638284a3f665795a1f93b",
+    "benchmarks/zed_comparison/native_observation.py": "d29a5b619717a2374abdd45795d560d0f4a38da589ed8581b990e61934a9b476",
+    "benchmarks/zed_comparison/performance.py": "882b0501f26723cb9011d796b43dbf81df7b16968b25498270c6f240761e60ea",
+    "benchmarks/zed_comparison/schema.py": "49cf0f9e0106fa0d5efe509c810f7dc0063d7e9077ce42486798b1bea4261698",
+    "docs/evidence/matched-performance-2026-10-28.py": "84474589237ea46ef29e45c3101befa2dbfa38a465512e205dfef418b8abebde",
+    "tests/test_zed_performance.py": "4442fbecc6c64d47e070098ede3675243c325e41ce89f8d853fe2cd8e8e4e792"
+  },
+  "synthetic_only": true
+}

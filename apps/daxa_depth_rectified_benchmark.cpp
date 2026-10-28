@@ -1,3 +1,4 @@
+#include "timing_metadata.hpp"
 #include "daxa_refinement_common.hpp"
 #include <stereoforge/canonical_record.hpp>
 #include <stereoforge/daxa_rectified_input.hpp>
@@ -176,6 +177,7 @@ int main(int argc,char** argv) { try {
         result["stereo_stage_ms"][key]=summary(stereo_stages[eye][k]);
         result["stereo_stage_raw_samples_ms"][key]=stereo_stages[eye][k];
     }
+    add_native_timing_metadata(result,frames,warmup,"nearest_rank_ceil_p_times_N_minus1");
     if(options.values.contains("--dump-prefix")) {
         auto start=Clock::now();auto const& prefix=options.values.at("--dump-prefix");
         if(refinement)result["files"]=dump(refinement->readback(output),prefix);

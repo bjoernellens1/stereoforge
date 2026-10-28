@@ -2,6 +2,7 @@
 #include <sl/Camera.hpp>
 #include <json.hpp>
 #include "export_io.hpp"
+#include "sdk_benchmark.hpp"
 #include <array>
 #include <bit>
 #include <chrono>
@@ -28,6 +29,9 @@
 #endif
 #ifndef SF_ZED_EXPORT_IO_SHA256
 #define SF_ZED_EXPORT_IO_SHA256 "unavailable"
+#endif
+#ifndef SF_ZED_EXPORT_BENCHMARK_SHA256
+#define SF_ZED_EXPORT_BENCHMARK_SHA256 "unavailable"
 #endif
 #ifndef SF_ZED_EXPORT_COMMIT
 #define SF_ZED_EXPORT_COMMIT "unavailable"
@@ -71,14 +75,16 @@ fs::path fresh_root(const fs::path& requested) {
 
 struct Options {
     std::string operation = "export", svo, output, mode = "NONE", profile = "instantaneous", settings_dir;
-    int frames = 2;
+    std::string timing_lane = "opaque-api";
+    int frames = 2, warmup = 0;
     bool self_calibration = true;
     float minimum = 0.3f, maximum = 8.0f;
 };
 void help() {
-    std::cout << "export_sdk --operation capture-diagnostic --svo FILE --output FRESH_DIR\n"
+    std::cout << "export_sdk --operation capture-diagnostic|benchmark --svo FILE --output FRESH_DIR\n"
         "  [--mode NONE|NEURAL_LIGHT|NEURAL|NEURAL_PLUS|PERFORMANCE] [--frames 1..100]\n"
         "  [--profile instantaneous] [--self-calibration on|off] [--settings-dir PRIVATE_DIR]\n"
+        "  [--warmup 0..100 (benchmark default 5)] [--timing-lane opaque-api (benchmark only)]\n"
         "  [--depth-min 0.3] [--depth-max 8] | --version | --help\n"
         "Diagnostic output is unqualified; canonical export requires proven raw pose and rectification support.\n";
 }
@@ -94,22 +100,28 @@ Options parse(int argc, char** argv) {
         else if (key == "--svo") o.svo = value;
         else if (key == "--output") o.output = value;
         else if (key == "--mode") o.mode = value;
+        else if (key == "--timing-lane") o.timing_lane = value;
         else if (key == "--profile") o.profile = value;
         else if (key == "--settings-dir") o.settings_dir = value;
         else if (key == "--self-calibration") {
             require(value == "on" || value == "off", "self-calibration must be on or off");
             o.self_calibration = value == "on";
-        } else if (key == "--frames") {
+        } else if (key == "--frames" || key == "--warmup") {
             require(!value.empty() && value.find_first_not_of("0123456789") == std::string::npos, "invalid frame count");
-            size_t used = 0; o.frames = std::stoi(value, &used);
-            require(used == value.size() && o.frames >= 1 && o.frames <= 100, "frames must be 1..100");
+            size_t used = 0; const int count = std::stoi(value, &used);
+            require(used == value.size() && count >= (key == "--frames" ? 1 : 0) && count <= 100, "frames must be 1..100; warmup must be 0..100");
+            if (key == "--frames") o.frames = count; else o.warmup = count;
         } else if (key == "--depth-min" || key == "--depth-max") {
             size_t used = 0; const float number = std::stof(value, &used);
             require(used == value.size() && std::isfinite(number), "invalid depth range");
             if (key == "--depth-min") o.minimum = number; else o.maximum = number;
         } else throw SafeError("unknown option");
     }
-    require(o.operation == "capture-diagnostic", "canonical export requires proven raw pose and rectification support; use --operation capture-diagnostic");
+    require(o.operation == "capture-diagnostic" || o.operation == "benchmark", "canonical export requires proven raw pose and rectification support; use --operation capture-diagnostic");
+    require(o.timing_lane == "opaque-api", "unsupported timing lane; only opaque-api is implemented; GPU-wide completion unavailable");
+    if (o.operation == "benchmark" && !seen.contains("--warmup")) o.warmup = 5;
+    if (o.operation == "capture-diagnostic")
+        require(!seen.contains("--warmup") && !seen.contains("--timing-lane"), "timing options require --operation benchmark");
     require(!o.svo.empty() && !o.output.empty(), "--svo and --output are required");
     require(o.profile == "instantaneous", "only instantaneous profile is implemented");
     require(o.minimum >= 0.3f && o.maximum <= 8.0f && o.minimum < o.maximum, "depth range must lie within 0.3..8 metres");
@@ -242,7 +254,7 @@ Json build_identity() {
     struct utsname identity{};
     if (uname(&identity) == 0) os = {{"system", identity.sysname}, {"release", identity.release}, {"machine", identity.machine}};
 #endif
-    return {{"source_sha256", SF_ZED_EXPORT_SOURCE_SHA256}, {"io_sha256", SF_ZED_EXPORT_IO_SHA256}, {"commit", SF_ZED_EXPORT_COMMIT},
+    return {{"source_sha256", SF_ZED_EXPORT_SOURCE_SHA256}, {"benchmark_sha256", SF_ZED_EXPORT_BENCHMARK_SHA256}, {"io_sha256", SF_ZED_EXPORT_IO_SHA256}, {"commit", SF_ZED_EXPORT_COMMIT},
         {"dirty", SF_ZED_EXPORT_DIRTY}, {"compiler", __VERSION__}, {"os", os},
         {"gpu_device_identity", unavailable("not queried by this exporter; effective SDK device ordinal recorded separately")},
         {"driver_identity", unavailable("not exposed by this capture contract")}};
@@ -261,7 +273,7 @@ int main(int argc, char** argv) {
         require(fs::is_regular_file(o.svo), "SVO input must be a regular file");
         root = fresh_root(o.output);
         diagnostic = {{"schema", "stereoforge.zed_comparison.sdk_diagnostic.v1"}, {"qualification", "unqualified"},
-            {"canonical_export", false}, {"operation", "capture-diagnostic"}, {"status", "in_progress"},
+            {"canonical_export", false}, {"operation", o.operation}, {"status", "in_progress"},
             {"sdk_version", sdk_string(sl::Camera::getSDKVersion())}, {"build", build_identity()},
             {"requested_mode", o.mode}, {"requested_result", unavailable("capture has not completed")}, {"profile", o.profile}, {"frames_requested", o.frames}, {"frames", Json::array()},
             {"source_codec", unavailable("no external codec attestation provided")},
@@ -271,6 +283,13 @@ int main(int argc, char** argv) {
             {"raw_pose_normalization", unavailable("SDK raw stereo pose convention requires independent proof")},
             {"timestamp_mapping", unavailable("no sensor-to-host mapping established")},
             {"timing_contract", "opaque grab API wall time; CPU retrieval and serialization/I/O separate; no GPU kernel timing or FPS claim"}};
+        if (o.operation == "benchmark") {
+            diagnostic.update(sf::zed_benchmark::report(sf::zed_benchmark::Samples<sl::ERROR_CODE>{}, o.warmup, o.frames, o.mode != "NONE"));
+            diagnostic["cpu_buffer_prepare_ms"] = unavailable("no diagnostic CPU buffers requested");
+            diagnostic["cold_setup_scopes"] = {{"cold_open_api_ms", "camera.open API only"},
+                {"source_copy_hash_io_ms", "preserved SVO copy and hash IO"},
+                {"cpu_buffer_prepare_ms", "not performed: no diagnostic CPU buffers requested"}};
+        }
         write_metadata(root, diagnostic);
         std::string extension = fs::path(o.svo).extension().string();
         for (char& ch : extension) if (ch >= 'A' && ch <= 'Z') ch = static_cast<char>(ch - 'A' + 'a');
@@ -323,6 +342,28 @@ int main(int argc, char** argv) {
             {"width", resolution.width}, {"height", resolution.height}, {"nominal_fps", number(initial_info.camera_configuration.fps)},
             {"serial_identity", unavailable("private serial intentionally omitted")}};
         diagnostic["initial_calibration"] = calibration_snapshot(initial_info);
+        if (o.operation == "benchmark") {
+            diagnostic["svo_cursor_before"] = camera.getSVOPosition();
+            diagnostic["settings_file_before"] = settings_snapshot(camera, initial_info.serial_number, root, 0);
+            const auto samples = sf::zed_benchmark::sample<sl::ERROR_CODE>(o.warmup, o.frames,
+                [&] { return camera.grab(runtime); }, sl::ERROR_CODE::SUCCESS);
+            diagnostic.update(sf::zed_benchmark::report(samples, o.warmup, o.frames, runtime.enable_depth));
+            diagnostic["svo_cursor_after"] = camera.getSVOPosition();
+            // Preserve partial samples before post-loop assertions or error serialization.
+            if (samples.failure) sdk_success(*samples.failure, diagnostic, "benchmark_grab");
+            assert_init(camera, init);
+            const auto effective_runtime = camera.getRuntimeParameters();
+            assert_runtime(effective_runtime, runtime.enable_depth);
+            diagnostic["effective_settings_after_benchmark"] = {{"init", init_settings(camera.getInitParameters())},
+                {"runtime", runtime_settings(effective_runtime)}, {"positional_tracking_enabled", camera.isPositionalTrackingEnabled()}};
+            diagnostic["final_calibration"] = calibration_snapshot(camera.getCameraInformation());
+            diagnostic["settings_file_after"] = settings_snapshot(camera, initial_info.serial_number, root, 1);
+            diagnostic["status"] = "benchmarked_unqualified";
+            diagnostic["requested_result"] = {{"available", true}, {"qualification", "unqualified"}};
+            write_metadata(root, diagnostic);
+            std::cout << "Unqualified opaque API timing written; GPU-wide completion remains unproven.\n";
+            return 0;
+        }
         const auto prepare_start = Clock::now();
         std::array<sl::Mat, 4> images;
         for (auto& image : images) image.alloc(resolution, sl::MAT_TYPE::U8_C4, sl::MEM::CPU);
