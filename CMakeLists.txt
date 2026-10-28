@@ -252,6 +252,7 @@ endif()
 
 if(TARGET stereoforge_daxa_refinement)
   target_link_libraries(stereoforge_daxa_refinement PRIVATE stereoforge_daxa_rectified_input)
+  include(cmake/CanonicalRecord.cmake)
 endif()
 
 if(TARGET stereoforge_daxa_refinement AND BUILD_TESTING)

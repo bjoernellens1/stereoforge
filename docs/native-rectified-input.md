@@ -3,7 +3,8 @@
 This adapter accepts offline canonical RGB records without decoding YUYV or
 remapping already rectified pixels. It implements a bounded portion of
 [Task 3](superpowers/plans/2026-10-28-zed-quality-benchmark.md#task-3-native-already-rectified-rgb-input).
-Task 3 is not complete. SDK geometry qualification is tracked separately in the
+The [record bridge and benchmark app](canonical-record-input.md) now implement
+the analytic known-geometry input lane. SDK geometry qualification is tracked separately in the
 [ZED diagnostic evidence](zed-reference-diagnostic-evidence.md).
 
 ## Record admission and layout
@@ -133,7 +134,8 @@ The listing must contain exactly one CPU test before execution. Extracted-layer
 paths follow the [View depth evidence](daxa-view-depth-evidence.md); use the local
 layer installation corresponding to the recorded run.
 
-The benchmark application, canonical record loader, refinement application input
-selection, SDK geometry qualification,
-quality evaluation and sustained 60 Hz remain open. This adapter and its bounded
-correctness evidence do not close those Task 3 or later qualification gates.
+The [canonical record bridge](canonical-record-input.md) provides a native
+loader and a separate benchmark application with full SGM and coarse/refinement
+variants, preserving the frozen raw-input application. Its 128×64 analytic GPU
+checks and 2,140-test CPU regression pass. SDK geometry/support qualification,
+held-out quality evaluation and sustained 60 Hz remain open.

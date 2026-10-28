@@ -81,17 +81,17 @@ export and Daxa input remain independent optional/runtime boundaries.
 
 ### Task 3: Native already-rectified RGB input
 
-**Files:** Create `include/stereoforge/daxa_rectified_input.hpp`, `src/daxa_rectified_input.cpp`, `python/stereoforge/shaders/daxa/rectified_input.slang`, `apps/daxa_depth_rectified_benchmark.cpp`, `tests/daxa_rectified_input.cpp`, `tests/test_daxa_rectified_input_hotpath.py`; narrowly modify `include/stereoforge/{capture,daxa_frame,daxa_depth,daxa_refinement}.hpp`, `src/{capture,daxa_depth,daxa_refinement}.cpp`, root `CMakeLists.txt` and `apps/daxa_refinement_common.hpp` input selection.
+**Files:** Create `include/stereoforge/daxa_rectified_input.hpp`, `src/daxa_rectified_input.cpp`, `python/stereoforge/shaders/daxa/rectified_input.slang`, `apps/daxa_depth_rectified_benchmark.cpp`, `tests/daxa_rectified_input.cpp`, `tests/test_daxa_rectified_input_hotpath.py`; narrowly modify `include/stereoforge/{capture,daxa_frame,daxa_depth,daxa_refinement}.hpp`, `src/{capture,daxa_depth,daxa_refinement}.cpp`, root `CMakeLists.txt`; a separate `apps/daxa_depth_rectified_benchmark.cpp` selector preserves the frozen raw-input application.
 **Interfaces:** Consumes Task 1 validated `RectifiedRgbFrame` (original/rectified RGB spans, support, IDs, calibration, timestamps). Produces `DaxaRectifiedInput::enqueue(frame) -> DaxaRectifiedInput::Frame` on a setup-bound context; `Frame::full()` and `Frame::coarse()` expose retained `DaxaFrame` leases. Add a `DaxaDepthPipeline` constructor overload taking a prototype `DaxaFrame`, `enqueue_preprocessed(const DaxaFrame&) -> DaxaDepthPipeline::Frame`, and `DaxaRefinement::process(coarseDepth, fullRectifiedFrame) -> DaxaRefinement::Frame`. This explicitly connects the producer to both existing consumers.
 
-- [ ] RED: add native cases `rectified_skips_decode_remap`, `refinement_never_remaps_sdk_pixels`, `full_coarse_share_source_identity`, `original_rgb_preserved`, `reject_geometry_context_mismatch`, `lease_survives_submit_failure`, `bounded_slot_reuse`, `metadata_only_source_rejected_by_yuyv_capture`; register target `daxa_rectified_input_contracts` and test `daxa_rectified_input_cpu_contracts` before implementing types.
-- [ ] Run `cmake --build build/daxa --target daxa_rectified_input_contracts`; expect compilation failure on the missing input API. After implementation assert `ctest -N --test-dir build/daxa -R '^daxa_rectified_input_cpu_contracts$'` lists exactly one test before executing it; no-tests is never a passing RED/GREEN check.
+- [x] RED: add native cases `rectified_skips_decode_remap`, `refinement_never_remaps_sdk_pixels`, `full_coarse_share_source_identity`, `original_rgb_preserved`, `reject_geometry_context_mismatch`, `lease_survives_submit_failure`, `bounded_slot_reuse`, `metadata_only_source_rejected_by_yuyv_capture`; register target `daxa_rectified_input_contracts` and test `daxa_rectified_input_cpu_contracts` before implementing types.
+- [x] Run `cmake --build build/daxa --target daxa_rectified_input_contracts`; expect compilation failure on the missing input API. After implementation assert `ctest -N --test-dir build/daxa -R '^daxa_rectified_input_cpu_contracts$'` lists exactly one test before executing it; no-tests is never a passing RED/GREEN check.
 - [x] Implement RGB-to-luma input path with explicit color/stride contract, bypassing capture decode and remap; do not re-encode RGB as YUYV or change frozen capture inputs.
 - [x] Preserve original post-ISP RGB for wide synthesis; use the existing eight-plane `DaxaFrame` lease/layout. Add explicitly tagged canonical-RGB source metadata to `CaptureFrame`; raw YUYV capture/replay admission rejects this tag rather than fabricating packed bytes. Retain source metadata/calibration/host backing through the adapter and shared stereo/metric completion. Preserve the existing raw-capture constructor/enqueue behavior.
 - [x] Configure optional 2× coarse generation at setup: downsample the canonical rectified input with a declared filter/support and half-pixel-scaled projection, retaining the same original RGB resources. The refinement overload consumes exact full rectified input and bypasses its current target-remap pass. Label this sampling profile separately from F1's direct original-camera remap; remeasure its quality and cost.
 - [x] Reject wrong dimensions/calibration/foreign context; enforce bounded preallocated 2–3 slots, partial-submit cleanup and no per-frame allocation/readback/wait in the resident path.
 - [x] GREEN: build new target and run named CPU contracts. A separate worker must complete the mandatory hot-path performance pass with an actual-source allocation/wait micro-probe and static guard before root GPU admission. Freeze source, actual compiler dependencies, binaries, SPIR-V and fixtures; qualify awkward strides, exact pixel/luma/support equality, core/sync and retained-consumer stress separately.
-- [ ] Review hot-path/resource ownership and exact unchanged decode/remap control lane; benchmark app must emit full independent SGM depth via `enqueue_preprocessed`, then exercise refinement from its coarse frame. Stage explicit Task 3 files and commit `feat: accept native rectified RGB benchmark inputs`.
+- [x] Review hot-path/resource ownership and exact unchanged decode/remap control lane; benchmark app must emit full independent SGM depth via `enqueue_preprocessed`, then exercise refinement from its coarse frame. Stage the verified native input checkpoint; full SGM and refinement run through the separate canonical benchmark selector.
 
 **Core checkpoint 2026-10-28 (Task 3 remains open):** Actual root GPU
 128×64 D32/P4 verification matched all eight producer planes, SGM integers,
@@ -113,10 +113,21 @@ results, without FPS, 720p, live-camera or scientific-quality qualification.
 Evidence: `artifacts/zed-task3/{adapter-gpu-stream-v1.log,adapter-cpu-v6.log,raw-gpu-regression.log}`
 and `artifacts/zed-task3/performance/{summary.md,view-setup/summary.md}`.
 
-Remaining Task 3 gates include the benchmark application, portable canonical
-record loader and refinement application input selection, and whole-task
-review/commit. SDK geometry/support admission,
-quality evaluation and sustained delivery remain separate open gates. See
+**Native analytic implementation checkpoint:** The portable bridge, cold
+C++ loader and `daxa_depth_rectified_benchmark` now run full independent
+D128/P4 SGM or coarse D64/P4 plus full-grid refinement without YUYV encoding
+or raw remapping. The existing raw application remains frozen. Independent
+functional and CPU performance reviews preceded both 128×64 analytic GPU
+variants (three measured iterations plus one warmup, zero validation errors or
+warnings through teardown). The connected 300-record stress and raw GPU
+regressions remain green. Full CPU regression: 2,140 passed, 37 deselected,
+no skips, 130.89 s. Both unused-coarse-ID admission and subpixel-reporting
+regressions have targeted RED/GREEN guards.
+
+The native implementation lane is verified for analytic known geometry;
+SDK geometry/support admission, held-out quality evaluation and sustained
+delivery remain separate open gates. The new loader/benchmark contract and
+reproduction commands are in [canonical record input](../../canonical-record-input.md). See
 [native input reproduction](../../native-rectified-input.md#verified-boundary-and-reproduction);
 GPU reproduction unsets `VK_LAYER_ENABLES` with `env -u` to avoid inherited
 obsolete-setting warnings.

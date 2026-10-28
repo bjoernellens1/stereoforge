@@ -333,3 +333,37 @@ def test_actual_header_admission_rejects_mutated_deep_scan_and_capability(extern
         expected='default capability bypass reached device'
     result=compile_run(code,'canonical-admission-mutation-'+mutation)
     assert result.returncode!=0 and expected in result.stderr,result.stderr
+
+
+def test_actual_full_only_producer_accepts_retained_coarse_identity(external_depth_program):
+    # Start from the same actual-source enqueue/helpers/header capability probe.
+    # Keep production setup through fixed descriptors/ring, then exercise active
+    # mismatch rejection and the full-only mode of that same admitted record.
+    code=producer_program(external_depth_program).split(' // Actual header capability constructor')[0]
+    code+=r'''
+ auto mismatched=std::make_shared<CanonicalRgbSource>(*side);mismatched->coarse_rectified_calibration_identity="other coarse";
+ auto mismatched_source=std::make_shared<CaptureFrame>(*source);mismatched_source->canonical_rgb=mismatched;
+ RectifiedRgbFrame mismatched_input{mismatched_source};
+ auto snapshots=context->device.snapshots;bool rejected=false;
+ try{producer.enqueue(mismatched_input);}catch(const std::invalid_argument&){rejected=true;}
+ check(rejected&&context->device.snapshots==snapshots,"active coarse identity mismatch admitted");
+ e->coarse.reset();for(auto const& slot:e->slots)slot->coarse.reset();
+ check(!side->coarse_rectified_calibration_identity.empty(),"coarse record identity lost");
+ auto slot0=e->slots[0].get();auto slot1=e->slots[1].get();auto stage0=staging[0].data();auto stage1=staging[1].data();
+ allocations=copy_calls=copied_bytes=0;snapshots=context->device.snapshots;
+ constexpr unsigned frames=10000;tracking=true;auto start=std::chrono::steady_clock::now();
+ for(unsigned i=0;i<frames;++i){auto out=producer.enqueue(input);check(bool(out.full_)&&!out.coarse_,"full-only output contract changed");complete();out={};}
+ e->collect_at(context->device.oldest);auto ns=std::chrono::duration<double,std::nano>(std::chrono::steady_clock::now()-start).count()/frames;tracking=false;
+ check(!allocations&&!context->device.waits&&!context->device.readbacks,"full-only hotpath allocated/waited/readback");
+ check(context->device.snapshots-snapshots==frames&&copy_calls==frames*6&&copied_bytes==frames*total,"full-only fixed snapshot/copy contract changed");
+ check(e->slots.size()==2&&e->slots[0].get()==slot0&&e->slots[1].get()==slot1&&staging[0].data()==stage0&&staging[1].data()==stage1,"full-only resources replaced");
+ std::cout<<"{\"scope\":\"actual_full_only_producer_control_fake_GPU_no_copy_cost\",\"frames\":"<<frames<<",\"cpu_ns_per_frame\":"<<ns<<",\"application_allocations\":"<<allocations<<",\"application_waits\":"<<context->device.waits<<",\"application_readbacks\":"<<context->device.readbacks<<",\"coarse_record_identity_retained\":true,\"active_coarse_mismatch_rejected\":true,\"fixed_ring_slots\":2}\n";
+ return 0;}catch(const std::exception& e){tracking=false;std::cerr<<e.what()<<'\n';return 1;}}
+'''
+    result=compile_run(code,'canonical-full-only-producer')
+    assert result.returncode==0,result.stderr
+    row=json.loads(result.stdout)
+    assert row['application_allocations']==row['application_waits']==row['application_readbacks']==0
+    assert row['coarse_record_identity_retained'] and row['active_coarse_mismatch_rejected']
+    (ARTIFACTS/'canonical-full-only-producer.json').write_text(json.dumps({'sample':row,'source_sha256':{p:hashlib.sha256(s.encode()).hexdigest() for p,s in sources().items()}},indent=2)+'\n')
+    print(result.stdout)

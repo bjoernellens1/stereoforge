@@ -1,0 +1,10 @@
+include_guard(GLOBAL)
+# Cold portable input: its public API contains no Vulkan/Daxa device types.
+add_library(stereoforge_canonical_record src/canonical_record.cpp)
+target_include_directories(stereoforge_canonical_record PRIVATE "${sf_native_json_SOURCE_DIR}")
+target_link_libraries(stereoforge_canonical_record PUBLIC stereoforge_capture stereoforge_daxa_calibration PRIVATE OpenSSL::Crypto)
+target_compile_features(stereoforge_canonical_record PUBLIC cxx_std_20)
+
+add_executable(daxa_depth_rectified_benchmark apps/daxa_depth_rectified_benchmark.cpp)
+target_include_directories(daxa_depth_rectified_benchmark PRIVATE "${sf_native_json_SOURCE_DIR}")
+target_link_libraries(daxa_depth_rectified_benchmark PRIVATE stereoforge_canonical_record stereoforge_daxa_rectified_input stereoforge_daxa_refinement)

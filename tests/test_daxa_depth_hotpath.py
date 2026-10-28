@@ -436,6 +436,9 @@ def check_external_depth_boundary(source, stereo):
     assert 'if(owner_->preprocessing)out.preprocessing=owner_->preprocessing->timings' in timing
     assert 'std::numeric_limits<double>::quiet_NaN()' in timing
     assert 'result[6]-stereo.start_tick' in timing and 'stereo.timestamp_bits==owner_->timestamp_bits' in timing
+    assert 'out.start_tick=stereo.start_tick' in timing and 'out.end_tick=result[6]' in timing
+    assert 'out.timestamp_period=owner_->timestamp_period' in timing and 'out.timestamp_bits=owner_->timestamp_bits' in timing
+    assert timing.count('daxa_timeline_query_pool_query_results(')==1, 'export ticks from existing queries only'
     assert 'if(out.combined_gpu_timing_available)out.combined_gpu_ms=' in timing
     for signature in ('DaxaStereoTiming DaxaStereo::Frame::timings(', 'DaxaStereoTiming DaxaStereo::pair_timings('):
         values=body(stereo,signature)
@@ -455,6 +458,9 @@ def test_external_depth_keeps_exact_owner_resident_admission_and_explicit_timing
     ('if(preprocessing)preprocessing->collect_completed_sources_at(oldest)','preprocessing->collect_completed_sources_at(oldest)'),
     ('slot->preprocessing=std::move(pre)',''),
     ('out.start_tick=results[0]','out.start_tick=0'),
+    ('out.start_tick=stereo.start_tick','out.start_tick=0'),
+    ('out.end_tick=result[6]','out.end_tick=result[0]'),
+    ('out.timestamp_bits=owner_->timestamp_bits','out.timestamp_bits=0'),
 ])
 def test_external_depth_guards_reject_owner_retention_nullable_and_fake_span_regressions(before,after):
     source=(ROOT/'src/daxa_depth.cpp').read_text();stereo=(ROOT/'src/daxa_stereo.cpp').read_text()

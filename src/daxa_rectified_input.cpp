@@ -19,7 +19,7 @@ void validate_daxa_rectified_input_geometry(const DaxaRectification& full,const 
     cfg.validate();require(frame.admitted(),"offline-admitted canonical prototype required");validate_canonical_rgb_source(*frame.source);grid(full);auto const& s=*frame.source->canonical_rgb;
     require(canonical_rgb_grid_association(*frame.source,full.eye_width,full.source_height,full.width,full.height,full.original_identity,full.rectified_identity)&&s.rectified_calibration_identity==full.rectified_identity,"full canonical calibration association mismatch");
     require(cfg.coarse_2x==coarse.has_value(),"canonical coarse configuration mismatch");
-    if(!coarse){require(s.coarse_rectified_calibration_identity.empty(),"unexpected coarse calibration identity");return;}
+    if(!coarse)return; // A record may retain a derived grid that this consumer does not request.
     auto const& c=*coarse;grid(c);require(!(full.width&1)&&!(full.height&1)&&c.width*2==full.width&&c.height*2==full.height,"canonical coarse requires even exact2x dimensions");
     require(canonical_rgb_grid_association(*frame.source,c.eye_width,c.source_height,c.width,c.height,c.original_identity,c.rectified_identity)&&s.coarse_rectified_calibration_identity==c.rectified_identity&&c.rectified_identity!=full.rectified_identity,"coarse canonical calibration association mismatch");
     auto const& a=*c.geometry;auto const& b=*full.geometry;
@@ -110,7 +110,7 @@ DaxaFrame DaxaRectifiedInput::Frame::coarse()const{require(bool(coarse_),"canoni
 size_t DaxaRectifiedInput::collect(){auto& e=*impl_;e.require_thread();return e.collect_at(e.context->device.oldest_pending_submit_index());}
 DaxaRectifiedInput::Frame DaxaRectifiedInput::enqueue(const RectifiedRgbFrame& input){
     auto& e=*impl_;e.require_thread();require(input.admitted(),"offline-admitted canonical source required");validate_canonical_rgb_source(*input.source);auto const& s=*input.source->canonical_rgb;
-    require(canonical_rgb_grid_association(*input.source,e.full->eye_width,e.full->source_height,e.full->width,e.full->height,e.full->original_identity,e.full->rectified_identity)&&s.rectified_calibration_identity==e.full->rectified_identity&&(e.coarse?s.coarse_rectified_calibration_identity==e.coarse->rectified_identity:s.coarse_rectified_calibration_identity.empty()),"canonical bound calibration mismatch");
+    require(canonical_rgb_grid_association(*input.source,e.full->eye_width,e.full->source_height,e.full->width,e.full->height,e.full->original_identity,e.full->rectified_identity)&&s.rectified_calibration_identity==e.full->rectified_identity&&(!e.coarse||s.coarse_rectified_calibration_identity==e.coarse->rectified_identity),"canonical bound calibration mismatch");
     for(unsigned i=0;i<6;++i){auto const& p=i<4?s.rgb[i]:s.support[i-4];auto const& d=e.descriptors[i];require(p.width==d.width&&p.height==d.height&&p.stride_bytes==d.stride_bytes&&p.format==d.format&&p.bytes.size()>=e.extents[i],"canonical bound descriptor mismatch");}
     auto oldest=e.context->device.oldest_pending_submit_index();e.collect_at(oldest);
     for(auto const& slot:e.slots)if(e.available(slot,oldest)){

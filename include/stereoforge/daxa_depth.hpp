@@ -32,6 +32,8 @@ struct DaxaDepthTiming {
     bool preprocessing_timings_available=true;
     bool combined_gpu_timing_available=true; // Producer upload through metric; unavailable for external inputs.
     double stereo_to_metric_gpu_ms=0;
+    // Existing same-queue query ticks, from first stereo work through metric completion.
+    uint64_t start_tick=0,end_tick=0;double timestamp_period=0;uint32_t timestamp_bits=0;
     DaxaStereoTiming left,right;
     bool per_reference_stereo_timings_available=true;
     DaxaStereoTiming paired_stereo; // Phase intervals contain both references; no isolated eye timings.
