@@ -77,3 +77,14 @@ right census and both census validity masks in addition to the existing debug
 outputs. This opt-in incurs three extra host readbacks; the default is unchanged.
 The future executor must request these fields before claiming this coverage. The collector does not calculate a performance verdict
 or establish statistical power. GPU qualification and optimized-default selection remain pending.
+
+The CPU-only `sintergpu_device_receipt.py` scaffold checks the instrumented
+runtime's device-owned receipt against that same device's three native handles
+and an expected UUID, while holding the canonical nonblocking lock through idle
+and close. It checks the lock inode and Linux fdinfo before and after use, retains
+the device and lock on idle, lock-check or close failure, and preserves multiple
+errors. These checks cannot prevent an uncooperative process replacing the lock
+path temporarily, and a failed device factory may hide partially created resources. This receipt is not available in the ordinary released SlangPy API.
+The scaffold does not authenticate the runtime, provider, receipt, or loader;
+it is not wired to a GPU entry point. Independent provenance and live provider
+verification are required before it can form part of hardware admission.
