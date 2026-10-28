@@ -105,3 +105,7 @@ camera disagreement. Time actual GPU execution, preprocessing, copies and waits
 with explicit device/resource ownership; compare matched resident and host-output
 lanes. Until those checks pass, no neural backend or performance advantage is
 qualified and the existing classical path stays the baseline.
+
+The subsequent [analytic quality and prefilter sensitivity experiment](crestereo-analytic-evidence.md)
+reports fixed-support results, a signed-shift witness, and the thin/near quality
+failure; it does not qualify neural inference or change the conversion outcome.
