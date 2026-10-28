@@ -150,7 +150,7 @@ namespace stereoforge {
     program += definition(source, 'struct DaxaRefinement::Slot') + ';\n'
     program += r'''
 struct DaxaRefinement::Impl{
- bool canonical=false;
+ bool canonical=false;CaptureSourceKind full_source_kind=CaptureSourceKind::PackedYuyv;
  std::shared_ptr<DaxaFoundation> context;std::shared_ptr<const DaxaRectification> coarse_maps,maps;
  std::vector<std::shared_ptr<Slot>> slots;uint64_t next_generation=1,retired=0;
  const std::thread::id thread=std::this_thread::get_id();
@@ -200,7 +200,7 @@ int main(int argc,char** argv){try{
  // Canonical mode retains both sources, updates six full nodes and rejects
  // unrelated leases/exact owners before submission. No setup/GPU is mocked as evidence.
  engine->canonical=true;DaxaFrame full;full.context=context;full.maps=target;full.src=captures[0];for(unsigned p=0;p<8;++p)full.buffers[p]={4000+p};
- auto canonical=stage.process(inputs[0],full);auto current=context->device.latest;auto full_bad=full;full_bad.src=captures[1];bool bad=false;try{stage.process(inputs[0],full_bad);}catch(std::invalid_argument const&){bad=true;}check(bad&&context->device.latest==current,"foreign full source admitted");
+ auto canonical=stage.process(inputs[0],full);auto current=context->device.latest;engine->full_source_kind=CaptureSourceKind::CanonicalRgbMetadata;bool kind_bad=false;try{stage.process(inputs[0],full);}catch(std::invalid_argument const&){kind_bad=true;}check(kind_bad&&context->device.latest==current,"wrong full source kind admitted");engine->full_source_kind=CaptureSourceKind::PackedYuyv;auto full_bad=full;full_bad.src=captures[1];bool bad=false;try{stage.process(inputs[0],full_bad);}catch(std::invalid_argument const&){bad=true;}check(bad&&context->device.latest==current,"foreign full source admitted");
  full_bad=full;full_bad.maps=std::make_shared<DaxaRectification>(*target);bad=false;try{stage.process(inputs[0],full_bad);}catch(std::invalid_argument const&){bad=true;}check(bad&&context->device.latest==current,"foreign full owner admitted");
  canonical={};check(bool(engine->slots[0]->full_input)&&stage.collect()==0,"pending full input released");finish();check(stage.collect()==1&&!engine->slots[0]->full_input,"completed full input retained");
  candidate->graph->fail=2;previous=context->device.latest;failed=false;try{stage.process(inputs[0],full);}catch(std::runtime_error const&){failed=true;}check(failed&&candidate->submit==previous+1&&bool(candidate->input)&&bool(candidate->full_input),"partial canonical sources not pinned");check(stage.collect()==0,"partial full source released before equality");finish();candidate->graph->fail=0;check(stage.collect()==1&&!candidate->full_input,"partial canonical source not retired");

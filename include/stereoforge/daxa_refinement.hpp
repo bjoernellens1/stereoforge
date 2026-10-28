@@ -48,7 +48,8 @@ public:
         DaxaRefinementTiming timings()const;
     };
     DaxaRefinement(std::shared_ptr<DaxaFoundation>,DaxaRectification target,const DaxaDepthPipeline::Frame& prototype,DaxaRefinementConfig={});
-    // Canonical mode borrows the producer's full planes; no remap/maps exist.
+    // Full-frame mode accepts canonical or packed-YUYV preprocessing with the
+    // same source lease and setup-bound calibration; six planes are copied on GPU.
     DaxaRefinement(std::shared_ptr<DaxaFoundation>,const DaxaDepthPipeline::Frame& coarse_prototype,const DaxaFrame& full_prototype,DaxaRefinementConfig={});
     Frame process(const DaxaDepthPipeline::Frame&);
     Frame process(const DaxaDepthPipeline::Frame&,const DaxaFrame& full);

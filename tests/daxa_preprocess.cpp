@@ -1,3 +1,4 @@
+#include "stereoforge/static_calibration_support.hpp"
 #include <stereoforge/daxa_preprocess.hpp>
 #include <bit>
 #include <iostream>
@@ -12,6 +13,21 @@ int main(int argc,char**argv){try{bool cpu=argc>1&&std::string(argv[1])=="--cpu-
     // Exercise the exact GPU-regression source injection before any Foundation.
     {NativeCapture capture(synthetic_pool_config(c.original_identity),synthetic_pool_source(c.original_identity));auto frame=capture.read();check(frame&&frame->packed_yuyv.size()==120&&frame->source_width==12&&frame->height==5&&frame->stride_bytes==24,"shared synthetic callback emits exactpreallocated120byteframe");capture.stop();}
     auto output=daxa_preprocess_reference(*source,c);for(unsigned eye=0;eye<2;++eye)for(unsigned y=0;y<5;++y)for(unsigned x=0;x<5;++x){auto i=y*5+x;check(output.planes[2+eye][i]==output.planes[eye][y*6+x],"identity RGB beforegray");check(output.planes[6+eye][i]==1,"zero-weight OOB neighbor at bottom edge preserves support");check(output.planes[4+eye][i]<=255,"luma uint8 widened");}c.maps[0][0]=-.5f;output=daxa_preprocess_reference(*source,c);check(output.planes[6][0]==0,"fractional border support invalid separately fromRGB");check(output.planes[2][0]!=0xff000000u,"fractional border blends validtap");
+    { auto fixture=c;
+      fixture.maps[0][0]=-.015625f; fixture.maps[1][0]=4.015626f;
+      fixture.maps[2][4]=5.015626f; fixture.maps[3][24]=4.0f;
+      fixture.maps[2][12]=2.5f; fixture.maps[3][12]=2.25f;
+      auto expected=daxa_preprocess_reference(*source,fixture);
+      auto masks=derive_static_calibration_support(fixture.eye_width,fixture.source_height,fixture.width,fixture.height,fixture.maps);
+      for(unsigned eye=0;eye<2;++eye) for(unsigned y=0;y<fixture.height;++y) for(unsigned x=0;x<fixture.width;++x) {
+        const auto i=y*fixture.width+x;
+        check(masks.sampling[eye][i]==expected.planes[6+eye][i],"static mask matches CPU preprocessing support");
+        bool census=x>=2 && y>=2 && x+2<fixture.width && y+2<fixture.height;
+        if(census) for(int dy=-2;dy<=2;++dy) for(int dx=-2;dx<=2;++dx)
+          census &= expected.planes[6+eye][size_t(int(y)+dy)*fixture.width+size_t(int(x)+dx)]==1;
+        check(bool(masks.census5x5[eye][i])==census,"static census mask matches independent CPU footprint");
+      }
+    }
     {auto taller=c;taller.height=7;for(auto& map:taller.maps)map.resize(35);for(unsigned eye=0;eye<2;++eye)for(unsigned y=0;y<7;++y)for(unsigned x=0;x<5;++x){taller.maps[eye*2][y*5+x]=float(x);taller.maps[eye*2+1][y*5+x]=float(y);}auto full=daxa_preprocess_reference(*source,taller);check(full.planes[0].size()==30&&full.planes[2].size()==35&&full.planes[2][30]==0xff000000u&&full.planes[4][30]==0&&full.planes[6][30]==0,"original fullcanvas survives different rectifieddimensions andzero border");}
     auto bad=c;bad.maps[0][0]=std::numeric_limits<float>::infinity();rejects([&]{bad.validate();});bad=c;bad.maps[0][0]=32769;rejects([&]{bad.validate();});bad=c;bad.original_identity.clear();rejects([&]{bad.validate();});bad=c;bad.eye_width=5;rejects([&]{bad.validate();});auto saved=source->calibration_identity;source->calibration_identity="other";rejects([&]{c.validate_source(*source);});source->calibration_identity=saved;
     check(detail::available_slot(1,4,4)&&!detail::available_slot(2,4,4)&&!detail::available_slot(1,5,4),"retained/inflight neveradmitted");DaxaFrame empty;rejects([&]{empty.plane(DaxaPreprocessPlane::LeftLuma);});
