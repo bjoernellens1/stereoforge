@@ -1,0 +1,35 @@
+# Connected ZED 2: experimental live refinement over ROS/Zenoh
+
+On 2026-10-28, two 15-second connected-camera smoke tests ran the current-source experimental refinement publisher on Radeon 8060S (RADV Mesa 26.2.4). The second run, without validation enabled, matched **896 unique depth frames and 896 unique rectified RGB frames** within a 15.0007-second window: **59.73 Hz per stream**. This is not sustained 60 Hz qualification, a physical depth-accuracy test, or evidence that the known thin-object regression is resolved.
+
+The inputs were 1280 × 720 per eye at nominal 60 Hz. The pipeline used independent left/right four-path 640 × 360/D64 SGM, full-resolution preprocessing and GPU-resident borrowed refinement to 1280 × 720/D128, with radius 4 and subpixel disabled. Two bounded pipeline slots were configured. Rectified RGB and axial `32FC1` depth were exported to host memory and sent to a separate ROS 2 Jazzy subscriber through `rmw_zenoh_cpp`, using best-effort, volatile, keep-last-one QoS. This is not a GPU zero-copy ROS transfer; wide RGB-D synthesis was not executed. Both publisher and subscriber reported the Zenoh RMW and exited successfully in both runs.
+
+| Run | Common window | Matched unique depth / RGB | Rate per stream | Depth ingress-to-arrival p50 / p99 | RGB ingress-to-arrival p50 / p99 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Validation requested | 15.0010 s | 900 / 900 | 60.00 Hz | 11.08 / 12.39 ms | 11.92 / 13.52 ms |
+| Validation disabled | 15.0007 s | 896 / 896 | 59.73 Hz | 10.68 / 12.31 ms | 11.52 / 13.41 ms |
+
+These are separate runs with independently varying live inputs, not a controlled performance comparison of validation overhead. No GPU-stage timestamps were collected. Host ingress is recorded after capture and host copying; the camera-to-host clock mapping is unverified, so exposure-to-consumer age is unavailable. Arrival-gap p99 was 18.26 ms depth and 18.29 ms RGB in the validation run, and 18.32 ms depth and 18.43 ms RGB in the other run. The latter run had maximum arrival gaps of 89.73 ms and 91.88 ms respectively; their cause is not established.
+
+In the validation run, the windowed capture counters recorded 900 source frames and no capture-queue drops; the publisher recorded 901 reads and admissions, 900 publications of each output, zero ring drops, and one pending item at window end. In the other run, capture counters recorded 898 source frames and one queue drop; the publisher recorded 897 reads and admissions, 896 publications of each output, zero ring drops, and one pending item at window end. The matching subscriber totals include one additional message per output after the respective common windows. Counter snapshots have different endpoints; they do not form a closed loss ledger. Poll timeouts are not camera-frame drops.
+
+The validation run requested `--validation` and set the synchronization-validation environment switch. Publisher and subscriber exited zero, and the publisher log contained no validation warnings or errors. The foundation requests the Khronos layer and keeps its validation messenger through device teardown; the logs do not separately attest that the synchronization-validation feature was enabled. The validation run exercised live, overlapping pipeline slots, but it did not compare output pixels against an independent reference or establish geometry accuracy.
+
+Both summaries remain unqualified: camera clock mapping is unverified, no frozen delivery policy was applied, and requested-storage accounting is incomplete. The validation run reported 785,839,648 bytes of tracked requested storage, not total GPU, driver, process or system memory. The longer run is reported below; frame age and physical quality and thin-geometry gates remain open.
+
+## 600-second connected-camera run
+
+A third run used the same built publisher and opt-in configuration, with validation disabled, for **600.0004 seconds**. Publisher and subscriber both exited zero and reported `rmw_zenoh_cpp`. Within the common window, the publisher recorded **35,634 publications** of each stream and the subscriber matched **35,633 unique depth frames and 35,633 unique RGB frames**, or **59.388 Hz** per stream. The capture counters recorded 35,734 source frames and 67 capture-queue drops; the publisher read 35,667 frames, admitted 35,635, recorded 32 ring drops and zero identity rejects. There were no duplicate matched source identities. One item was pending and the capture queue was empty at the window endpoint; observed pending and capture-queue peaks were both two. Subscriber totals were 35,634 per stream, including arrivals outside the common matching window. These counters are captured at different endpoints and should not be added into a single closed loss ledger. Poll timeouts count reads, not camera-frame drops.
+
+| Stream | Host ingress to arrival p50 / p99 / max | Arrival gap p50 / p99 / max |
+| --- | ---: | ---: |
+| Depth | 10.61 / 12.75 / 65.24 ms | 16.69 / 18.58 / 117.83 ms |
+| Rectified RGB | 11.34 / 14.28 / 96.26 ms | 16.69 / 18.62 / 117.88 ms |
+
+The run sustained approximately 59.4 delivered unique frames per second for ten minutes, with drops and tail gaps. It does **not** establish an exact 60 Hz delivery or the target end-to-end p99: the host-ingress interval excludes earlier camera latency, the camera exposure clock remains unverified, and these measurements are not GPU-stage p99. No physical depth ground truth or thin-object quality was evaluated. The summary remains unqualified because no frozen delivery policy was applied, the clock mapping was unverified, and storage accounting was incomplete. Its tracked requested storage was 824,719,648 bytes, including a larger trace allocation; this is not total system or GPU memory. View synthesis was not executed.
+
+## Build and local artifacts
+
+The tested build used source HEAD `763d2cbacc35f4d5599b3b4df916544bddd0d7f4` plus a tracked patch whose SHA-256 was `3d49791c72d0969f5f7db909f543e2cf7ac0e74396bc925e0b4a7d66a2982aa6`. The patch hash was recorded before and after build; the publisher itself reports its commit as unattested. The container image ID was `459d16995481f8cc5c655bcac5b3bec957b2026032b9a75e780f680b56c25558`. Publisher executable SHA-256 was `86748ea08512833f60aa9af9b58fef9961eadb906d3e9a64bb4075cffdc57cfc`; subscriber executable SHA-256 was `86011ce8a2ddc6377d9acaa26992362d8468ce0e6dcb09783dd1236495309b2f`; refinement Census SPIR-V SHA-256 was `e5ce9a5895840fae64462445992739e4db3f139b1e1d1622b6b641cb10aca53c`.
+
+The private temporary directory `/dev/shm/stereoforge-live-refine-qualification-v3/` contains the build and its input identities, harness, logs, traces and summaries; its `validation/` and `smoke/` subdirectories contain the short runs, and the root trace and summary files contain the 600-second run. These files and the associated camera calibration/capture fixtures are local, potentially ephemeral, and intentionally excluded from the repository. Preserve them privately if longer-term reproducibility is needed.

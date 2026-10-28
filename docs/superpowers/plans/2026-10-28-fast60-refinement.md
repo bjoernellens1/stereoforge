@@ -44,8 +44,14 @@ held-out truth gates cannot be replaced by agreement with proprietary depth.
    reason/method counters, requalify changed kernels before timing. Compare actual
    truth and full independent SGM separately, with support-aware completeness and
    false accepts; no hidden quality loss by dropping hard pixels.
-6. **R5 view and live gate.** Construct View against target map owner, preserve
-   original RGB and strict holes, measure combined direct latency/resources.
+6. **R5 view and live gate.** An opt-in experimental ROS depth/RGB publisher now
+   wires coarse stereo, full preprocessing and borrowed refinement. Two short
+   connected-camera smoke runs are recorded in [live evidence](../../ros-live-refinement-evidence.md);
+   A separate 600-second run delivered 35,633 unique frames per stream at
+   59.388 Hz with capture and ring drops. These runs do not exercise View, verify
+   exposure-clock mapping, establish physical quality or qualify 60 Hz delivery.
+   Construct View against target map owner,
+   preserve original RGB and strict holes, measure combined direct latency/resources.
    Qualify held-out quality and physical geometry, then ≥10-minute nominal60Hz
    unique capture→GPU→consumer with frame age/drops/queues/sharing pressure. Keep
    targets unpromoted until measured. Publish bounded evidence incrementally.
