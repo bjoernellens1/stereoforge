@@ -115,6 +115,9 @@ def test_mocked_full_eleven_plane_chain_preserves_exact_controls(tmp_path,monkey
     def identify(*args):
         identities.append(1);actual=copy.deepcopy(identity)
         if mutation=='identity' and len(identities)>1:actual['source']='changed'
+        if mutation in ('observation_source_identity','observation_header_identity') and len(identities)>1:
+            key='src/daxa_observation.cpp' if mutation=='observation_source_identity' else 'include/stereoforge/daxa_observation.hpp'
+            actual.setdefault('source_sha256',{})[key]='rehashed-mutated-bytes'
         return actual
     monkeypatch.setattr(view,'native_identities',identify)
     expected={mode:view.expected_known_output(f,camera,p,g['witnesses'],[images['rect_left'],images['rect_right']],[images['original_left'],images['original_right']],mode,view.forced_gain(g,p,images)) for mode in ('strict','preview')}
@@ -204,7 +207,10 @@ def test_identity_preserves_old_spvs_and_binds_all_eighteen_view_shaders(tmp_pat
     monkeypatch.setattr(view.depth,'native_identities',lambda *args:dict(offline_shader_directory=str(tmp_path),source_sha256={},offline_spirv_sha256=dict(old),compiler_input_sha256={}))
     monkeypatch.setattr(view.legacy,'dependencies',lambda *args:dict(sha256='deps'))
     monkeypatch.setattr(view.base,'sha256',lambda path:'sha:'+str(path))
-    monkeypatch.setattr(view.depth,'compiler_header_identities',lambda *args:{'header':'sha'})
+    compiler_requests=[]
+    def headers(directory,targets):
+        compiler_requests.extend(targets);return {'header':'sha'}
+    monkeypatch.setattr(view.depth,'compiler_header_identities',headers)
     pairs=dict(view_depth_shader_source_sha256_pair=('python/stereoforge/shaders/daxa/view_depth.slang','python/stereoforge/shaders/ops/projection.slang'),depth_shader_source_sha256_pair=('python/stereoforge/shaders/daxa/depth.slang','python/stereoforge/shaders/ops/stereo_observation.slang'),preprocess_shader_source_sha256_pair=('python/stereoforge/shaders/daxa/preprocess.slang','python/stereoforge/shaders/ops/preprocess.slang'))
     expected={key:':'.join('sha:'+str(view.ROOT/path) for path in paths) for key,paths in pairs.items()}
     if tamper:expected['view_depth_shader_source_sha256_pair']='tampered'
@@ -216,6 +222,9 @@ def test_identity_preserves_old_spvs_and_binds_all_eighteen_view_shaders(tmp_pat
         assert len(identity['offline_spirv_sha256'])==51 and all(identity['offline_spirv_sha256'][k]==v for k,v in old.items())
         assert identity['view_shader_source_identities']==expected
         assert set(identity['compiler_input_sha256'])=={'view_daxa','view_rhi'}
+        assert ('stereoforge_daxa_foundation','src/daxa_observation.cpp') in compiler_requests
+        for path in ('src/daxa_observation.cpp','include/stereoforge/daxa_observation.hpp'):
+            assert identity['source_sha256'][path]=='sha:'+str(view.ROOT/path)
 
 
 def test_owner_normalization_cannot_hide_control_strict_hole_owner_corruption():
@@ -281,3 +290,8 @@ def test_native_only_validation_requires_explicit_native_validation_before_fixtu
 def test_explicit_split_rejects_false_child_validation_claims(tmp_path,monkeypatch,mutation):
     for name in view.legacy.VALIDATION_ENVIRONMENT:monkeypatch.delenv(name,raising=False)
     test_mocked_full_eleven_plane_chain_preserves_exact_controls(tmp_path,monkeypatch,'tie','perspective','constant',mutation,'native-only')
+
+
+@pytest.mark.parametrize('mutation',['observation_source_identity','observation_header_identity'])
+def test_new_observation_sources_rehashed_after_children_fail_identity_gate(tmp_path,monkeypatch,mutation):
+    test_mocked_full_eleven_plane_chain_preserves_exact_controls(tmp_path,monkeypatch,'tie','perspective','constant',mutation)

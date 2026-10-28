@@ -228,3 +228,21 @@ timing. This is static synthetic repeated-input evidence, not stereo accuracy,
 physical calibration, live throughput, peak-memory or 60 Hz acceptance. Full
 Task 6 acceptance and native temporal/adaptive/live work remain open. See
 [bounded evidence](daxa-view-depth-evidence.md).
+
+
+### 2026-10-28: common native observations and temporal reference
+
+Depth and View now share a concrete retained observation lease: six rectified
+metric planes and four current RGB buffers, actual device/map owner/completion
+identity, safe child-before-context release and no allocating adapter. Native
+core/sync lifetime contracts, all 24 geometry comparisons and 300+3 repeated 720p
+frames pass with zero native validation diagnostics. All 58 SPVs remain unchanged.
+Static combined GPU run means are 34.022–34.136ms and host 34.500–34.596ms; this is
+not a speedup claim or live 60 Hz acceptance. See [observation evidence](daxa-observation-evidence.md).
+
+The final CPU run passes 1,505 tests (37 deselected) and 10 CPU/source CTests. New
+independent temporal CPU math covers 63 tests; 90 view-oracle tests include the new
+observation source/compiler dependency binding. Independent review caught and
+corrected malformed fresh-input acceptance and nonfinite/zero convex fusion
+results before reference publication. General float32/native temporal execution
+and complete temporal/adaptive/live qualification remain open.

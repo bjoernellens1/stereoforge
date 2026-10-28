@@ -319,3 +319,9 @@ about **2 ms**. Requested chain buffers total **1,032,292,504 bytes**; driver pe
 memory is not measured. These results exceed the 16.67 ms target. Native temporal/
 adaptive integration, physical accuracy and sustained fresh-camera 60 Hz remain
 open. See [depth-to-view evidence and commands](docs/daxa-view-depth-evidence.md).
+
+The common [observation lease](docs/daxa-observation-contract.md) now lets the
+renderer consume retained metric/RGB buffers independently of the producer.
+[Its qualification](docs/daxa-observation-evidence.md) preserves exact outputs
+and bounded ownership. The new CPU temporal reference covers timed known motion
+and complete bounded ancestry; native temporal GPU execution remains next.

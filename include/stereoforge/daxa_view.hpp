@@ -1,5 +1,6 @@
 #pragma once
 #include <stereoforge/daxa_foundation.hpp>
+#include <stereoforge/daxa_observation.hpp>
 #include <stereoforge/geometry.hpp>
 #include <stereoforge/capture.hpp>
 #ifdef SF_DAXA_VIEW_HAS_DEPTH
@@ -43,6 +44,8 @@ public:
 #ifdef SF_DAXA_VIEW_HAS_DEPTH
     DaxaView(GeometryConfig,VirtualView const&,std::shared_ptr<DaxaFoundation>,DaxaDepthPipeline::Frame const& prototype,unsigned slots=2);
     Frame project(DaxaDepthPipeline::Frame const&);
+    DaxaView(GeometryConfig,VirtualView const&,std::shared_ptr<DaxaFoundation>,DaxaObservationFrame const& prototype,unsigned slots=2);
+    Frame project(DaxaObservationFrame const&);
 #endif
     size_t collect();bool can_project()const;
     static std::string depth_shader_identity();

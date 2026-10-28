@@ -21,7 +21,12 @@ BENCHMARK = ROOT / "apps/daxa_view_benchmark.cpp"
 
 def execution_closure(source):
     for match in re.finditer(r"DaxaView::Frame DaxaView::project\(", source):
-        yield "project", block(source, match.start())[0]
+        implementation = block(source, match.start())[0]
+        declaration = source[match.start():source.index("{", match.start())]
+        if "DaxaDepthPipeline::Frame const&" in declaration:
+            assert code_only(implementation).strip() == "return project(input.observations());", "Depth overload must only forward the bounded observation adapter"
+            continue
+        yield "project", implementation
     setup = block(source, source.index("void DaxaView::Impl::setup_slots("))[0]
     callbacks = list(re.finditer(r"\.executes\(\s*\[[^\]]*\]\s*\([^)]*\)\s*\{", setup))
     assert callbacks, "review the compositor callbacks if their declaration changes"
@@ -31,6 +36,15 @@ def execution_closure(source):
     assert len(boundaries) == 2, "scheduled graph timestamp boundaries must also be reviewed"
     for callback in boundaries:
         yield "callback", block(setup, callback.start())[0]
+
+
+@pytest.mark.parametrize("replacement", ("return project(input.observations()); frame.wait();", "return project(input);"))
+def test_depth_forwarding_guard_is_fail_closed(replacement):
+    source = SOURCE.read_text()
+    before = "return project(input.observations());"
+    assert before in source
+    with pytest.raises(AssertionError):
+        list(execution_closure(source.replace(before, replacement, 1)))
 
 
 def assert_no_costly_enqueue_work(source):

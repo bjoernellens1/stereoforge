@@ -56,7 +56,7 @@ struct DaxaView::Slot {
     std::map<std::string,daxa::BufferId,std::less<>> buffers;
     std::map<std::string,daxa::ExternalTaskBuffer,std::less<>> external;
     std::unique_ptr<daxa::TaskGraph> graph;daxa::TimelineQueryPool queries;
-    DaxaDepthPipeline::Frame input;CaptureLease source;
+    DaxaObservationFrame input;CaptureLease source;
     int64_t timestamp=0;uint64_t submit=0,generation=0;unsigned visited=0,finished=0;
 };
 struct DaxaView::Impl {
@@ -118,8 +118,8 @@ struct DaxaView::Impl {
     #endif
     void setup(GeometrySources const& s,VirtualView const& v,unsigned count);
     void setup_slots(VirtualView const&,unsigned);
-    void validate_frame(DaxaDepthPipeline::Frame const&)const;
-    void bind(Slot&,DaxaDepthPipeline::Frame const&);
+    void validate_frame(DaxaObservationFrame const&)const;
+    void bind(Slot&,DaxaObservationFrame const&);
 };
 DaxaView::Frame::Frame(std::shared_ptr<Impl> owner,std::shared_ptr<Slot> slot):owner_(std::move(owner)),slot_(std::move(slot)),generation_(slot_->generation){}
 DaxaView::Frame& DaxaView::Frame::operator=(Frame other)noexcept{
@@ -226,27 +226,29 @@ DaxaView::DaxaView(GeometryConfig c,GeometrySources const& s,VirtualView const& 
     validate(c,s,v,slots);impl_=std::make_shared<Impl>(c,validation);impl_->setup(s,v,slots);
 }
 #ifdef SF_DAXA_VIEW_HAS_DEPTH
-void DaxaView::Impl::validate_frame(DaxaDepthPipeline::Frame const& frame)const{
-    require(frame&&frame.context_id()==reinterpret_cast<uintptr_t>(context->device.get()),"foreign depth context");require(frame.calibration()==maps,"foreign immutable map/model owner");require(frame.width()==config.source_width&&frame.height()==config.source_height&&frame.layers()==2,"typed depth dimensions mismatch");auto n=size_t(config.source_width)*config.source_height;for(auto plane:{DaxaDepthPlane::Depth,DaxaDepthPlane::MetricConfidence,DaxaDepthPlane::MetricValidity,DaxaDepthPlane::Provenance})require(frame.size_bytes(plane)==2*n*4,"typed depth plane size mismatch");for(auto plane:{DaxaDepthPlane::SourceIds,DaxaDepthPlane::AgeNs})require(frame.size_bytes(plane)==2*n*8,"typed metadata plane size mismatch");require(frame.source()&&frame.source()->host_ingress_timestamp_ns<=uint64_t(INT64_MAX),"view timestamp outside signed64 domain");
+DaxaView::DaxaView(GeometryConfig c,VirtualView const& v,std::shared_ptr<DaxaFoundation> context,DaxaDepthPipeline::Frame const& prototype,unsigned count):DaxaView(c,v,std::move(context),prototype.observations(),count){}
+DaxaView::Frame DaxaView::project(DaxaDepthPipeline::Frame const& input){return project(input.observations());}
+void DaxaView::Impl::validate_frame(DaxaObservationFrame const& frame)const{
+    require(frame&&frame.context_id()==reinterpret_cast<uintptr_t>(context->device.get()),"foreign depth context");require(frame.calibration()==maps,"foreign immutable map/model owner");require(frame.width()==config.source_width&&frame.height()==config.source_height&&frame.layers()==2,"typed depth dimensions mismatch");auto n=size_t(config.source_width)*config.source_height;for(auto plane:{DaxaObservationPlane::Depth,DaxaObservationPlane::Confidence,DaxaObservationPlane::Validity,DaxaObservationPlane::Provenance})require(frame.size_bytes(plane)==2*n*4,"typed depth plane size mismatch");for(auto plane:{DaxaObservationPlane::SourceIds,DaxaObservationPlane::AgeNs})require(frame.size_bytes(plane)==2*n*8,"typed metadata plane size mismatch");require(frame.source()&&frame.source()->host_ingress_timestamp_ns<=uint64_t(INT64_MAX),"view timestamp outside signed64 domain");
 }
-void DaxaView::Impl::bind(Slot& slot,DaxaDepthPipeline::Frame const& frame){
+void DaxaView::Impl::bind(Slot& slot,DaxaObservationFrame const& frame){
     auto& d=context->device;auto* extended=reinterpret_cast<detail::DepthViewParameters*>(d.buffer_host_address(slot.buffers.find("parameters")->second).value());auto& p=extended->view;
     auto set=[&](const char* name,daxa::BufferId id,uint64_t& address){slot.buffers.find(name)->second=id;slot.external.find(name)->second.set_buffer(id);address=d.device_address(id).value();};
-    set("source_depth",frame.buffer(DaxaDepthPlane::Depth),p.address_source_depth);set("source_confidence",frame.buffer(DaxaDepthPlane::MetricConfidence),p.address_source_confidence);set("source_provenance",frame.buffer(DaxaDepthPlane::Provenance),p.address_source_provenance);set("source_ids",frame.buffer(DaxaDepthPlane::SourceIds),p.address_source_ids);set("source_ages",frame.buffer(DaxaDepthPlane::AgeNs),p.address_source_ages);
-    set("source_rgb",frame.image(DaxaPreprocessPlane::RectifiedLeft).buffer(),p.address_source_rgb);set("rectified_right_rgb",frame.image(DaxaPreprocessPlane::RectifiedRight).buffer(),extended->rectified_right_rgb);set("original_left_rgb",frame.image(DaxaPreprocessPlane::OriginalLeft).buffer(),extended->original_left_rgb);set("original_right_rgb",frame.image(DaxaPreprocessPlane::OriginalRight).buffer(),extended->original_right_rgb);
+    set("source_depth",frame.buffer(DaxaObservationPlane::Depth),p.address_source_depth);set("source_confidence",frame.buffer(DaxaObservationPlane::Confidence),p.address_source_confidence);set("source_provenance",frame.buffer(DaxaObservationPlane::Provenance),p.address_source_provenance);set("source_ids",frame.buffer(DaxaObservationPlane::SourceIds),p.address_source_ids);set("source_ages",frame.buffer(DaxaObservationPlane::AgeNs),p.address_source_ages);
+    set("source_rgb",frame.image(DaxaObservationImage::RectifiedLeft).buffer(),p.address_source_rgb);set("rectified_right_rgb",frame.image(DaxaObservationImage::RectifiedRight).buffer(),extended->rectified_right_rgb);set("original_left_rgb",frame.image(DaxaObservationImage::OriginalLeft).buffer(),extended->original_left_rgb);set("original_right_rgb",frame.image(DaxaObservationImage::OriginalRight).buffer(),extended->original_right_rgb);
     slot.input=frame;slot.source=frame.source();slot.timestamp=int64_t(slot.source->host_ingress_timestamp_ns);
 }
-DaxaView::DaxaView(GeometryConfig c,VirtualView const& v,std::shared_ptr<DaxaFoundation> context,DaxaDepthPipeline::Frame const& prototype,unsigned count){
+DaxaView::DaxaView(GeometryConfig c,VirtualView const& v,std::shared_ptr<DaxaFoundation> context,DaxaObservationFrame const& prototype,unsigned count){
     require(context&&prototype&&prototype.context_id()==reinterpret_cast<uintptr_t>(context->device.get()),"shared foundation typed intake requires matching context");require(count>=1&&count<=3,"view ring requires1..3 slots");auto maps=prototype.calibration();auto cache=prepare_daxa_view_calibration(*maps,c,v);
     impl_=std::make_shared<Impl>(c,false,std::move(context));auto& e=*impl_;e.typed=true;e.maps=std::move(maps);e.cache=std::move(cache);e.calibration=e.maps->rectified_identity;e.validate_frame(prototype);auto& d=e.context->device;
-    e.inputs["source_depth"]=prototype.buffer(DaxaDepthPlane::Depth);e.inputs["source_confidence"]=prototype.buffer(DaxaDepthPlane::MetricConfidence);e.inputs["source_provenance"]=prototype.buffer(DaxaDepthPlane::Provenance);e.inputs["source_ids"]=prototype.buffer(DaxaDepthPlane::SourceIds);e.inputs["source_ages"]=prototype.buffer(DaxaDepthPlane::AgeNs);e.inputs["source_rgb"]=prototype.image(DaxaPreprocessPlane::RectifiedLeft).buffer();e.inputs["rectified_right_rgb"]=prototype.image(DaxaPreprocessPlane::RectifiedRight).buffer();e.inputs["original_left_rgb"]=prototype.image(DaxaPreprocessPlane::OriginalLeft).buffer();e.inputs["original_right_rgb"]=prototype.image(DaxaPreprocessPlane::OriginalRight).buffer();
+    e.inputs["source_depth"]=prototype.buffer(DaxaObservationPlane::Depth);e.inputs["source_confidence"]=prototype.buffer(DaxaObservationPlane::Confidence);e.inputs["source_provenance"]=prototype.buffer(DaxaObservationPlane::Provenance);e.inputs["source_ids"]=prototype.buffer(DaxaObservationPlane::SourceIds);e.inputs["source_ages"]=prototype.buffer(DaxaObservationPlane::AgeNs);e.inputs["source_rgb"]=prototype.image(DaxaObservationImage::RectifiedLeft).buffer();e.inputs["rectified_right_rgb"]=prototype.image(DaxaObservationImage::RectifiedRight).buffer();e.inputs["original_left_rgb"]=prototype.image(DaxaObservationImage::OriginalLeft).buffer();e.inputs["original_right_rgb"]=prototype.image(DaxaObservationImage::OriginalRight).buffer();
     auto recorder=d.create_command_recorder({.name="one-time calibrated rays and preview map"});e.upload(recorder,"source_rays",e.cache.rays.data(),e.cache.rays.size()*sizeof(Ray3));e.upload(recorder,"preview_indices",e.cache.preview_indices.data(),e.cache.preview_indices.size()*4);recorder.pipeline_barrier({.src_access=daxa::AccessConsts::TRANSFER_WRITE,.dst_access=daxa::AccessConsts::COMPUTE_SHADER_READ});auto commands=recorder.complete_current_commands();d.submit_commands({.command_lists={&commands,1}});d.wait_on_submit({.queue=daxa::QUEUE_MAIN,.queue_submit_index=d.latest_queue_submit_index(daxa::QUEUE_MAIN),.timeout=30'000'000'000ull});e.setup_slots(e.cache.effective_view,count);
 }
 #endif
 size_t DaxaView::collect(){auto& e=*impl_;e.require_thread();return e.collect_at(e.context->device.oldest_pending_submit_index());}
 bool DaxaView::can_project()const{auto& e=*impl_;e.require_thread();auto pending=e.context->device.oldest_pending_submit_index();e.collect_at(pending);for(auto const& slot:e.slots)if(slot.use_count()==1&&(!slot->submit||slot->submit<pending))return true;return false;}
 #ifdef SF_DAXA_VIEW_HAS_DEPTH
-DaxaView::Frame DaxaView::project(DaxaDepthPipeline::Frame const& input){
+DaxaView::Frame DaxaView::project(DaxaObservationFrame const& input){
     auto& e=*impl_;e.require_thread();require(e.typed,"typed project requires calibrated shared constructor");e.validate_frame(input);auto pending=e.context->device.oldest_pending_submit_index();e.collect_at(pending);
     for(auto& s:e.slots)if(s.use_count()==1&&(!s->submit||s->submit<pending)){e.bind(*s,input);s->generation=e.next_generation++;s->visited=s->finished=0;e.context->device.collect_garbage();try{s->graph->execute({});}catch(...){s->submit=e.context->device.latest_queue_submit_index(daxa::QUEUE_MAIN);throw;}s->submit=e.context->device.latest_queue_submit_index(daxa::QUEUE_MAIN);require(s->visited==8&&s->finished==8,"view callback count changed");return Frame(impl_,s);}throw std::runtime_error("view output ring exhausted before projection");
 }

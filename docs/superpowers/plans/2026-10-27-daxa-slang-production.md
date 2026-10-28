@@ -942,3 +942,141 @@ performance is measured, develop known-motion temporal processing before
 adaptive search while retaining the failed 60 Hz gate as open. Starting that development does not establish or relax the required
 end-to-end quality, fresh-frame throughput, frame-age/drop/backpressure, physical
 geometry or sustained live 720p/60 Hz acceptance.
+
+## Task 7 continuation: native retained observations and known motion
+
+The full Task 7 deliverable is a stateful two-eye GPU temporal stage consumed by
+View, followed by adaptive work and the frozen four-way ablation. The common
+lease below is a prerequisite; implementing it alone does not finish Task 7.
+The original full-pipeline quality, physical and sustained live 60 Hz gates stay
+open. Root alone runs GPU workloads, after separate functional/performance review.
+
+### 7a. Concrete shared observation lease
+
+Create `include/stereoforge/daxa_observation.hpp` and `src/daxa_observation.cpp`.
+Add `DaxaDepthPipeline::Frame::observations()` and a common-observation View
+constructor/project overload; retain the existing Depth overloads as forwarding
+adapters and all legacy fixture behavior. Keep View independent of Temporal.
+One integration owner owns these files, Depth's adapter, View intake and the
+narrow CMake/library change. Preserve the depth-disabled View configuration.
+
+`DaxaObservationFrame` is a privately producer-constructed value lease, with
+Depth and the future Temporal stage as the closed producer set. It retains
+existing producer owner/lease references without allocating an adapter or
+creating a context. It exposes six named planes (float32 axial-Z depth/confidence,
+uint32 validity/provenance, int64 source IDs/age), contiguous `[eye][y][x]`, plus
+four current original/rectified RGB views. Current capture/time/clock identifies
+the output grid and RGB, not every metric observation's original source. Keep
+raw/LR/disparity available only through the original Depth frame.
+
+The lease binds actual shared foundation/device, main-queue submission ticket,
+exact immutable map owner, dimensions, current source and generation. Expose
+context/calibration/source/configuration and read-only borrowed buffer accessors;
+no public arbitrary-buffer constructor or writable observation override. Producers
+must retain all storage until completion and downstream release. A retained
+common lease must prevent original Depth slot reuse even after the typed Depth
+Frame and producer facade are destroyed. Use child-before-context destruction
+and by-value noexcept swap assignment, including empty/self/cross-owner cases.
+Setup validates layout/association; admission uses bounded owner/shape/generation
+checks, no image copy/readback/wait or per-frame heap allocation. Same-queue
+cross-graph write visibility remains explicit.
+
+- [ ] Watch missing common-interface tests fail; implement and run CPU GREEN.
+- [ ] Test actual owner/device/map pairing, source/time/clock and six-plane/four-RGB
+  bindings, generation, producer-facade destruction, retained rings, copy/move/
+  self/cross-owner assignment, and old Depth/legacy overload parity.
+- [ ] Freeze sources/binaries/shaders; independently review functionality and
+  performance, including actual-source warmed CPU allocation/admission probe.
+- [ ] Root reruns native legacy/typed/common contracts under core/sync validation
+  and the existing bound geometry matrix; no arithmetic/shader change is intended.
+
+### 7b. Stateful known-motion temporal stage
+
+Implement `DaxaTemporal` with persistent bounded history and preallocated output
+rings, `DaxaTemporal::Frame::observations()`, and direct Temporal-to-View use.
+No re-upload or writing private raw-stereo outputs. Motion is an absolute rigid
+world-from-original-left pose bound to the current host-ingress timestamp and
+its clock domain; calibration/device identity must match. Cached geometry maps
+each rectified eye into the original-left rig: `A_L=R1^T`,
+`A_R=original.right_to_left*R2^T`; per-eye previous-to-current motion is
+`inverse(A_current)*inverse(world_from_rig_current)*world_from_rig_previous*A_previous`.
+Use the appropriate eye intrinsics and rectified axial Z, not one Left transform
+for both eyes. Current disparity/LR/raw planes remain unchanged and separate.
+
+Use a bounded accumulated prior per eye with explicit per-pixel contributor
+identities, count, oldest contributor age and reuse count in a retained GPU
+sidecar. Preserve selected-source age/ID separately from oldest-contributor age.
+Never silently truncate ancestry, count a shared ancestor independently, or
+increase confidence through repeated reuse. If a configured ancestry/reuse cap
+prevents valid fusion, prefer current measured geometry or invalidate unsupported
+history; do not manufacture a fresh observation. Freeze exact caps, confidence/
+depth gates and reset semantics in the temporal contract before implementation.
+
+Known motion must be validated before submission; unknown alignment is rejected,
+not converted between clock domains implicitly. Missing motion gives current-only
+output and severs history linkage; recovery establishes a new compatible pair.
+Reject late/duplicate input without inserting it into history. Excessive gaps,
+explicit reset and calibration/clock replacement invalidate history; changed
+shape/calibration owners require compatible reconfiguration/new state while old
+consumer leases remain usable. Handle signed64 age overflow conservatively.
+
+Global visibility resolution precedes gather/fusion. Current measured depth wins
+on incompatible surfaces; history fill remains aged/reprojected and cannot prove
+visibility of newly occluding dynamic objects. Calibration support is mandatory
+for metric output. Propagate ancestry to virtual-view consumers using the selected
+metric owner; preview-only output retains no metric ancestry. Orientation
+stabilization follows validated motion and translated viewpoints retain holes.
+
+Qualification requires independent timed-world-point sequences, exact rational
+geometry/masks/metadata and separately scoped broader float/reference comparison:
+identity/translation/rotation, unequal eye intrinsics/R1/R2, occlusions/ties,
+unsupported samples, missing depth, provenance5, same/shared ancestry, exact age/
+count limits, overflow, stale/missing/recovered motion, calibration/clock change,
+late/duplicate input, retained consumers and bounded stress. Existing temporal
+CPU/RHI wrappers are restricted numerical controls, not complete native semantics.
+Keep all failed/reference limitations explicit; no generic epsilon hides metadata
+or discrete projection errors. Freeze the full sources/compiler/binaries/SPIR-V,
+run independent performance review and then root GPU validation before publication.
+
+### 7b baseline defaults and reference boundary
+
+Supervisor choices for development (not a held-out quality promotion): at most
+four complete contributor IDs per sample, four successful history reprojections
+(inclusive), maximum oldest-contributor age 200,000,000 ns, relative axial-depth
+tolerance 0.03 and history/fusion confidence floor 0.05. These remain explicit
+configuration parameters; increasing a cap cannot silently discard ancestry.
+The confidence floor gates fusion/history use, not the existence of fresh raw
+measured depth. When no valid fusion is permitted, current valid evidence wins.
+
+Per-sample sidecar: four sorted unique signed64 ancestor IDs (-1 unused), uint32
+contributor count, signed64 oldest contributor age, uint32 reuse count and uint32
+origin-provenance mask (OR of `1 << original_provenance`, preserving derived5).
+Selected-source ID/age stay in the original six-plane contract. Invalid sidecars
+have zero count/age/reuse/origin mask and all IDs -1. Fresh valid observations
+start with one identity and zero reuses. Each successful history warp increases
+reuse by one; the fifth warp is unusable. History age overflow invalidates only
+that history sample. Malformed fresh input or motion rejects the transaction
+without updating history; trusted native producer contents are not host-scanned
+per frame.
+
+Fusion requires compatible surfaces, both confidences at least the floor,
+disjoint complete ancestry and a union no larger than the cap. Use confidence-
+weighted axial Z, confidence=max of inputs, FUSED provenance3, selected current
+ID/age, maximum contributor age and maximum contributing reuse count. Shared
+ancestry or a full union does not average or truncate: prefer current. A missing
+current sample may carry eligible history with explicit aged/reprojected or
+compound/derived provenance, never fresh identity. Missing pose severs the link;
+first recovered pose seeds current-only and the next compatible pair may warp.
+Device/clock epoch replacement resets sequence ordering; changed calibration/map
+owner requires explicit compatible reconfiguration or a new native stage. Old
+consumer leases must remain usable. Late/duplicate time or capture ID within an
+epoch cannot enter history.
+
+`benchmarks/temporal_known_motion_oracle.py` and its tests provide independent
+CPU timed-world-point/math cases, not an executed GPU temporal pipeline. Exact
+rational fixtures (including representable quarter-depth tolerance boundaries)
+qualify their defined byte/mask expectations. Broader float64 geometric reference
+results do not assert general float32 GPU byte equality or hide discrete errors
+behind an epsilon. Current work counters distinguish scanned/projected/eligible/
+winning/fused/filled samples; they do not count saved SGM work. Adaptive candidate
+AND aggregation accounting remains a subsequent native deliverable.

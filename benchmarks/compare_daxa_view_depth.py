@@ -328,7 +328,7 @@ def normalize_control_owners(raw,geometry):
 
 
 VIEW_ENTRIES=('clear','clear_layers','splat_layer_depth','splat_layer_owner','histogram_ratios','reduce_ratios','resolve_layers','gather_project_metadata','inspect_outputs')
-SOURCE_FILES=('benchmarks/compare_daxa_view_depth.py','apps/daxa_view_depth_fixture.cpp','apps/daxa_view_depth_common.hpp','apps/daxa_view_depth_benchmark.cpp','src/daxa_view.cpp','src/daxa_view_calibration.cpp','include/stereoforge/daxa_view.hpp','include/stereoforge/daxa_view_calibration.hpp','include/stereoforge/daxa_view_parameters.hpp','apps/native_view_benchmark.cpp','src/geometry.cpp','python/stereoforge/shaders/daxa/view_depth.slang','python/stereoforge/shaders/daxa/view.slang','python/stereoforge/shaders/ops/projection.slang','python/stereoforge/shaders/fusion/project.slang','CMakeLists.txt')
+SOURCE_FILES=('src/daxa_observation.cpp','include/stereoforge/daxa_observation.hpp','benchmarks/compare_daxa_view_depth.py','apps/daxa_view_depth_fixture.cpp','apps/daxa_view_depth_common.hpp','apps/daxa_view_depth_benchmark.cpp','src/daxa_view.cpp','src/daxa_view_calibration.cpp','include/stereoforge/daxa_view.hpp','include/stereoforge/daxa_view_calibration.hpp','include/stereoforge/daxa_view_parameters.hpp','apps/native_view_benchmark.cpp','src/geometry.cpp','python/stereoforge/shaders/daxa/view_depth.slang','python/stereoforge/shaders/daxa/view.slang','python/stereoforge/shaders/ops/projection.slang','python/stereoforge/shaders/fusion/project.slang','CMakeLists.txt')
 
 
 def native_identities(rhi,native,compiler,manifest):
@@ -340,7 +340,7 @@ def native_identities(rhi,native,compiler,manifest):
         for entry in VIEW_ENTRIES:identity['offline_spirv_sha256'][prefix+entry+'.spv']=base.sha256(directory/(prefix+entry+'.spv'))
     # Preserve every additional compiled control in this actual offline directory.
     for path in sorted(directory.glob('*.spv')):identity['offline_spirv_sha256'][path.name]=base.sha256(path)
-    identity['compiler_input_sha256']['view_daxa']=depth.compiler_header_identities(directory,(('daxa_view_depth_fixture','apps/daxa_view_depth_fixture.cpp'),('stereoforge_daxa_view','src/daxa_view.cpp'),('stereoforge_daxa_view','src/daxa_view_calibration.cpp')))
+    identity['compiler_input_sha256']['view_daxa']=depth.compiler_header_identities(directory,(('stereoforge_daxa_foundation','src/daxa_observation.cpp'),('daxa_view_depth_fixture','apps/daxa_view_depth_fixture.cpp'),('stereoforge_daxa_view','src/daxa_view.cpp'),('stereoforge_daxa_view','src/daxa_view_calibration.cpp')))
     identity['compiler_input_sha256']['view_rhi']=depth.compiler_header_identities(Path(rhi).resolve().parent,(('native_view_benchmark','apps/native_view_benchmark.cpp'),('stereoforge_runtime','src/geometry.cpp')))
     groups=dict(view_depth_shader_source_sha256_pair=('python/stereoforge/shaders/daxa/view_depth.slang','python/stereoforge/shaders/ops/projection.slang'),depth_shader_source_sha256_pair=('python/stereoforge/shaders/daxa/depth.slang','python/stereoforge/shaders/ops/stereo_observation.slang'),preprocess_shader_source_sha256_pair=('python/stereoforge/shaders/daxa/preprocess.slang','python/stereoforge/shaders/ops/preprocess.slang'))
     identity['view_shader_source_identities']={key:':'.join(base.sha256(ROOT/name) for name in names) for key,names in groups.items()}

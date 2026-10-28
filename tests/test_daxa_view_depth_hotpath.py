@@ -1,7 +1,7 @@
 """CPU-only guards/probes for retained calibrated DaxaView submission.
 
 The probe extracts production C++ methods; only GPU/device/graph and DepthFrame
-storage are mocked. Host timings exclude GPU/driver work and prove no GPU speed.
+storage are mocked. The common observation lease is probed separately. Host timings exclude GPU/driver work and prove no GPU speed.
 """
 import json
 from pathlib import Path
@@ -20,7 +20,8 @@ ROOT = Path(__file__).resolve().parents[1]
 def check_view_hotpath(source):
     signatures = ('void DaxaView::Impl::validate_frame(', 'void DaxaView::Impl::bind(',
                   'size_t collect_at(', 'size_t DaxaView::collect(', 'bool DaxaView::can_project(',
-                  'DaxaView::Frame DaxaView::project(DaxaDepthPipeline::Frame const&')
+                  'DaxaView::Frame DaxaView::project(DaxaObservationFrame const&')
+    assert body(source, 'DaxaView::Frame DaxaView::project(DaxaDepthPipeline::Frame const&').strip() == 'return project(input.observations());'
     hot = '\n'.join(body(source, signature) for signature in signatures)
     forbidden = r'\b(?:make_shared|make_unique|new|malloc|calloc|realloc|aligned_alloc|allocate|create_\w+|destroy_\w+|wait\w*|readback\w*|inspect|upload|sha256|sha_file|strict_json|metric_calibration|prepare_daxa_view_calibration|memcpy|memmove|resize|reserve|push_back|emplace_back|register_buffer|add_task|submit_commands)\s*(?:<[^;()]*>)?\s*\(|\b(?:vector|ifstream|ofstream|TaskGraph|ExternalTaskBuffer)\b|\.geometry|\b(?:R1|R2|P1|P2)\['
     assert not re.search(forbidden, hot) and not re.search(r'\bnew\b|\b\w*(?:sha256|hash|strict_json)\w*\s*\(|(?:maps|calibration)->validate\s*\(', hot), 'no per-frame allocation, wait, readback, matrix validation, hash/JSON or image copy'
@@ -42,7 +43,7 @@ def check_view_hotpath(source):
     admission = body(source, 'bool DaxaView::can_project(')
     assert admission.count('for(') == 1 and 'while(' not in admission
     assert admission.count('oldest_pending_submit_index(') == 1 and 'collect_at(pending)' in admission
-    project = body(source, 'DaxaView::Frame DaxaView::project(DaxaDepthPipeline::Frame const&')
+    project = body(source, 'DaxaView::Frame DaxaView::project(DaxaObservationFrame const&')
     assert project.count('for(') == 1 and 'while(' not in project, 'only bounded slot admission may loop'
     assert project.count('oldest_pending_submit_index(') == 1 and 'collect_at(pending)' in project
     assert project.index('e.validate_frame(input)') < project.index('oldest_pending_submit_index(') < project.index('e.bind(') < project.index('graph->execute(')
@@ -61,7 +62,7 @@ def test_no_per_frame_alloc_wait_readback_matrix_validation():
                                     'for(unsigned pixel=0;pixel<width*height;++pixel){}'])
 def test_guard_rejects_costly_work_in_actual_typed_project(mutation):
     source = (ROOT/'src/daxa_view.cpp').read_text()
-    marker = 'DaxaView::Frame DaxaView::project(DaxaDepthPipeline::Frame const& input){'
+    marker = 'DaxaView::Frame DaxaView::project(DaxaObservationFrame const& input){'
     assert marker in source
     with pytest.raises(AssertionError):
         check_view_hotpath(source.replace(marker, marker+mutation, 1))
@@ -70,14 +71,14 @@ def test_guard_rejects_costly_work_in_actual_typed_project(mutation):
 def test_preallocated_graph_and_frame_ownership_reuse_setup_resources():
     source = (ROOT/'src/daxa_view.cpp').read_text()
     slot = body(source, 'struct DaxaView::Slot')
-    assert 'DaxaDepthPipeline::Frame input' in slot and 'CaptureLease source' in slot
+    assert 'DaxaObservationFrame input' in slot and 'CaptureLease source' in slot
     assert 'std::vector<std::shared_ptr<Slot>> slots' in source
     setup = body(source, 'void DaxaView::Impl::setup_slots(')
     assert 'slots.push_back(std::make_shared<Slot>())' in setup
     assert 'slot.external.emplace(' in setup and 'graph.register_buffer(' in setup and 'graph.complete({})' in setup
     captures = re.findall(r'\.executes\(\[([^]]*)\]', setup)
     assert captures and all(not re.search(r'\b(?:prototype|frame|input)\b', capture) for capture in captures)
-    constructor = body(source, 'DaxaView::DaxaView(GeometryConfig c,VirtualView const&')
+    constructor = body(source, 'DaxaView::DaxaView(GeometryConfig c,VirtualView const& v,std::shared_ptr<DaxaFoundation> context,DaxaObservationFrame const&')
     assert 'e.maps=std::move(maps)' in constructor and 'e.setup_slots(' in constructor
     assert not re.search(r'\b(?:slot\.input|slot->input)\s*=\s*prototype', constructor), 'setup cannot retain the constructor prototype'
 
@@ -130,15 +131,15 @@ struct CaptureFrame{uint64_t frame_id=0,host_ingress_timestamp_ns=0;};using Capt
 struct Maps{};
 struct Device{uint64_t oldest=1,latest=0,snapshots=0,gc=0;void collect_garbage(){++gc;}void* get(){return this;}uint64_t oldest_pending_submit_index(){++snapshots;return oldest;}uint64_t latest_queue_submit_index(int){return latest;}struct Host{uint64_t id;void* value(){return reinterpret_cast<void*>(id);}};Host buffer_host_address(uint64_t id){return {id};}struct Address{uint64_t id;uint64_t value(){return id;}};Address device_address(uint64_t id){return {id};}};
 struct Context{Device device;};
-enum class DaxaDepthPlane{LRDisparity,LRConfidence,LRValidity,Depth,MetricConfidence,MetricValidity,Provenance,SourceIds,AgeNs};
-enum class DaxaPreprocessPlane{RectifiedLeft,RectifiedRight,OriginalLeft,OriginalRight};
+enum class DaxaObservationPlane{Depth,Confidence,Validity,Provenance,SourceIds,AgeNs};
+enum class DaxaObservationImage{OriginalLeft,OriginalRight,RectifiedLeft,RectifiedRight};
 struct Input{std::shared_ptr<Context> context;std::shared_ptr<const Maps> maps;CaptureLease source;uint64_t marker=0;unsigned width=1280,height=720;};
-class DaxaDepthPipeline{public:class Frame{public:std::shared_ptr<Context> owner;std::shared_ptr<Input> input;uint64_t generation=1;explicit operator bool()const{return bool(input);}uint64_t context_id()const{return reinterpret_cast<uintptr_t>(input->context->device.get());}auto calibration()const{return input->maps;}unsigned width()const{return input->width;}unsigned height()const{return input->height;}unsigned layers()const{return 2;}size_t size_bytes(DaxaDepthPlane p)const{return 2ull*width()*height()*(unsigned(p)>=7?8:4);}CaptureLease source()const{return input->source;}uint64_t buffer(DaxaDepthPlane p)const{return input->marker+unsigned(p)+1;}struct Image{uint64_t id;uint64_t buffer()const{return id;}};Image image(DaxaPreprocessPlane p)const{return {input->marker+unsigned(p)+20};}};};
+class DaxaObservationFrame{public:std::shared_ptr<Context> owner;std::shared_ptr<Input> input;uint64_t generation=1;explicit operator bool()const{return bool(input);}uint64_t context_id()const{return reinterpret_cast<uintptr_t>(input->context->device.get());}auto calibration()const{return input->maps;}unsigned width()const{return input->width;}unsigned height()const{return input->height;}unsigned layers()const{return 2;}size_t size_bytes(DaxaObservationPlane p)const{return 2ull*width()*height()*(unsigned(p)>=4?8:4);}CaptureLease source()const{return input->source;}uint64_t buffer(DaxaObservationPlane p)const{return input->marker+unsigned(p)+1;}struct Image{uint64_t id;uint64_t buffer()const{return id;}};Image image(DaxaObservationImage p)const{return {input->marker+unsigned(p)+20};}};
 struct External{uint64_t id=0;void set_buffer(uint64_t value){id=value;}};
 struct Graph{Device* device;unsigned* visited;unsigned* finished;unsigned executions=0;void execute(std::initializer_list<int>){++executions;++device->latest;*visited=*finished=8;}};
-class DaxaView{public:struct Slot{std::map<std::string,daxa::BufferId,std::less<>> buffers;std::map<std::string,External,std::less<>> external;std::unique_ptr<Graph> graph;DaxaDepthPipeline::Frame input;CaptureLease source;int64_t timestamp=0;uint64_t submit=0,generation=0;unsigned visited=0,finished=0;};
- struct Impl{std::shared_ptr<Context> context;std::shared_ptr<const Maps> maps;GeometryConfig config{1280,720,1280,720};bool typed=true;uint64_t next_generation=1;std::vector<std::shared_ptr<Slot>> slots;void require_thread()const{}void validate_frame(DaxaDepthPipeline::Frame const&)const;void bind(Slot&,DaxaDepthPipeline::Frame const&);size_t collect_at(uint64_t);};
- std::shared_ptr<Impl> impl_;class Frame{std::shared_ptr<Impl> owner_;std::shared_ptr<Slot> slot_;uint64_t generation_=0;friend class DaxaView;Frame(std::shared_ptr<Impl>,std::shared_ptr<Slot>);void validate()const;public:Frame()=default;Frame(Frame const&)=default;Frame(Frame&&)noexcept=default;Frame& operator=(Frame)noexcept;CaptureLease source()const;int64_t timestamp_ns()const;uint64_t generation()const;};size_t collect();bool can_project()const;Frame project(DaxaDepthPipeline::Frame const&);
+class DaxaView{public:struct Slot{std::map<std::string,daxa::BufferId,std::less<>> buffers;std::map<std::string,External,std::less<>> external;std::unique_ptr<Graph> graph;DaxaObservationFrame input;CaptureLease source;int64_t timestamp=0;uint64_t submit=0,generation=0;unsigned visited=0,finished=0;};
+ struct Impl{std::shared_ptr<Context> context;std::shared_ptr<const Maps> maps;GeometryConfig config{1280,720,1280,720};bool typed=true;uint64_t next_generation=1;std::vector<std::shared_ptr<Slot>> slots;void require_thread()const{}void validate_frame(DaxaObservationFrame const&)const;void bind(Slot&,DaxaObservationFrame const&);size_t collect_at(uint64_t);};
+ std::shared_ptr<Impl> impl_;class Frame{std::shared_ptr<Impl> owner_;std::shared_ptr<Slot> slot_;uint64_t generation_=0;friend class DaxaView;Frame(std::shared_ptr<Impl>,std::shared_ptr<Slot>);void validate()const;public:Frame()=default;Frame(Frame const&)=default;Frame(Frame&&)noexcept=default;Frame& operator=(Frame)noexcept;CaptureLease source()const;int64_t timestamp_ns()const;uint64_t generation()const;};size_t collect();bool can_project()const;Frame project(DaxaObservationFrame const&);
 };
 '''
     program += definition(source, 'size_t collect_at(').replace('size_t collect_at(', 'size_t DaxaView::Impl::collect_at(', 1)
@@ -146,7 +147,7 @@ class DaxaView{public:struct Slot{std::map<std::string,daxa::BufferId,std::less<
                       'DaxaView::Frame::Frame(', 'DaxaView::Frame& DaxaView::Frame::operator=(', 'void DaxaView::Frame::validate(',
                       'CaptureLease DaxaView::Frame::source(', 'int64_t DaxaView::Frame::timestamp_ns(',
                       'uint64_t DaxaView::Frame::generation(', 'size_t DaxaView::collect(',
-                      'bool DaxaView::can_project(', 'DaxaView::Frame DaxaView::project(DaxaDepthPipeline::Frame const&'):
+                      'bool DaxaView::can_project(', 'DaxaView::Frame DaxaView::project(DaxaObservationFrame const&'):
         program += definition(source, signature)
     program += r'''
 }
@@ -156,7 +157,7 @@ int main(){try{
  auto context=std::make_shared<Context>();auto engine=std::make_shared<DaxaView::Impl>();engine->context=context;engine->maps=std::make_shared<Maps>();DaxaView view;view.impl_=engine;
  std::array<detail::DepthViewParameters,2> parameters{};
  for(unsigned i=0;i<2;++i){auto slot=std::make_shared<DaxaView::Slot>();for(auto name:{"parameters","source_depth","source_confidence","source_provenance","source_ids","source_ages","source_rgb","rectified_right_rgb","original_left_rgb","original_right_rgb"}){slot->buffers.emplace(name,0);slot->external.emplace(name,External{});}slot->buffers.find("parameters")->second=reinterpret_cast<uintptr_t>(&parameters[i]);slot->graph=std::make_unique<Graph>(Graph{&context->device,&slot->visited,&slot->finished});engine->slots.push_back(std::move(slot));}
- std::array<DaxaDepthPipeline::Frame,2> inputs;for(unsigned i=0;i<2;++i){auto s=std::make_shared<CaptureFrame>();s->frame_id=7;s->host_ingress_timestamp_ns=100+i;auto in=std::make_shared<Input>();in->context=context;in->maps=engine->maps;in->source=s;in->marker=1000+100*i;inputs[i].owner=context;inputs[i].input=std::move(in);}
+ std::array<DaxaObservationFrame,2> inputs;for(unsigned i=0;i<2;++i){auto s=std::make_shared<CaptureFrame>();s->frame_id=7;s->host_ingress_timestamp_ns=100+i;auto in=std::make_shared<Input>();in->context=context;in->maps=engine->maps;in->source=s;in->marker=1000+100*i;inputs[i].owner=context;inputs[i].input=std::move(in);}
  auto complete=[&]{context->device.oldest=context->device.latest+1;};
  check(view.can_project(),"initial admission failed");auto first=view.project(inputs[0]);complete();auto second=view.project(inputs[1]);complete();check(first.source()==inputs[0].source()&&second.source()==inputs[1].source(),"slot source metadata overwritten");check(first.timestamp_ns()==100&&second.timestamp_ns()==101,"slot timestamp changed");check(first.generation()!=second.generation(),"same source ID generations aliased");
  auto submissions=context->device.latest;unsigned upstream_uploads=0;auto offer=[&]{if(!view.can_project())return false;++upstream_uploads;return true;};check(!offer()&&upstream_uploads==0&&context->device.latest==submissions,"retained ring accepted upstream upload");check(view.collect()==0,"retained input retired");first={};second={};check(view.collect()==2,"completed unleased inputs not retired");for(auto& s:engine->slots)check(!s->input&&!s->source,"retirement kept hidden producer");
@@ -170,14 +171,14 @@ int main(){try{
  for(unsigned i=0;i<frames;++i){check(view.can_project(),"warm admission failed");auto out=view.project(inputs[i%2]);check(out.source()==inputs[i%2].source(),"actual bind dropped producer");complete();out={};}
  view.collect();double ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();tracking=false;
  check(allocations==0,"application allocation in warmed project/admission/retirement");check(context->device.gc-before_gc==frames,"actual project must reclaim Daxa pools once per frame");check(context->device.snapshots-before==2*frames+1,"view poll count changed: one upstream admission plus one project snapshot per frame and final collect");check(engine->slots[0]->graph->executions+engine->slots[1]->graph->executions-executions==frames,"preallocated graph not reused");
- for(auto& s:engine->slots){check(s->buffers.size()==10&&s->external.size()==10,"binding registry grew");check(!s->input&&!s->source,"warm completed source retained");}for(auto& in:inputs)check(in.input.use_count()==1,"source producer pinned after collect");check(parameters[0].view.address_source_depth==inputs[1].buffer(DaxaDepthPlane::Depth),"actual parameter addresses not rebound");check(parameters[0].original_right_rgb==inputs[1].image(DaxaPreprocessPlane::OriginalRight).buffer(),"original RGB namespace not rebound");
+ for(auto& s:engine->slots){check(s->buffers.size()==10&&s->external.size()==10,"binding registry grew");check(!s->input&&!s->source,"warm completed source retained");}for(auto& in:inputs)check(in.input.use_count()==1,"source producer pinned after collect");check(parameters[0].view.address_source_depth==inputs[1].buffer(DaxaObservationPlane::Depth),"actual parameter addresses not rebound");check(parameters[0].original_right_rgb==inputs[1].image(DaxaObservationImage::OriginalRight).buffer(),"original RGB namespace not rebound");
  auto keep=view.project(inputs[1]);auto retained=std::weak_ptr<DaxaView::Impl>(engine);view.impl_.reset();engine.reset();check(!retained.expired()&&keep.source()==inputs[1].source(),"output did not retain engine and producer");keep={};check(retained.expired(),"view lease ownership cycle");
  std::cout<<"{\"frames\":"<<frames<<",\"application_allocations\":"<<allocations<<",\"view_admission_and_project_snapshots\":"<<2*frames<<",\"final_collect_snapshots\":1,\"mean_cpu_ms\":"<<ms/frames<<",\"retained_sources_bounded\":true,\"registry_nodes_per_slot\":20,\"graph_reused\":true,\"retained_ring_rejects_before_upstream_upload\":true,\"scope\":\"actual_View_project_bind_validate_admission_retirement_fake_GPU_no_image_copy\"}\n";
  return 0;
  }catch(std::exception const& e){tracking=false;std::cerr<<e.what()<<'\n';return 1;}}
 '''
     setup = body(source, 'void DaxaView::Impl::setup_slots(')
-    constructor = body(source, 'DaxaView::DaxaView(GeometryConfig c,VirtualView const&')
+    constructor = body(source, 'DaxaView::DaxaView(GeometryConfig c,VirtualView const& v,std::shared_ptr<DaxaFoundation> context,DaxaObservationFrame const&')
     names = set(re.findall(r'e\.inputs\["([^"]+)"\]', constructor))
     names.update(re.findall(r'e\.upload\(recorder,"([^"]+)"', constructor))
     names.update(re.findall(r'slot\.buffers\["([^"]+)"\]', setup))
@@ -211,7 +212,7 @@ def test_actual_view_admission_projection_and_retirement_cpu_probe(tmp_path_fact
 @pytest.mark.parametrize('mutation', ['allocation', 'retained_admission', 'upstream_admission'])
 def test_actual_view_probe_detects_hot_allocation_and_retained_slot_overwrite(tmp_path_factory, mutation):
     def transform(source):
-        marker = 'DaxaView::Frame DaxaView::project(DaxaDepthPipeline::Frame const& input){'
+        marker = 'DaxaView::Frame DaxaView::project(DaxaObservationFrame const& input){'
         assert marker in source
         if mutation == 'allocation':
             return source.replace(marker, marker+'auto allocation_guard=std::make_shared<int>(42);', 1)

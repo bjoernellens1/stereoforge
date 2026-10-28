@@ -1,5 +1,6 @@
 #pragma once
 #include <stereoforge/daxa_preprocess.hpp>
+#include <stereoforge/daxa_observation.hpp>
 namespace stereoforge {
 enum class DaxaDepthStereoSchedule { Sequential,PairedPerPath,LayeredPerPath,SharedCensusSequential };
 struct DaxaDepthConfig {
@@ -46,6 +47,7 @@ public:
     public:
         Frame()=default;Frame(const Frame&)=default;Frame(Frame&&)noexcept=default;Frame& operator=(Frame)noexcept;
         explicit operator bool()const{return bool(owner_&&slot_);}
+        DaxaObservationFrame observations()const;
         void wait()const;bool ready()const;
         uint32_t width()const;uint32_t height()const;uint32_t layers()const{return 2;}
         uint64_t generation()const;uint64_t context_id()const;
