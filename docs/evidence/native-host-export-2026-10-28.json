@@ -1,0 +1,239 @@
+{
+  "date": "2026-10-28",
+  "lane": "bounded native host-export static GPU correctness and CPU contracts",
+  "qualification": false,
+  "production_freeze_sha256": {
+    "src/daxa_host_export.cpp": "05544565a272c8bd6e26e63881a2a23846d3aaedfb68d1a5f8f73d1135290921",
+    "include/stereoforge/daxa_host_export.hpp": "c02fa132c566da84a7975466819ad92fe6f3a1269997bcff980b231be3dcfbaa",
+    "tests/daxa_host_export.cpp": "1e301b4312d962109747acb17d6acf9017e488a09bada8db9498035eae5708fc",
+    "build/daxa/daxa_host_export_contracts": "00947722efaee2072bde221736c4beab0f4e6ecd35c68f728540df4572f32522"
+  },
+  "evidence_log_sha256": {
+    "artifacts/zed-task7/native-export-build.log": "61e9d58f2653c2e5e1296039bc6c26bd064812858c623b70b27332fb4ba01803",
+    "artifacts/zed-task7/native-export-freeze.sha256": "39719dd4643c0fafc8ee21c49f629c8d7da9a6e3c84be1ffb063caa50005f330",
+    "artifacts/zed-task7/native-export-regression.log": "f04ecd4d5417f02c0c8a73812a61837f40c2038036fd45c6c7f552a43b1e3fd8",
+    "artifacts/zed-task7/native-export-gpu-validation.log": "6a2b2dd303907755491f3fb401bd669edd53e0335b212640bc47ca0227d37a5f",
+    "artifacts/zed-task7/native-export-gpu-sync-validation.log": "6a2b2dd303907755491f3fb401bd669edd53e0335b212640bc47ca0227d37a5f",
+    "artifacts/zed-task7/native-export-cpu-build.log": "16c56e69142316802dfc8fd47fba7abe98a62919678c5e3f4098c9ae2768a017"
+  },
+  "build": {
+    "linked": true,
+    "private_vma_link_fix": "applied by supervisor",
+    "compiler_warnings_present": true
+  },
+  "cpu_regression": {
+    "passed": 2546,
+    "deselected": 37,
+    "seconds": 150.17
+  },
+  "functional_review": {
+    "clock_oracle_cases": 500000,
+    "release_ctest_passed": 1,
+    "release_ctest_total": 1,
+    "sanitizer_qualified": false
+  },
+  "gpu": {
+    "width": 128,
+    "height": 64,
+    "static_cycles_per_run": 30,
+    "exact_selective_bytes": true,
+    "core_validation_passed": true,
+    "explicit_sync_validation_passed": true,
+    "sync_environment": {
+      "VK_LAYER_VALIDATE_SYNC": "1"
+    },
+    "final_validation_log_errors": 0,
+    "final_validation_log_warnings": 0,
+    "memory_type_index": 5,
+    "property_flags": 14,
+    "host_cached": true,
+    "bytes_per_slot": 65536,
+    "requested_bytes": 131072,
+    "slots": 2,
+    "exclusive_global_reservation": false,
+    "reservation": "cooperative flock; desktop renderers also present",
+    "selected_explicit_environment": {
+      "VK_DRIVER_FILES": "/usr/share/vulkan/icd.d/radeon_icd.x86_64.json",
+      "VK_LAYER_VALIDATE_SYNC": "1"
+    },
+    "final_sync_validation_after_dependency_freeze": true
+  },
+  "performance": {
+    "tests_passed": 30,
+    "current_json_mock_ns_range": [
+      22.8789,
+      33.5408
+    ],
+    "range_note": "Latest full-suite mock sample; separate pass from historical narrow review. Not real enqueue latency.",
+    "actual_source_enqueue_evidence": {
+      "scope": "actual production export enqueue + collect; bounded API mocks; no GPU/driver/copy or ROS cost",
+      "source_sha256": {
+        "src/daxa_host_export.cpp": "05544565a272c8bd6e26e63881a2a23846d3aaedfb68d1a5f8f73d1135290921",
+        "include/stereoforge/daxa_host_export.hpp": "c02fa132c566da84a7975466819ad92fe6f3a1269997bcff980b231be3dcfbaa",
+        "src/daxa_frame.cpp": "c0ebf12ff4ce9640bbed087ec3744a8610868c98fa00f1b861473c0ddeed8517",
+        "src/daxa_observation.cpp": "2275b7131bc3d2f4226febfc6fee4464631e2d44266e27cc8ac8cfa01d2d5bac",
+        "include/stereoforge/daxa_frame.hpp": "9ccd53c92819bf89a099beef96dd57c3971090882b3fc6d3a9a34268cf74b56a",
+        "include/stereoforge/daxa_observation.hpp": "506080b3189905cf759c85f126e6549c30ea67e7548af51f3bd6cd5986346c86",
+        "include/stereoforge/ros_depth_contract.hpp": "117d864f851517d80f48331f0e19866e3a7c9801c6b1560388bacc1b60fb6cde"
+      },
+      "translation_unit_sha256": "bbaa8fbee899c5ca441acde9f6ff89936d564e10934672442a8f755d35bb8be3",
+      "command": [
+        "/usr/bin/c++",
+        "-std=c++20",
+        "-O3",
+        "-pthread",
+        "/home/bjoern/git/stereoforge-implementation/artifacts/zed-task3/regression-tmp/native-export-final/test_actual_source_enqueue_cpu0/export_performance.cpp",
+        "-o",
+        "/home/bjoern/git/stereoforge-implementation/artifacts/zed-task3/regression-tmp/native-export-final/test_actual_source_enqueue_cpu0/export_performance"
+      ],
+      "rows": [
+        {
+          "mode": 0,
+          "run": 0,
+          "frames": 65536,
+          "cpu_ns_per_enqueue_collect": 31.637,
+          "application_allocations": 0,
+          "waits": 0,
+          "copies_per_enqueue": 1
+        },
+        {
+          "mode": 0,
+          "run": 1,
+          "frames": 65536,
+          "cpu_ns_per_enqueue_collect": 31.65,
+          "application_allocations": 0,
+          "waits": 0,
+          "copies_per_enqueue": 1
+        },
+        {
+          "mode": 0,
+          "run": 2,
+          "frames": 65536,
+          "cpu_ns_per_enqueue_collect": 31.6412,
+          "application_allocations": 0,
+          "waits": 0,
+          "copies_per_enqueue": 1
+        },
+        {
+          "mode": 1,
+          "run": 0,
+          "frames": 65536,
+          "cpu_ns_per_enqueue_collect": 31.6817,
+          "application_allocations": 0,
+          "waits": 0,
+          "copies_per_enqueue": 1
+        },
+        {
+          "mode": 1,
+          "run": 1,
+          "frames": 65536,
+          "cpu_ns_per_enqueue_collect": 33.5408,
+          "application_allocations": 0,
+          "waits": 0,
+          "copies_per_enqueue": 1
+        },
+        {
+          "mode": 1,
+          "run": 2,
+          "frames": 65536,
+          "cpu_ns_per_enqueue_collect": 28.2985,
+          "application_allocations": 0,
+          "waits": 0,
+          "copies_per_enqueue": 1
+        },
+        {
+          "mode": 2,
+          "run": 0,
+          "frames": 65536,
+          "cpu_ns_per_enqueue_collect": 22.962,
+          "application_allocations": 0,
+          "waits": 0,
+          "copies_per_enqueue": 2
+        },
+        {
+          "mode": 2,
+          "run": 1,
+          "frames": 65536,
+          "cpu_ns_per_enqueue_collect": 23.0359,
+          "application_allocations": 0,
+          "waits": 0,
+          "copies_per_enqueue": 2
+        },
+        {
+          "mode": 2,
+          "run": 2,
+          "frames": 65536,
+          "cpu_ns_per_enqueue_collect": 22.9659,
+          "application_allocations": 0,
+          "waits": 0,
+          "copies_per_enqueue": 2
+        },
+        {
+          "mode": 3,
+          "run": 0,
+          "frames": 65536,
+          "cpu_ns_per_enqueue_collect": 22.8849,
+          "application_allocations": 0,
+          "waits": 0,
+          "copies_per_enqueue": 1
+        },
+        {
+          "mode": 3,
+          "run": 1,
+          "frames": 65536,
+          "cpu_ns_per_enqueue_collect": 22.8789,
+          "application_allocations": 0,
+          "waits": 0,
+          "copies_per_enqueue": 1
+        },
+        {
+          "mode": 3,
+          "run": 2,
+          "frames": 65536,
+          "cpu_ns_per_enqueue_collect": 23.0031,
+          "application_allocations": 0,
+          "waits": 0,
+          "copies_per_enqueue": 1
+        }
+      ]
+    },
+    "actual_source_enqueue_json_sha256": "bbe3f0ba9a3dbb9c89f33b7c18caa5b8e2e1fff6c735e572dc2963c8f3df1573",
+    "excluded": [
+      "real producer object size/copy cost",
+      "Daxa",
+      "driver",
+      "GPU transfer/completion",
+      "ROS",
+      "physical capture"
+    ]
+  },
+  "open_gates": [
+    "live input",
+    "720p throughput",
+    "FPS",
+    "real ROS publisher/application",
+    "measured clock mapping",
+    "600-second delivery report",
+    "SDK benchmark (user authorized; not executed here)"
+  ],
+  "failure_policy": {
+    "explicit_frame_wait_and_drain": "throw on failure",
+    "uninspectable_partial_submit": "terminate; retain pending resources",
+    "destructor_wait_failure": "terminate; avoid freeing pending resources"
+  },
+  "default_cpu_ctest": {
+    "passed": 2,
+    "total": 2
+  },
+  "dependency_freeze": {
+    "path": "artifacts/zed-task7/native-export-dependency-freeze.json",
+    "sha256": "84458b089ee55f31e12003f4c94ae6073bf0e4f39baa75bc2de2472af984b50e",
+    "verified_file_hashes": 176,
+    "hash_mismatches": 0,
+    "scope": "static correctness freeze; not complete performance or scientific qualification",
+    "device_sysfs": {
+      "/sys/class/drm/card1/device/vendor": "0x1002",
+      "/sys/class/drm/card1/device/device": "0x1586"
+    }
+  }
+}

@@ -35,7 +35,7 @@ public:
     DaxaFrame& operator=(DaxaFrame other)noexcept;
     explicit operator bool()const{return bool(owner_&&slot_);}
     void wait()const;bool ready()const;
-    uint64_t generation()const;uint64_t context_id()const;
+    uint64_t generation()const;uint64_t submit_ticket()const;uint64_t context_id()const;
     CaptureLease source()const;std::shared_ptr<const DaxaRectification> calibration()const;
     DaxaImageView plane(DaxaPreprocessPlane)const;
 };

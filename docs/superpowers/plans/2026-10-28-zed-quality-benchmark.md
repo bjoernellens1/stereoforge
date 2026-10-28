@@ -185,6 +185,7 @@ obsolete-setting warnings.
 **Files:** Create `benchmarks/zed_comparison/report.py`, `benchmarks/zed_comparison/ros2_delivery.py`, `apps/ros2_depth_publisher.cpp`, `cmake/ROS2.cmake`, `tests/test_zed_report.py`, `tests/test_zed_ros2_delivery.py`, `docs/zed-quality-benchmark.md`; optional default-OFF root CMake inclusion only.
 **Interfaces:** Consumes Tasks 4–6 reports and native observation leases. Produces optional C++ `stereoforge_ros2_depth_publisher` (`rclcpp`/`sensor_msgs`), `build_report(records: list[dict], policy: dict) -> dict` and `summarize_delivery(events: list[dict]) -> dict`; Python remains offline evaluation, not the live pipeline.
 
+- [x] Native publication prerequisite: persistent selective left-depth/RGBA export with producer/copy/host ownership and ROS-independent checked clock/image contracts. Actual128×64 GPU copy/synchronization and portable regression verified; [implementation and evidence](../../native-host-export-evidence.md). This does not complete ROS delivery or its qualification.
 - [ ] RED: add `test_599_seconds_unqualified`, `test_repeated_depth_not_unique`, `test_queue_growth_rejects_sustained`, `test_missing_quality_blocks_promotion`, `test_ros_units_qos_and_frame_identity`.
 - [ ] Run `python -m pytest tests/test_zed_report.py tests/test_zed_ros2_delivery.py -q`; expect missing interfaces failure.
 - [ ] Implement ≥600 s nominal60 Hz delivery accounting for unique depth/RGB, drops/gaps/observation age/queue growth/memory, bounded 2–3 slots and separately fixed View; include RGB-only teleoperation as a distinct mode.

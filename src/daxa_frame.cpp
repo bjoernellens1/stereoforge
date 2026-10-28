@@ -7,6 +7,7 @@ DaxaFrame& DaxaFrame::operator=(DaxaFrame other)noexcept{owner_.swap(other.owner
 void DaxaFrame::validate()const{require(owner_&&slot_&&owner_->context&&owner_->context->device.get()&&generation_==slot_->generation&&slot_->source&&slot_->calibration,"empty/stale Daxa preprocessing lease");}
 void DaxaFrame::wait()const{validate();auto& d=owner_->context->device;d.wait_on_submit({.queue=daxa::QUEUE_MAIN,.queue_submit_index=slot_->submit,.timeout=30'000'000'000ull});}
 bool DaxaFrame::ready()const{validate();return detail::completed_submission(slot_->submit,owner_->context->device.oldest_pending_submit_index());}
+uint64_t DaxaFrame::submit_ticket()const{validate();return slot_->submit;}
 uint64_t DaxaFrame::generation()const{validate();return generation_;}uint64_t DaxaFrame::context_id()const{validate();return reinterpret_cast<uintptr_t>(owner_->context->device.get());}
 CaptureLease DaxaFrame::source()const{validate();return slot_->source;}std::shared_ptr<const DaxaRectification> DaxaFrame::calibration()const{validate();return slot_->calibration;}
 DaxaImageView DaxaFrame::plane(DaxaPreprocessPlane p)const{validate();require(unsigned(p)<8,"invalid preprocessing plane");return DaxaImageView(*this,p);}
