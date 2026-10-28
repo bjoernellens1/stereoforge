@@ -1,0 +1,178 @@
+{
+  "schema": "stereoforge.quality_plane_evidence.v1",
+  "scope": "single analytic infinite-plane development fixture; not SDK, physical, held-out or throughput qualification",
+  "geometry": {
+    "width": 128,
+    "height": 64,
+    "depth_m": 1.44,
+    "disparity_pixels": 8,
+    "truth_samples": 8192,
+    "remap_support": 8001,
+    "both_stereo_visible": 7497
+  },
+  "generator": {
+    "source": "tests/test_zed_native_input.py:write_analytic_record",
+    "arguments": {
+      "width": 128,
+      "height": 64,
+      "disparity": 8
+    },
+    "truth": "Independent infinite plane Z=fx*baseline/8 on all rectified rays; no prediction used as truth."
+  },
+  "status": "unqualified",
+  "parity_qualified": false,
+  "reasons": [
+    "missing_executed_reference",
+    "provisional_policy"
+  ],
+  "results": [
+    {
+      "method": "StereoForge / full_sgm",
+      "input_identity": "385f8d43e723ea8b43ace18c70e9b5d0d7fd7cd9bcbdc244dc2080507d6dc1f2",
+      "requested": {
+        "truth_count": 8192,
+        "accepted_count": 6960,
+        "error_count": 6960,
+        "correct_count": null,
+        "accepted_incorrect_count": null,
+        "abs_error_sum_m": 79.58178936481472,
+        "relative_error_sum": 55.26513150334357,
+        "squared_error_sum_m2": 1.9628870169022128,
+        "mae_m": 0.011434165138622806,
+        "relative_mae": 0.00794039245737695,
+        "p95_abs_error_m": 0.03220444679260259,
+        "max_abs_error_m": 0.09583645820617681,
+        "rmse_m": 0.0167935700993372,
+        "false_accept_rate": null,
+        "conditional_false_accept_rate": null,
+        "completeness": 0.849609375,
+        "correct_completeness": null
+      },
+      "common_support": {
+        "truth_count": 8001,
+        "accepted_count": 6960,
+        "error_count": 6960,
+        "correct_count": null,
+        "accepted_incorrect_count": null,
+        "abs_error_sum_m": 79.58178936481472,
+        "relative_error_sum": 55.26513150334357,
+        "squared_error_sum_m2": 1.9628870169022128,
+        "mae_m": 0.011434165138622806,
+        "relative_mae": 0.00794039245737695,
+        "p95_abs_error_m": 0.03220444679260259,
+        "max_abs_error_m": 0.09583645820617681,
+        "rmse_m": 0.0167935700993372,
+        "false_accept_rate": null,
+        "conditional_false_accept_rate": null,
+        "completeness": 0.869891263592051,
+        "correct_completeness": null
+      },
+      "search_supported": {
+        "truth_count": 8192,
+        "accepted_count": 6960,
+        "error_count": 6960,
+        "correct_count": null,
+        "accepted_incorrect_count": null,
+        "abs_error_sum_m": 79.58178936481472,
+        "relative_error_sum": 55.26513150334357,
+        "squared_error_sum_m2": 1.9628870169022128,
+        "mae_m": 0.011434165138622806,
+        "relative_mae": 0.00794039245737695,
+        "p95_abs_error_m": 0.03220444679260259,
+        "max_abs_error_m": 0.09583645820617681,
+        "rmse_m": 0.0167935700993372,
+        "false_accept_rate": null,
+        "conditional_false_accept_rate": null,
+        "completeness": 0.849609375,
+        "correct_completeness": null
+      }
+    },
+    {
+      "method": "StereoForge / coarse_refine",
+      "input_identity": "385f8d43e723ea8b43ace18c70e9b5d0d7fd7cd9bcbdc244dc2080507d6dc1f2",
+      "requested": {
+        "truth_count": 8192,
+        "accepted_count": 5837,
+        "error_count": 5837,
+        "correct_count": null,
+        "accepted_incorrect_count": null,
+        "abs_error_sum_m": 0.00036182880370505544,
+        "relative_error_sum": 0.00025127000257295514,
+        "squared_error_sum_m2": 2.2429344387636038e-11,
+        "mae_m": 6.198883051311554e-08,
+        "relative_mae": 4.3047798967441345e-08,
+        "p95_abs_error_m": 6.198883051311554e-08,
+        "max_abs_error_m": 6.198883051311554e-08,
+        "rmse_m": 6.198883051311554e-08,
+        "false_accept_rate": null,
+        "conditional_false_accept_rate": null,
+        "completeness": 0.7125244140625,
+        "correct_completeness": null
+      },
+      "common_support": {
+        "truth_count": 8001,
+        "accepted_count": 5837,
+        "error_count": 5837,
+        "correct_count": null,
+        "accepted_incorrect_count": null,
+        "abs_error_sum_m": 0.00036182880370505544,
+        "relative_error_sum": 0.00025127000257295514,
+        "squared_error_sum_m2": 2.2429344387636038e-11,
+        "mae_m": 6.198883051311554e-08,
+        "relative_mae": 4.3047798967441345e-08,
+        "p95_abs_error_m": 6.198883051311554e-08,
+        "max_abs_error_m": 6.198883051311554e-08,
+        "rmse_m": 6.198883051311554e-08,
+        "false_accept_rate": null,
+        "conditional_false_accept_rate": null,
+        "completeness": 0.7295338082739657,
+        "correct_completeness": null
+      },
+      "search_supported": {
+        "truth_count": 8192,
+        "accepted_count": 5837,
+        "error_count": 5837,
+        "correct_count": null,
+        "accepted_incorrect_count": null,
+        "abs_error_sum_m": 0.00036182880370505544,
+        "relative_error_sum": 0.00025127000257295514,
+        "squared_error_sum_m2": 2.2429344387636038e-11,
+        "mae_m": 6.198883051311554e-08,
+        "relative_mae": 4.3047798967441345e-08,
+        "p95_abs_error_m": 6.198883051311554e-08,
+        "max_abs_error_m": 6.198883051311554e-08,
+        "rmse_m": 6.198883051311554e-08,
+        "false_accept_rate": null,
+        "conditional_false_accept_rate": null,
+        "completeness": 0.7125244140625,
+        "correct_completeness": null
+      }
+    }
+  ],
+  "evaluator_file_sha256": {
+    "benchmarks/zed_comparison/compare_quality.py": "0a371b28ccac75b44f2941eb5d9e11cf25350935a55de75374fa4c0e2edacfa4",
+    "benchmarks/zed_comparison/native_input.py": "43a9b74f9ee626543ef5309ec867f9a7d6ada312ae1638284a3f665795a1f93b",
+    "benchmarks/zed_comparison/native_observation.py": "d29a5b619717a2374abdd45795d560d0f4a38da589ed8581b990e61934a9b476",
+    "benchmarks/zed_comparison/quality_metrics.py": "198f56b2f0361a0190866298a7fdec933b0b48788c86972edbb2822f07df5174",
+    "benchmarks/zed_comparison/schema.py": "8f30c49fb44d2551764a0757e022dd514b7da149d329170318677db84d61fc08",
+    "benchmarks/zed_comparison/truth.py": "85059d0cbe8ed12f20a09bb2101787a776db3ace8daf1964931f6c28ad550cbc"
+  },
+  "environment": {
+    "python": "3.12.13 (main, Mar  3 2026, 14:59:34) [Clang 21.1.4 ]",
+    "numpy": "2.5.4"
+  },
+  "full_report_sha256": "3917c040b1f3bb711c614fa3aaac6938a94352dfed0e890c1bdd04b6cd2106f1",
+  "freeze_sha256": "447c64bcb7e3d89031b33e535186d03970245f0eaab5438856cfbc5de30b73bc",
+  "verification": {
+    "cpu_passed": 2290,
+    "gpu_camera_deselected": 37,
+    "cpu_skipped": 0,
+    "functional_component_passed": 131,
+    "component_and_performance_passed": 150,
+    "native_validation_errors": 0,
+    "native_validation_warnings": 0,
+    "retained_left_bytes_exact": true,
+    "evaluated_inputs_unchanged": true
+  },
+  "artifact_scope": "Full reports, dumps and review probes are retained in local ignored artifacts/zed-task4; this file publishes the compact metrics and source binding."
+}

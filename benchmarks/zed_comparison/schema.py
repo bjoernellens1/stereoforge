@@ -607,12 +607,12 @@ def _freeze_parameters(params, required_regions, frozen):
             _hex(value, 64, "partition_digest")
 
 
-def load_policy(path):
-    """Return unqualified or policy_ready, never a quality-qualified decision."""
-    path = Path(path)
-    if not path.exists():
-        return {"status": "unqualified", "reason": "missing_policy"}
-    policy = _read_json(path)
+def validate_policy(policy):
+    """Validate a policy document without mutation or a quality-qualified claim."""
+    try:
+        _json_value(policy)
+    except RecursionError as exc:
+        raise ValueError("policy nesting exceeds supported JSON depth") from exc
     _keys(policy, {"schema", "primary_reference", "frozen", "margins", "required_regions", "requested_range_m", "freeze_parameters"}, "policy")
     _require(policy["schema"] == POLICY_SCHEMA, "unknown policy schema")
     _require(policy["primary_reference"] == "NEURAL_LIGHT", "unknown primary reference")
@@ -633,3 +633,11 @@ def load_policy(path):
     _require(limits[0] < limits[1], "range must increase")
     _freeze_parameters(policy["freeze_parameters"], regions, policy["frozen"])
     return {**policy, "status": "policy_ready" if policy["frozen"] else "unqualified"}
+
+
+def load_policy(path):
+    """Return unqualified or policy_ready, never a quality-qualified decision."""
+    path = Path(path)
+    if not path.exists():
+        return {"status": "unqualified", "reason": "missing_policy"}
+    return validate_policy(_read_json(path))

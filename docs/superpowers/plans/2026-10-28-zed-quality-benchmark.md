@@ -134,18 +134,20 @@ obsolete-setting warnings.
 
 ### Task 4: Independent truth and quality-first comparisons
 
-**Files:** Create `benchmarks/zed_comparison/compare_quality.py`, `tests/test_zed_compare_quality.py`; modify `configs/benchmarks/zed_quality_policy.json` only through recorded development-policy freeze.
+**Files:** Create `benchmarks/zed_comparison/{compare_quality,truth,quality_metrics,native_observation}.py` with corresponding evaluator, truth, metrics, adapter and materialization tests; modify `configs/benchmarks/zed_quality_policy.json` only through recorded development-policy freeze.
 **Interfaces:** Consumes Task 1 records/policy, Task 3 outputs and independent truth masks. Produces `compare_quality(records: list[dict], truth: dict, policy: dict) -> dict` with metrics, denominators, uncertainty and qualified/unqualified decisions.
 
-- [ ] RED: add `test_off_axis_range_to_axial_z`, `test_invalid_sparse_truth_denominators`, `test_zero_reference_error_policy`, `test_confidence_direction_coverage_curve`, `test_d128_range_strata`, `test_unexecuted_sdk_never_parity_pass`.
-- [ ] Run `python -m pytest tests/test_zed_compare_quality.py -q`; expect missing evaluator failure.
-- [ ] Implement relative depth MAE by distance, absolute p95, intersection-valid error, fixed-truth completeness, false accepts, thin recall/boundary F1, support populations and error-versus-coverage/reliability curves; include surface reconstruction error only where independently supported geometry exists. Confidence remains an uncalibrated score.
+- [x] RED: add `test_off_axis_range_to_axial_z`, `test_invalid_sparse_truth_denominators`, `test_zero_reference_error_policy`, `test_confidence_direction_coverage_curve`, `test_d128_range_strata`, `test_unexecuted_sdk_never_parity_pass`.
+- [x] Run `python -m pytest tests/test_zed_compare_quality.py -q`; expect missing evaluator failure.
+- [x] Implement relative depth MAE by distance, absolute p95, intersection-valid error, fixed-truth completeness, false accepts, thin recall/boundary F1, support populations and error-versus-coverage/reliability curves; include surface reconstruction error only where independently supported geometry exists. Confidence remains an uncalibrated score.
 - [ ] Sweep matching and texture-filter settings independently on development data; preserve raw scores/direction and effective settings. Do not equate SDK low-is-good thresholds with StereoForge high-is-good scores or invent a missing texture map.
-- [ ] Require independent truth registration/timestamp uncertainty; sparse LiDAR supports only actual samples. Left aligned outputs are primary; independent-right diagnostics stay auxiliary.
+- [x] Require independent truth registration/timestamp uncertainty; sparse LiDAR supports only actual samples. Left aligned outputs are primary; independent-right diagnostics stay auxiliary.
 - [ ] Run full-resolution independent SGM D128 first on canonical exported pairs, then each executed SDK mode, then Fast60; changed pixel/calibration identity reruns a separate stratum, never silently warps SDK depth.
-- [ ] Report `d=fx*b/Z+cx_offset`, absolute search bounds and common-supported/full 0.3–8 m results; retain out-of-range failures. Any shifted/local near search beyond 128 is a separate profile.
+- [x] Report `d=fx*b/Z+cx_offset`, absolute search bounds and common-supported/full 0.3–8 m results; retain out-of-range failures. Any shifted/local near search beyond 128 is a separate profile.
 - [ ] Freeze thin/boundary/near definitions, tolerances and paired scene/sequence statistical uncertainty on development data before held-out evaluation; preserve provisional 2 pp / 10% / no-excess-boundary limits without inventing vendor parity.
 - [ ] GREEN: rerun named tests; root admits frozen analytic comparisons before real records. Review missing-data decision paths and commit `feat: evaluate stereo quality against independent truth` with explicit Task 4 files.
+
+**Implementation checkpoint 2026-10-28:** The [detailed evaluator contract](2026-10-28-independent-quality-evaluation.md) now has strict independent truth admission, exact native observation export, fixed-support metrics, confidence curves, deterministic scene/sequence bootstrap and gated coordinator decisions. Full CPU regression: 2,290 passed, 37 deselected, no skips. Independent functional and performance reviews passed; the actual 128×64 analytic comparison remains unqualified because the policy is provisional and no SDK reference has executed. Software acceptance tests are not SDK/held-out quality qualification. Development sweeps, real SDK admission/comparison, frozen policy and held-out physical evaluation remain open. [Usage and measured scope](../../independent-quality-evaluation.md).
 
 ### Task 5: Physical and temporal controlled lanes
 
