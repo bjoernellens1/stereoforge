@@ -104,3 +104,17 @@ only been tested with mock engines. It does not establish runtime provenance,
 physical device identity, validation layers, timestamp accuracy or GPU parity;
 it has no standalone hardware entry point. Fixture construction, warmups,
 engine lifetime, provider verification and qualification remain open.
+
+`benchmarks/sintergpu_execution_coordinator.py` contains the concrete internal
+coordinator for a single device and configuration: it checks a device-owned
+UUID/driver/handle receipt before and after captures, constructs explicit
+baseline and shared-reduction engines on that same device, warms both per
+fixture and invokes the collector. The explicit `shared_reduction` constructor
+option avoids changing process-global environment state; its default preserves
+existing environment behavior. Cleanup waits for idle and drops engine-owned
+resources before caller teardown; failed idle retains those resources and reports
+both workload and idle errors. These paths have only CPU fake-device tests.
+The public entry point unconditionally blocks because loaded runtime, Vulkan
+provider and ICD provenance are not verified. The internal coordinator is not
+an authorization or a safe entry point for physical hardware; lock lifetime,
+immutable environment and full evidence capture still require a reviewed caller.

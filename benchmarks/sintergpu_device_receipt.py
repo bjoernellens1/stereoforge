@@ -33,6 +33,16 @@ def check_receipt(device, expected_uuid, handle_types):
 # Keeping references prevents Python destructors and preserves the advisory lock
 # after a teardown failure. Process termination still releases OS resources.
 QUARANTINED = []
+QUARANTINED_RESOURCES = []
+
+
+def quarantine_resources(device, resources):
+    """Transfer ownership to the outer guard after an unsuccessful idle."""
+    QUARANTINED_RESOURCES.append((device, resources))
+
+
+def _resources_quarantined(device):
+    return any(owner is device for owner, _ in QUARANTINED_RESOURCES)
 
 
 def _verify_lock(fd, path):
@@ -63,11 +73,14 @@ def admitted_device(factory, expected_uuid, handle_types, *, _lock_path=LOCK_PAT
             yield device
         except BaseException as error:
             errors.append(error)
-        try:
-            device.wait_for_idle()
-        except BaseException as error:
-            errors.append(error)
+        if _resources_quarantined(device):
             quarantine = True
+        else:
+            try:
+                device.wait_for_idle()
+            except BaseException as error:
+                errors.append(error)
+                quarantine = True
         try:
             _verify_lock(fd, _lock_path)
         except BaseException as error:

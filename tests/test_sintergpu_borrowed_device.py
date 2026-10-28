@@ -64,3 +64,14 @@ def test_receipt_admission_precedes_shader_loading(monkeypatch, tmp_path):
         with guard.admitted_device(lambda: device, expected, kinds, _lock_path=tmp_path/'two') as admitted:
             VulkanStereo(device=admitted)
     assert not device.sources and device.closed
+
+
+def test_explicit_variant_ignores_process_environment(monkeypatch):
+    from stereoforge._sintergpu_reduction import reduction_source
+    from pathlib import Path
+    import stereoforge.gpu as gpu
+    path=Path(gpu.__file__).parent/'shaders/stereo/sgm.slang'
+    monkeypatch.setenv('SINTERGPU_SHARED_REDUCTION', '1')
+    _, identity=reduction_source(path, enabled=False)
+    assert identity['shared_reduction'] is False
+    with pytest.raises(ValueError): reduction_source(path, enabled='false')

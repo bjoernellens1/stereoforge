@@ -7,9 +7,12 @@ _VERSION = '0.2.11'
 _HELPER_SHA256 = 'b963fc6f1cad8365068c60579f57b55c73c1ad3c3a696a1d3573b0cf627d9388'
 
 
-def reduction_source(path):
+def reduction_source(path, *, enabled=None):
     original = Path(path).read_bytes()
-    enabled = os.environ.get('SINTERGPU_SHARED_REDUCTION') == '1'
+    if enabled is not None and type(enabled) is not bool:
+        raise ValueError('enabled must be bool or None')
+    if enabled is None:
+        enabled = os.environ.get('SINTERGPU_SHARED_REDUCTION') == '1'
     if not enabled:
         return original.decode('utf-8'), {'source_sha256': sha256(original).hexdigest(), 'shared_reduction': False}
     import sintergpu

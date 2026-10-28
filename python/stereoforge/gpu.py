@@ -6,10 +6,10 @@ from .reference import DIRECTIONS
 from ._sintergpu_reduction import reduction_source
 
 class VulkanStereo:
-    def __init__(self,max_disparity=128,paths=4,p1=8,p2=32,subpixel=True,debug=False,*,device=None):
+    def __init__(self,max_disparity=128,paths=4,p1=8,p2=32,subpixel=True,debug=False,*,device=None,shared_reduction=None):
         if not 1<=max_disparity<=256 or paths not in (4,8) or not 0<=p1<=p2<=10000:
             raise ValueError('invalid SGM parameters')
-        source,self.shader_source_identity=reduction_source(Path(__file__).parent/'shaders/stereo/sgm.slang')
+        source,self.shader_source_identity=reduction_source(Path(__file__).parent/'shaders/stereo/sgm.slang',enabled=shared_reduction)
         import slangpy as s
         self.s=s
         # A borrowed device stays owned and closed by its caller.
