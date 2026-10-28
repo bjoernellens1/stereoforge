@@ -25,3 +25,54 @@ for both sources when entry points are discovered automatically. Explicit
 `-entry select` does not resolve on the unchanged baseline in either compiler;
 automatic discovery preserves the `select` entry name without altering source.
 SlangPy runtime execution of the full pipeline still needs qualification.
+
+## Proposed 4070 qualification protocol (execution blocked)
+
+The target is the canonical `cps-wkstn-nvidia4070.local` RTX 4070 Ti. Use the
+cross-project nonblocking `/tmp/sintergpu-gpu.lock` for the entire run, and
+coordinate with other GPU users; this advisory lock cannot exclude processes
+that do not honor it. Capture the actual Vulkan physical-device UUID, PCI bus
+identity, vendor/device IDs, driver/ICD and SlangPy compiler identity before
+and after the run. Record the exact source commit, dirty status, composed shader
+hash, released wheel/helper hashes, fixture hashes, environment and executable
+versions. Abort on an identity mismatch, changing source or missing evidence.
+
+A reviewed executor must select and verify that physical device before any
+work, hold the lock through synchronization and teardown, and abort cleanly on
+failure. `VulkanStereo` currently constructs a default device and exposes only
+an adapter name; this does not establish physical identity or controlled device
+selection. The collector `benchmarks/sintergpu_qualification_runner.py` therefore
+blocks its command-line hardware entry point before GPU initialization. Its
+injected CPU-only callback tests establish collector behavior only; they are not
+hardware evidence. No name-only or `nvidia-smi`-only inference is sufficient.
+
+After that blocker is resolved and independently reviewed, test baseline and
+candidate on identical deterministic stereo pairs including non-multiple-of-256
+and disparity counts 1, 127, 128, 255 and 256; 4 and 8 paths; odd and border
+sizes, bounded and unbounded disparity, flat and textured input. Compare
+byte-exact left and right census descriptors and their validity masks, cost,
+aggregate, disparity, confidence and validity results,
+including old-before and old-after outputs. Save inputs and outputs or their
+content-addressed hashes and retain mismatch witnesses. This verifies these
+fixtures only and does not establish trajectory or application quality.
+
+For each fixture, warm both paths, then collect at least three independently
+controlled baseline/candidate/baseline runs with enough per-run samples for
+stable medians and p95; retain every raw sample, warmup policy, run order and
+clock/thermal/load metadata. Record GPU timestamp stage duration, complete
+GPU pipeline time, and host transfer-inclusive latency separately. Do not sum
+stage timestamps and present them as a measured pipeline wall time. Readback is
+an explicit output/debug boundary and its cost is reported separately. Compare
+paired medians and p95 across runs and use a predeclared statistical method and
+confidence interval for improvement; reject performance adoption on any output
+mismatch, a greater than 5% p95 regression, or evidence of a median regression.
+Fusion adoption additionally requires the existing three-run threshold of at
+least 5% lower median pipeline time and a statistically positive improvement.
+The present collector records raw timing triples and fails on bitwise output
+mismatches. If a witness directory is supplied, it saves the first mismatched
+array pair and case/round identity in a uniquely named NPZ file; a future GPU
+executor must require this directory and retain input and source identity too.
+`VulkanStereo.result(debug=True)` does not currently expose right census or
+either census validity mask, so an executor must add explicit access before
+claiming this coverage. The collector does not calculate a performance verdict
+or establish statistical power. GPU qualification and optimized-default selection remain pending.
