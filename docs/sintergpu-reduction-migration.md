@@ -39,9 +39,13 @@ versions. Abort on an identity mismatch, changing source or missing evidence.
 
 A reviewed executor must select and verify that physical device before any
 work, hold the lock through synchronization and teardown, and abort cleanly on
-failure. `VulkanStereo` currently constructs a default device and exposes only
-an adapter name; this does not establish physical identity or controlled device
-selection. The collector `benchmarks/sintergpu_qualification_runner.py` therefore
+failure. `VulkanStereo` defaults to constructing a device and exposes only an adapter
+name; this does not establish physical identity or controlled device selection.
+Its optional caller-owned `device` parameter permits the same device checked by
+a future admission layer to be used for shader compilation and dispatch; the
+caller owns synchronization and teardown and must destroy engine resources
+before closing the device. For a borrowed device, `debug` does not configure
+its validation layers; the caller must configure them when creating it. Mock tests verify object reuse only. The collector `benchmarks/sintergpu_qualification_runner.py` therefore
 blocks its command-line hardware entry point before GPU initialization. Its
 injected CPU-only callback tests establish collector behavior only; they are not
 hardware evidence. No name-only or `nvidia-smi`-only inference is sufficient.
