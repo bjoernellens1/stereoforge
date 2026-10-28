@@ -128,3 +128,10 @@ identifier can represent either a platform LUID or a UUID: the helper does not
 assume it equals the desired UUID or prove the mapping. Provider/runtime and
 ICD provenance, actual selected-device identity and selection behavior remain
 unverified on hardware; the public GPU entry remains blocked.
+
+The coordinator snapshots each input array and records its SHA-256, shape and
+dtype. It verifies these snapshots before and after every capture and performs
+warmups immediately before the measured runs for each fixture, avoiding a shape
+change between warmup and measurement. These hashes identify input bytes only;
+they do not establish fixture origin, independently validate outputs or supply
+runtime/provider provenance. The coordinator remains blocked from GPU use.

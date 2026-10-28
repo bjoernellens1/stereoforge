@@ -93,3 +93,28 @@ def test_failed_coordinator_idle_quarantines_outer_device_and_lock(monkeypatch,t
     assert all(e.query_pool is not None for e in made)
     with path.open('r') as lock:
         with pytest.raises(BlockingIOError):fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+
+
+def test_warmups_immediately_precede_each_case_and_hashes_recorded(monkeypatch,tmp_path):
+    d,_=setup(monkeypatch);events=[];a=np.ones((5,5),dtype=np.uint8);b=np.full((6,6),2,dtype=np.uint8)
+    original=runner.capture
+    def observed(engine,left,*args,**kwargs):
+        events.append((engine.shared,left.shape)); return original(engine,left,*args,**kwargs)
+    monkeypatch.setattr(runner,'capture',observed)
+    result=runner._execute_with_device(d,UUID,KINDS,7,{'first':(a,a,None,None),'second':(b,b,None,None)}, {},tmp_path,rounds=3,warmups=1)
+    assert events[:2]==[(False,(5,5)),(True,(5,5))]
+    assert events[11:13]==[(False,(6,6)),(True,(6,6))]
+    assert len(result['fixtures']['first']['left']['sha256'])==64
+    assert result['fixtures']['first']['left']['shape']==[5,5]
+
+
+def test_inflight_fixture_mutation_is_rejected(monkeypatch,tmp_path):
+    d,_=setup(monkeypatch);a=np.ones((5,5),dtype=np.uint8)
+    original=runner.capture
+    def mutate(engine,left,*args,**kwargs):
+        left.setflags(write=True);left[0,0]=9
+        return original(engine,left,*args,**kwargs)
+    monkeypatch.setattr(runner,'capture',mutate)
+    with pytest.raises(ValueError,match='fixture.*changed'):
+        runner._execute_with_device(d,UUID,KINDS,7,{'first':(a,a,None,None)}, {},tmp_path,rounds=3,warmups=1)
+    assert a[0,0]==1
