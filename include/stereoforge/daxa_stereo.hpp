@@ -17,7 +17,7 @@ enum class DaxaStereoEstimator { IndependentSGM,LeftAggregatedSelection,Independ
 enum class DaxaLRDependency { IndependentReferences,LeftAggregatedCorrelated };
 // Reserved native observation value; valid derived observations use this on both layers.
 enum class DaxaDepthProvenance : uint32_t { Invalid=0,IndependentStereo=1,LeftAggregatedStereo=5 };
-enum class DaxaSgmVariant { Baseline,Wave,Packed,PackedSpecialized,PackedD128,PackedQuad,PackedShuffle,PackedSpecializedOverwrite };
+enum class DaxaSgmVariant { Baseline,Wave,Packed,PackedSpecialized,PackedD128,PackedQuad,PackedShuffle,PackedSpecializedOverwrite,PackedSpecializedOverwriteQuad };
 enum class DaxaStereoPlane : unsigned { Disparity,Confidence,Validity,Depth,DepthValidity,Costs,Sums,LeftCensus,RightCensus,LeftCensusValid,RightCensusValid,PackedPenalties };
 struct DaxaStereoReadback {
     DaxaStereoReference reference=DaxaStereoReference::Left;
@@ -104,6 +104,7 @@ public:
     unsigned validation_errors()const;
     static const char* variant_name(DaxaSgmVariant);
     static std::string shader_identity();
+    static std::string overwrite_quad_shader_identity();
     static std::string shader_directory();
     static std::string specialized_shader_identity(); // Actual compiled Parameters:shared-body SHA256.
     static std::string derived_shader_identity();

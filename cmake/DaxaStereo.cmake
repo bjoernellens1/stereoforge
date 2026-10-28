@@ -11,12 +11,21 @@ file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/shaders/daxa/stereo_derived.slang" SF_D
 file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/shaders/daxa/stereo.slang" SF_DAXA_STEREO_WRAPPER_SHA256)
 file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/shaders/ops/sgm.slang" SF_DAXA_STEREO_OPS_SHA256)
 set(sf_daxa_stereo_entries census cost aggregate_baseline aggregate_wave select_output depth_convert inspect clear_packed aggregate_packed8 aggregate_packed16 select_packed aggregate_specialized8 aggregate_specialized16 select_specialized8 select_specialized16 aggregate_d1288 aggregate_d12816 select_quad8 select_quad16 aggregate_shuffle8 aggregate_shuffle16 aggregate_right_specialized8 aggregate_right_specialized16 select_right_specialized8 select_right_specialized16 aggregate_layered8 aggregate_layered16 select_layered8 select_layered16)
+file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/shaders/daxa/stereo_overwrite.slang" SF_DAXA_STEREO_OVERWRITE_WRAPPER_SHA256)
+file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/shaders/ops/sgm_overwrite.slang" SF_DAXA_STEREO_OVERWRITE_OPS_SHA256)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS shaders/daxa/stereo_overwrite.slang shaders/ops/sgm_overwrite.slang)
+file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/shaders/daxa/stereo_overwrite_quad.slang" SF_DAXA_STEREO_OVERWRITE_QUAD_SHA256)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS shaders/daxa/stereo_overwrite_quad.slang)
+list(APPEND sf_daxa_stereo_entries select_overwrite_quad_left8 select_overwrite_quad_left16 select_overwrite_quad_right8 select_overwrite_quad_right16)
 list(APPEND sf_daxa_stereo_entries select_right_derived8 select_right_derived16 aggregate_init_left8 aggregate_init_left16 aggregate_init_right8 aggregate_init_right16)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS shaders/daxa/stereo_derived.slang)
 set(sf_daxa_stereo_spirv)
 foreach(entry IN LISTS sf_daxa_stereo_entries)
   set(output "${CMAKE_CURRENT_BINARY_DIR}/daxa-stereo-${entry}.spv")
   set(source "${CMAKE_CURRENT_SOURCE_DIR}/shaders/daxa/stereo.slang")
+  if(entry MATCHES "^select_overwrite_quad_")
+    set(source "${CMAKE_CURRENT_SOURCE_DIR}/shaders/daxa/stereo_overwrite_quad.slang")
+  endif()
   if(entry MATCHES "^aggregate_init_")
     set(source "${CMAKE_CURRENT_SOURCE_DIR}/shaders/daxa/stereo_overwrite.slang")
   endif()
@@ -40,6 +49,9 @@ add_library(stereoforge_daxa_stereo src/daxa_stereo.cpp)
 target_link_libraries(stereoforge_daxa_stereo PUBLIC stereoforge_daxa_foundation stereoforge_daxa_frame PRIVATE GPUOpen::VulkanMemoryAllocator)
 target_compile_definitions(stereoforge_daxa_stereo PRIVATE
   SF_DAXA_STEREO_SPIRV_DIRECTORY="${CMAKE_CURRENT_BINARY_DIR}"
+  SF_DAXA_STEREO_OVERWRITE_WRAPPER_SHA256="${SF_DAXA_STEREO_OVERWRITE_WRAPPER_SHA256}"
+  SF_DAXA_STEREO_OVERWRITE_OPS_SHA256="${SF_DAXA_STEREO_OVERWRITE_OPS_SHA256}"
+  SF_DAXA_STEREO_OVERWRITE_QUAD_SHA256="${SF_DAXA_STEREO_OVERWRITE_QUAD_SHA256}"
   SF_DAXA_STEREO_WRAPPER_SHA256="${SF_DAXA_STEREO_WRAPPER_SHA256}"
   SF_DAXA_STEREO_OPS_SHA256="${SF_DAXA_STEREO_OPS_SHA256}"
   SF_DAXA_STEREO_PARAMETERS_SHA256="${SF_DAXA_STEREO_PARAMETERS_SHA256}"

@@ -59,7 +59,7 @@ int main(int argc,char** argv) { try {
     check(variant=="full_sgm"||variant=="coarse_refine","unknown canonical benchmark variant");
     bool refine=variant=="coarse_refine";
     auto stereo_variant=options.values.contains("--stereo-variant")?options.values.at("--stereo-variant"):"packed-specialized";
-    check(stereo_variant=="packed-specialized"||stereo_variant=="packed-specialized-overwrite","unknown stereo variant");
+    check(stereo_variant=="packed-specialized"||stereo_variant=="packed-specialized-overwrite"||stereo_variant=="packed-specialized-overwrite-quad","unknown stereo variant");
     auto record=load_canonical_record(options.values.at("--manifest"));
     auto full=grid(record.full_geometry);
     std::optional<DaxaRectification> coarse;
@@ -69,7 +69,7 @@ int main(int argc,char** argv) { try {
     auto const& stereo_grid=refine?*coarse:full;
     depth_config.stereo={stereo_grid.width,stereo_grid.height,refine?64u:128u,4,8,32,true};
     depth_config.slots=2;depth_config.right_reference_mode=DaxaRightReferenceMode::IndependentSGM;
-    depth_config.stereo_variant=stereo_variant=="packed-specialized-overwrite"?DaxaSgmVariant::PackedSpecializedOverwrite:DaxaSgmVariant::PackedSpecialized;
+    depth_config.stereo_variant=stereo_variant=="packed-specialized-overwrite-quad"?DaxaSgmVariant::PackedSpecializedOverwriteQuad:stereo_variant=="packed-specialized-overwrite"?DaxaSgmVariant::PackedSpecializedOverwrite:DaxaSgmVariant::PackedSpecialized;
     depth_config.validate();
     DaxaRefinementConfig refinement_config;refinement_config.slots=2;refinement_config.radius=radius;refinement_config.validate();
 

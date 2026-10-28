@@ -268,7 +268,7 @@ def test_quad_selection_uses_full_active_pixel_groups_without_lds():
     check_quad_collectives(shader)
     setup=body(source,'void DaxaStereo::Impl::setup(')
     assert 'i==17||i==18' in setup[:setup.index('shader.create_flags=')], 'both quad pipelines require full subgroups'
-    assert 'PackedQuad?15:63' in setup and 'PackedQuad?16:64' in setup, 'quad dispatch must cover16 pixels per group'
+    assert 'PackedQuad||variant==DaxaSgmVariant::PackedSpecializedOverwriteQuad)?15:63' in setup and 'PackedQuad||variant==DaxaSgmVariant::PackedSpecializedOverwriteQuad)?16:64' in setup, 'both quad variants must dispatch 16 pixels per group'
 
 
 @pytest.mark.parametrize('insert,diagnostic',[('return;','uniform shuffles'),('GroupMemoryBarrierWithGroupSync();','LDS, barriers')])
@@ -360,7 +360,7 @@ void operator delete(void* p)noexcept{std::free(p);}void operator delete[](void*
 void operator delete(void* p,std::size_t)noexcept{std::free(p);}void operator delete[](void* p,std::size_t)noexcept{std::free(p);}
 namespace stereoforge {
 enum class DaxaStereoReference { Left,Right };
-enum class DaxaSgmVariant { Baseline,Wave,Packed,PackedSpecialized,PackedD128,PackedQuad,PackedShuffle,PackedSpecializedOverwrite };
+enum class DaxaSgmVariant { Baseline,Wave,Packed,PackedSpecialized,PackedD128,PackedQuad,PackedShuffle,PackedSpecializedOverwrite,PackedSpecializedOverwriteQuad };
 class DaxaStereo {public:static void validate_shape(StereoConfig,unsigned,std::optional<MetricCalibration>,DaxaSgmVariant variant=DaxaSgmVariant::Baseline,DaxaStereoReference reference=DaxaStereoReference::Left);static void validate(StereoConfig,std::span<const uint32_t>,std::span<const uint32_t>,unsigned,std::optional<MetricCalibration>,DaxaSgmVariant variant=DaxaSgmVariant::Baseline,DaxaStereoReference reference=DaxaStereoReference::Left);static uint32_t packed_bits(StereoConfig);};
 '''
     for enum in ('DaxaRightReferenceMode', 'DaxaStereoEstimator'):

@@ -23,3 +23,13 @@ def test_experimental_variant_cannot_claim_canonical_estimator_identity():
     assert 'if(!refinement&&depth_config.stereo_variant==DaxaSgmVariant::PackedSpecialized)' in app
     assert 'result["effective_estimator"]=nullptr' in app
     assert 'experimental_variant_not_qualified_for_canonical_estimator_identity' in app
+
+
+def test_quad_candidate_is_opt_in_and_excluded_from_canonical_identity():
+    source = (ROOT / 'src/daxa_depth.cpp').read_text()
+    app = (ROOT / 'apps/daxa_depth_rectified_benchmark.cpp').read_text()
+    assert 'stereo_variant==DaxaSgmVariant::PackedSpecializedOverwriteQuad' in source
+    assert 'stereo_variant!=DaxaSgmVariant::PackedSpecializedOverwriteQuad' in source
+    assert 'packed-specialized-overwrite-quad' in app
+    assert 'DaxaSgmVariant::PackedSpecializedOverwriteQuad' in app
+    assert 'if(!refinement&&depth_config.stereo_variant==DaxaSgmVariant::PackedSpecialized)' in app

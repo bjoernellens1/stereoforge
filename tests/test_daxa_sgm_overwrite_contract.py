@@ -35,7 +35,8 @@ def test_experimental_first_path_declares_write_and_bypasses_clear():
     shader = (ROOT / 'python/stereoforge/shaders/ops/sgm_overwrite.slang').read_text()
     assert 'PackedSpecializedOverwrite' in source
     assert 'if(word<row_words)words[i*row_words+word]=addition;' in shader
-    assert 'if(packing&&variant!=DaxaSgmVariant::PackedSpecializedOverwrite)add(2,7' in source
+    assert 'if(packing&&(variant!=DaxaSgmVariant::PackedSpecializedOverwrite&&variant!=DaxaSgmVariant::PackedSpecializedOverwriteQuad))add(2,7' in source
+    assert 'bool overwrite_first_path=(variant==DaxaSgmVariant::PackedSpecializedOverwrite||variant==DaxaSgmVariant::PackedSpecializedOverwriteQuad)&&path==0' in source
     assert 'if(overwrite_first_path)add(stage,' in source
     assert '{LeftDesc,RightDesc,LeftValid,RightValid},{Penalties},{})' in source
     assert 'line_count(config,dx,dy),{LeftDesc,RightDesc,LeftValid,RightValid},{},{Penalties})' in source
