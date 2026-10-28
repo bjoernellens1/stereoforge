@@ -119,3 +119,78 @@ conversion output. The rewritten graph SHA-256 is
 `2a16e57f3237815c86acef89f4c569871d500f31bd688eaab96752c6867e56af`. No rewritten model is distributed and Vulkan inference remains
 unmeasured. The earlier unmodified conversion attempt and license limits are in
 the [feasibility report](crestereo-vulkan-feasibility.md).
+
+## Additional texture-seed sensitivity
+
+Two additional 720p analytic families were generated with texture seeds `1729`
+and `8675309` using the existing default calibration, scene geometry and
+photometric settings. These are new texture realizations of the **same scene
+geometry**, not independent scene layouts, physical images, or a held-out
+qualification set. The two settings, seeds and original 1-pixel threshold were
+specified before these runs; sigma 2 had already been chosen post-hoc from the
+previous scene. All four raw predictions were frozen before either truth was
+read for scoring. Inputs are the original full-grid rectified image pairs;
+truth remains on that grid and the fixed-support definitions above apply.
+
+| Seed | Sigma | Clean correct / eligible | Thin correct / eligible | Edge correct / eligible | Near correct / eligible |
+|---|---:|---:|---:|---:|---:|
+| 1729 | 0 | 0 / 816,257 | 0 / 3,164 | 0 / 10,119 | 0 / 33,768 |
+| 1729 | 2 | 722,310 / 816,257 | 0 / 3,164 | 2,890 / 10,119 | 8,582 / 33,768 |
+| 8675309 | 0 | 0 / 816,257 | 0 / 3,164 | 0 / 10,119 | 0 / 33,768 |
+| 8675309 | 2 | 695,191 / 816,257 | 0 / 3,164 | 2,695 / 10,119 | 2,267 / 33,768 |
+
+All four outputs produced finite positive effective disparity for all 61,105
+truth-occluded pixels. This is numerical validity only: the model output has
+no demonstrated independent correspondence check or calibrated confidence.
+The clean-region error counts are likewise numerical predictions differing by
+more than one pixel, not validated LR false-accept counts. These results show
+sensitivity on this one analytic geometry; they do not establish physical
+accuracy, inference throughput or a GPU performance comparison.
+
+The generator and evaluator were run from commit
+`c2288d79375bc2857e41d94f66c848f36cbdd1fd`, with generator SHA-256
+`dbad448214e2309a399ee37f01bf2f760e828917df89eb1818b6a3b74aa922b6` and
+the evaluator/adapter hashes and ONNX CPU runtime settings stated above. The
+full input manifest and truth hashes are:
+
+| Seed | Full manifest SHA-256 | Truth manifest SHA-256 |
+|---|---|---|
+| 1729 | `7efcff15c8a2cbb7237158f3677f46e98f8cf39d3e02fc475d092bb25c6e3698` | `10ab6fe292f090ec0eb5dbc8dd3a4de7b9844ebfc8e06046fcb2dd46edfc848d` |
+| 8675309 | `10657c54a25f3f8f9cae07fe7515885a3e1372e6139c6ad9fee2bb4f3e6a4f64` | `2e672ff6e66c55110bb33d7c555e124c6d6df1cfdff475b79b8ae5054fefda2a` |
+
+Frozen output SHA-256 values, in table order, are
+`cc79d9c9970f0d1d5659bf04ef8bd398590b9a7675703bea5aca5cd80bc6e2eb`,
+`ecf6a713c953fb473a8f0390d33eab716c4f95d6b71fa3c0d52e3e956fb94765`,
+`305bb330af8ccf4898b1bfb712cce5347779f01345fa73e66b6f17bbf0f08257`, and
+`9fa39e721648512aca8bae1cff26d2d4611160c56f8abf1367823c517259d78e`.
+
+Reproduce from the project root with the same pinned model and Python CPU
+runtime specified earlier. Generate both inputs, then freeze *all* predictions,
+then evaluate:
+
+```bash
+for SEED in 1729 8675309; do
+  PYTHONPATH=python:benchmarks .venv/bin/python benchmarks/refinement_quality_fixtures.py \
+    --output "/dev/shm/stereoforge-neural-seed${SEED}" --seed "$SEED"
+done
+for SEED in 1729 8675309; do
+  for SIGMA in 0 2; do
+    "$PYTHON" benchmarks/crestereo_quality.py freeze --model "$MODEL" \
+      --fixture "/dev/shm/stereoforge-neural-seed${SEED}/full" \
+      --output "/dev/shm/stereoforge-neural-seed${SEED}-sigma${SIGMA}" --sigma "$SIGMA"
+  done
+done
+for SEED in 1729 8675309; do
+  for SIGMA in 0 2; do
+    "$PYTHON" benchmarks/crestereo_quality.py evaluate \
+      --fixture "/dev/shm/stereoforge-neural-seed${SEED}/full" \
+      --frozen "/dev/shm/stereoforge-neural-seed${SEED}-sigma${SIGMA}" \
+      --output "/dev/shm/stereoforge-neural-seed${SEED}-sigma${SIGMA}-report.json"
+  done
+done
+```
+
+The generator uses its 1280×720 defaults. Output paths must be fresh, and the
+model and its data remain external. Runtime and platform differences can change
+floating-point outputs; reproduce with the recorded environment before comparing
+hashes. These tests did not alter the production pipeline.
