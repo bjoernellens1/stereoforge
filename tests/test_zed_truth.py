@@ -181,3 +181,89 @@ def test_bundle_final_recheck_catches_completed_frame_mutation(record,tmp_path):
     with b.frame(record['input_identity']):pass
     (tmp_path/'truth-depth').write_bytes((tmp_path/'truth-depth').read_bytes())
     with pytest.raises(ValueError):b.recheck()
+
+
+def add_physical_reference(truth, root):
+    """Manifest is nested; its payload remains relative to the truth root."""
+    frame = truth['frames'][0]
+    truth['provenance']['kind'] = 'measured'
+    truth['provenance']['generator'] = unavailable('independent measurement')
+    frame['registration']['value']['max_error_m'] = .002
+    frame['timestamp_uncertainty']['value']['max_error_ns'] = 20
+    payload = b'independent survey evidence'
+    (root / 'physical-payload').write_bytes(payload)
+    artifact = dict(path='physical-payload', sha256=sha256(payload).hexdigest(), size_bytes=len(payload))
+    metadata = dict(schema='stereoforge.zed_comparison.physical_reference.v1',
+                    kind='surveyed_plane', independent=True, artifact=artifact,
+                    calibration_sha256=frame['calibration']['sha256'], units='m',
+                    coordinate_axes='x_right_y_down_z_forward', sampling='sparse',
+                    interpolated=False, dense_geometry_labels=False, labels=unavailable(),
+                    registration=available(dict(method='survey', transform_to_left=np.eye(4).tolist(), max_error_m=.001, justification='measured bound')),
+                    timestamp_uncertainty=available(dict(max_error_ns=10, justification='measured clock bound')),
+                    survey=available(dict(plane_normal_left=[0,0,1], plane_offset_m=-2, axial_intercept_m=2, absolute_error_m=.001, method='independent survey')))
+    write_physical_manifest(truth, root, metadata)
+    return metadata
+
+
+def write_physical_manifest(truth, root, metadata):
+    (root / 'references').mkdir(exist_ok=True)
+    data = json.dumps(metadata).encode()
+    (root / 'references' / 'shared.json').write_bytes(data)
+    truth['frames'][0]['physical_reference'] = available(dict(path='references/shared.json', sha256=sha256(data).hexdigest(), size_bytes=len(data)))
+
+
+def test_measured_without_physical_reference_remains_admissible(record, tmp_path):
+    truth = make_truth(record, tmp_path)
+    truth['provenance']['kind'] = 'measured'
+    truth['provenance']['generator'] = unavailable('no generator')
+    bundle = load(truth, [record], tmp_path)
+    assert bundle.physical_references == {}
+    truth['frames'][0]['physical_reference'] = unavailable('not inventoried')
+    assert load(truth, [record], tmp_path).physical_references == {}
+
+
+def test_physical_reference_admission_and_root_relative_payload(record, tmp_path):
+    truth = make_truth(record, tmp_path)
+    metadata = add_physical_reference(truth, tmp_path)
+    before = deepcopy(truth)
+    bundle = load(truth, [record], tmp_path)
+    result = bundle.physical_references[record['input_identity']]
+    assert result['status'] == 'metadata_ready'
+    assert result['metadata'] == metadata
+    assert result['checked_paths'] == ['physical-payload']
+    assert result['quality_qualified'] is False
+    with bundle.frame(record['input_identity']) as frame:
+        assert frame['registration']['value']['max_error_m'] == .002
+    assert truth == before
+    assert schema.validate_physical_reference(metadata, root=tmp_path)['status'] == 'metadata_ready'
+
+
+@pytest.mark.parametrize('case', ['calibration', 'registration', 'timestamp', 'analytic'])
+def test_physical_reference_binding_rejected(record, tmp_path, case):
+    truth = make_truth(record, tmp_path)
+    metadata = add_physical_reference(truth, tmp_path)
+    if case == 'calibration':
+        metadata['calibration_sha256'] = '0' * 64
+        write_physical_manifest(truth, tmp_path, metadata)
+    elif case == 'registration':
+        truth['frames'][0]['registration']['value']['max_error_m'] = .0001
+    elif case == 'timestamp':
+        truth['frames'][0]['timestamp_uncertainty']['value']['max_error_ns'] = 1
+    else:
+        truth['provenance']['kind'] = 'analytic'
+    with pytest.raises(ValueError):
+        load(truth, [record], tmp_path)
+
+
+@pytest.mark.parametrize('target', ['physical-payload', 'references/shared.json'])
+def test_physical_reference_mutation_after_admission(record, tmp_path, target):
+    truth = make_truth(record, tmp_path)
+    add_physical_reference(truth, tmp_path)
+    bundle = load(truth, [record], tmp_path)
+    path = tmp_path / target
+    path.write_bytes(path.read_bytes())
+    with pytest.raises(ValueError):
+        with bundle.frame(record['input_identity']):
+            pass
+    with pytest.raises(ValueError):
+        bundle.recheck()

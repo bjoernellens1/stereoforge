@@ -39,7 +39,7 @@ def guard(source):
                 assert all(alias.name.split('.')[0] in allowed for alias in node.names), 'non-CPU dependency'
             if isinstance(node, ast.ImportFrom):
                 if node.level:
-                    assert node.module in ('truth', 'quality_metrics', 'native_input') or (node.module is None and all(alias.name == 'schema' for alias in node.names)), 'non-CPU local dependency'
+                    assert node.module in ('truth', 'quality_metrics', 'native_input', 'physical_reference', 'evaluate_temporal', 'epipolar') or (node.module is None and all(alias.name == 'schema' for alias in node.names)), 'non-CPU local dependency'
                 else:
                     assert node.module.split('.')[0] in allowed, 'non-CPU dependency'
             if isinstance(node, ast.Call):

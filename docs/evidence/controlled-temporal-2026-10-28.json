@@ -1,0 +1,379 @@
+{
+  "epipolar": {
+    "deltas": {
+      "convention": "second_minus_first",
+      "horizontal": {
+        "absolute_max_px": 0.0,
+        "absolute_median_px": 0.0,
+        "absolute_p95_px": 0.0,
+        "signed_median_px": 0.0
+      },
+      "status": "available",
+      "vertical": {
+        "absolute_max_px": -2.0,
+        "absolute_median_px": -2.0,
+        "absolute_p95_px": -2.0,
+        "signed_median_px": -2.0
+      }
+    },
+    "diagnostic": true,
+    "metric_truth": false,
+    "profiles": [
+      {
+        "calibration_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "correspondence_provenance": {
+          "method": "manual",
+          "population_identity": {
+            "status": "available",
+            "value": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          },
+          "selection": "all"
+        },
+        "count": 1,
+        "diagnostic": true,
+        "geometry": {
+          "baseline_m": 0.1,
+          "coordinate_axes": "x_right_y_down_z_forward",
+          "coordinate_frame": "left",
+          "cx_left": 5,
+          "cx_right": 5,
+          "depth_convention": "axial_z",
+          "fx": 10,
+          "fy": 10,
+          "height": 10,
+          "pixel_centres": "integer_centres",
+          "projection": "perspective",
+          "reference_camera": "left",
+          "units": "m",
+          "width": 10
+        },
+        "horizontal": {
+          "absolute_max_px": 0.0,
+          "absolute_median_px": 0.0,
+          "absolute_p95_px": 0.0,
+          "count": 1,
+          "negative_count": 0,
+          "positive_count": 0,
+          "signed_median_px": 0.0,
+          "zero_count": 1
+        },
+        "matches_sha256": "cc3aa146440d490b17b3bbe8ec943df23729bf6c8fbae57711ac9ff195e72b09",
+        "metric_truth": false,
+        "original_pixel_identity": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "p95_policy": "nearest_rank",
+        "profile": "factory",
+        "quality_qualified": false,
+        "residual_convention": "left_minus_right",
+        "schema": "stereoforge.zed_comparison.epipolar.v1",
+        "space": "rectified",
+        "status": "available",
+        "vertical": {
+          "absolute_max_px": 2.0,
+          "absolute_median_px": 2.0,
+          "absolute_p95_px": 2.0,
+          "count": 1,
+          "negative_count": 0,
+          "positive_count": 1,
+          "signed_median_px": 2.0,
+          "zero_count": 0
+        }
+      },
+      {
+        "calibration_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "correspondence_provenance": {
+          "method": "manual",
+          "population_identity": {
+            "status": "available",
+            "value": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          },
+          "selection": "all"
+        },
+        "count": 1,
+        "diagnostic": true,
+        "geometry": {
+          "baseline_m": 0.1,
+          "coordinate_axes": "x_right_y_down_z_forward",
+          "coordinate_frame": "left",
+          "cx_left": 5,
+          "cx_right": 5,
+          "depth_convention": "axial_z",
+          "fx": 10,
+          "fy": 10,
+          "height": 10,
+          "pixel_centres": "integer_centres",
+          "projection": "perspective",
+          "reference_camera": "left",
+          "units": "m",
+          "width": 10
+        },
+        "horizontal": {
+          "absolute_max_px": 0.0,
+          "absolute_median_px": 0.0,
+          "absolute_p95_px": 0.0,
+          "count": 1,
+          "negative_count": 0,
+          "positive_count": 0,
+          "signed_median_px": 0.0,
+          "zero_count": 1
+        },
+        "matches_sha256": "c914e8188e43fff1c96e25283e15b252af0d9f39b469f2d1518915802c756d18",
+        "metric_truth": false,
+        "original_pixel_identity": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "p95_policy": "nearest_rank",
+        "profile": "effective",
+        "quality_qualified": false,
+        "residual_convention": "left_minus_right",
+        "schema": "stereoforge.zed_comparison.epipolar.v1",
+        "space": "rectified",
+        "status": "available",
+        "vertical": {
+          "absolute_max_px": 0.0,
+          "absolute_median_px": 0.0,
+          "absolute_p95_px": 0.0,
+          "count": 1,
+          "negative_count": 0,
+          "positive_count": 0,
+          "signed_median_px": 0.0,
+          "zero_count": 1
+        }
+      }
+    ],
+    "quality_qualified": false
+  },
+  "native_or_sdk_execution": false,
+  "physical_qualified": false,
+  "policy": "provisional",
+  "quality_qualified": false,
+  "schema": "stereoforge.controlled_temporal.synthetic_evidence.v1",
+  "source_sha256": {
+    "benchmarks/zed_comparison/compare_quality.py": "31b6ede96e5c7a781ff72fdb27b8713efc943df552032d71b23fc631504cc842",
+    "benchmarks/zed_comparison/epipolar.py": "8268ec7168362300a9e3d5ccc52a955074f979fbed914f3a0433b5eceb38ece7",
+    "benchmarks/zed_comparison/evaluate_temporal.py": "89e95c7208677775675c2758c3d943be11d3fb720eb8f21b3ba50f3afb53fbeb",
+    "benchmarks/zed_comparison/schema.py": "49cf0f9e0106fa0d5efe509c810f7dc0063d7e9077ce42486798b1bea4261698",
+    "benchmarks/zed_comparison/truth.py": "5a4badcda16524a0c4c5054f6401e75a85c09891e00be63cf5f83fa0b806991c",
+    "tests/test_zed_comparison_schema.py": "5aba699e308a83f22614a2332fba557392e530447f8fe9ff5c9d87a098016060",
+    "tests/test_zed_epipolar.py": "a2ee839096e6d544b825d65084e134a4ea339da781f11929854316e1209af7d7",
+    "tests/test_zed_evaluate_temporal.py": "fcb023803b3de6764fc10b5af507ae29f90fa818b7d0ad71ec067a3281128523",
+    "tests/test_zed_truth.py": "1e7df5e52d9e5857f79f3b1bec0617fae39c573c2c9adb6b59f65f3f9ad5f7a2"
+  },
+  "synthetic_only": true,
+  "temporal": {
+    "historical_provenance": {
+      "derived_current_source_count": 0,
+      "fresh_error_jitter": {
+        "bias_sum_m": 0.0,
+        "mean_track_bias_m": null,
+        "mean_track_error_std_m": null,
+        "observation_count": 0,
+        "p95_error_std_m": null,
+        "p95_unavailable_reason": "pooled_track_distribution_not_retained",
+        "population": "track_segments_with_at_least_two_unique_captures",
+        "std_ddof": 1,
+        "std_sum_m": 0.0,
+        "track_count": 0
+      },
+      "fresh_observation_count": 0,
+      "ghosting": {
+        "changed_known_truth_count": 0,
+        "ghost_compatible_count": 0,
+        "status": "available"
+      },
+      "historical_count": 12,
+      "output_error_jitter": {
+        "mean_track_bias_m": 0.0,
+        "mean_track_error_std_m": 0.0,
+        "observation_count": 12,
+        "p95_error_std_m": null,
+        "p95_unavailable_reason": "pooled_track_distribution_not_retained",
+        "population": "track_segments_with_at_least_two_unique_captures",
+        "std_ddof": 1,
+        "track_count": 4
+      },
+      "quality_qualified": false,
+      "raw_depth_std": {
+        "mean_track_bias_m": 1.0,
+        "mean_track_error_std_m": 0.0,
+        "observation_count": 12,
+        "p95_error_std_m": null,
+        "p95_unavailable_reason": "pooled_track_distribution_not_retained",
+        "population": "track_segments_with_at_least_two_unique_captures",
+        "std_ddof": 1,
+        "track_count": 4
+      },
+      "reasons": [
+        "fused_ancestry_incomplete",
+        "missing_or_provisional_policy",
+        "missing_registered_uncertainty_bounds",
+        "partition_digest_mismatch_or_missing"
+      ],
+      "recoveries": [],
+      "repeat_count": 0,
+      "status": "unqualified",
+      "unique_capture_count": 3,
+      "unknown_freshness_count": 0,
+      "valid_output_count": 12
+    },
+    "known_motion_recovery": {
+      "derived_current_source_count": 0,
+      "fresh_error_jitter": {
+        "mean_track_bias_m": 0.6666666666666667,
+        "mean_track_error_std_m": 0.5773502691896258,
+        "observation_count": 12,
+        "p95_error_std_m": null,
+        "p95_unavailable_reason": "pooled_track_distribution_not_retained",
+        "population": "track_segments_with_at_least_two_unique_captures",
+        "std_ddof": 1,
+        "track_count": 4
+      },
+      "fresh_observation_count": 12,
+      "ghosting": {
+        "reason": "independent_dense_visibility_reprojection_not_provided_for_moving_rig",
+        "status": "unavailable"
+      },
+      "historical_count": 0,
+      "output_error_jitter": {
+        "mean_track_bias_m": 0.6666666666666667,
+        "mean_track_error_std_m": 0.5773502691896258,
+        "observation_count": 12,
+        "p95_error_std_m": null,
+        "p95_unavailable_reason": "pooled_track_distribution_not_retained",
+        "population": "track_segments_with_at_least_two_unique_captures",
+        "std_ddof": 1,
+        "track_count": 4
+      },
+      "quality_qualified": false,
+      "raw_depth_std": {
+        "reason": "raw_depth_std_requires_static_rig_and_scene",
+        "status": "unavailable"
+      },
+      "reasons": [
+        "missing_or_provisional_policy",
+        "missing_registered_uncertainty_bounds",
+        "partition_digest_mismatch_or_missing"
+      ],
+      "recoveries": [
+        {
+          "event_id": "reveal",
+          "first_correct_geometry_ns": [
+            200
+          ],
+          "first_fresh_correct_measurement_ns": [
+            200
+          ],
+          "fresh_censored_count": 0,
+          "geometry_censored_count": 0,
+          "kind": "disocclusion",
+          "reason": null,
+          "start_capture_ns": 100,
+          "status": "available",
+          "target_track_ids": [
+            0
+          ]
+        }
+      ],
+      "repeat_count": 0,
+      "status": "unqualified",
+      "unique_capture_count": 3,
+      "unknown_freshness_count": 0,
+      "valid_output_count": 12
+    },
+    "stationary": {
+      "derived_current_source_count": 0,
+      "fresh_error_jitter": {
+        "mean_track_bias_m": 0.0,
+        "mean_track_error_std_m": 0.0,
+        "observation_count": 12,
+        "p95_error_std_m": null,
+        "p95_unavailable_reason": "pooled_track_distribution_not_retained",
+        "population": "track_segments_with_at_least_two_unique_captures",
+        "std_ddof": 1,
+        "track_count": 4
+      },
+      "fresh_observation_count": 12,
+      "ghosting": {
+        "changed_known_truth_count": 0,
+        "ghost_compatible_count": 0,
+        "status": "available"
+      },
+      "historical_count": 0,
+      "output_error_jitter": {
+        "mean_track_bias_m": 0.0,
+        "mean_track_error_std_m": 0.0,
+        "observation_count": 12,
+        "p95_error_std_m": null,
+        "p95_unavailable_reason": "pooled_track_distribution_not_retained",
+        "population": "track_segments_with_at_least_two_unique_captures",
+        "std_ddof": 1,
+        "track_count": 4
+      },
+      "quality_qualified": false,
+      "raw_depth_std": {
+        "mean_track_bias_m": 1.0,
+        "mean_track_error_std_m": 0.0,
+        "observation_count": 12,
+        "p95_error_std_m": null,
+        "p95_unavailable_reason": "pooled_track_distribution_not_retained",
+        "population": "track_segments_with_at_least_two_unique_captures",
+        "std_ddof": 1,
+        "track_count": 4
+      },
+      "reasons": [
+        "missing_or_provisional_policy",
+        "missing_registered_uncertainty_bounds",
+        "partition_digest_mismatch_or_missing"
+      ],
+      "recoveries": [],
+      "repeat_count": 0,
+      "status": "unqualified",
+      "unique_capture_count": 3,
+      "unknown_freshness_count": 0,
+      "valid_output_count": 12
+    },
+    "stationary_dynamic_ghosts": {
+      "derived_current_source_count": 0,
+      "fresh_error_jitter": {
+        "mean_track_bias_m": -0.33333333333333337,
+        "mean_track_error_std_m": 0.5773502691896258,
+        "observation_count": 12,
+        "p95_error_std_m": null,
+        "p95_unavailable_reason": "pooled_track_distribution_not_retained",
+        "population": "track_segments_with_at_least_two_unique_captures",
+        "std_ddof": 1,
+        "track_count": 4
+      },
+      "fresh_observation_count": 12,
+      "ghosting": {
+        "changed_known_truth_count": 8,
+        "ghost_compatible_count": 4,
+        "status": "available"
+      },
+      "historical_count": 0,
+      "output_error_jitter": {
+        "mean_track_bias_m": -0.33333333333333337,
+        "mean_track_error_std_m": 0.5773502691896258,
+        "observation_count": 12,
+        "p95_error_std_m": null,
+        "p95_unavailable_reason": "pooled_track_distribution_not_retained",
+        "population": "track_segments_with_at_least_two_unique_captures",
+        "std_ddof": 1,
+        "track_count": 4
+      },
+      "quality_qualified": false,
+      "raw_depth_std": {
+        "reason": "raw_depth_std_requires_static_rig_and_scene",
+        "status": "unavailable"
+      },
+      "reasons": [
+        "missing_or_provisional_policy",
+        "missing_registered_uncertainty_bounds",
+        "partition_digest_mismatch_or_missing"
+      ],
+      "recoveries": [],
+      "repeat_count": 0,
+      "status": "unqualified",
+      "unique_capture_count": 3,
+      "unknown_freshness_count": 0,
+      "valid_output_count": 12
+    }
+  }
+}

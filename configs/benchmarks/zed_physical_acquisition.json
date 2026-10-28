@@ -1,0 +1,20 @@
+{
+  "schema": "stereoforge.zed_comparison.physical_acquisition_plan.v1",
+  "frozen": false,
+  "status": "planning_only",
+  "device": {"status": "unavailable", "reason": "Device not inventoried for this acquisition plan"},
+  "reference": {"status": "unavailable", "reason": "Independent reference not inventoried or measured"},
+  "conditions": {
+    "surveyed_frontal_planes_m": [0.3, 0.5, 1, 2, 4, 8],
+    "thin_geometry_width_px": {"minimum": 1, "maximum": 8},
+    "regions": ["edges", "low_texture", "repeated_texture", "reflective_materials", "dark_materials"],
+    "static_duration_s": {"minimum": 10, "maximum": 30},
+    "motion": ["camera_motion", "object_motion"]
+  },
+  "calibration_profiles": ["factory", "effective"],
+  "partitions": {
+    "development": {"status": "unavailable", "reason": "Scene and sequence assignments pending"},
+    "held_out": {"status": "unavailable", "reason": "Scene and sequence assignments pending"}
+  },
+  "collected_data": {"status": "unavailable", "reason": "No acquisition performed by this planning artifact"}
+}

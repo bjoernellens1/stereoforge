@@ -154,14 +154,16 @@ obsolete-setting warnings.
 **Files:** Create `benchmarks/zed_comparison/evaluate_temporal.py`, `tests/test_zed_evaluate_temporal.py`; extend `compare_quality.py` and its tests for calibration residuals, and Task 1 schema tests for physical reference metadata.
 **Interfaces:** Consumes Task 1 sequences and Task 4 per-frame metrics. Produces `evaluate_temporal(records: list[dict], truth: dict, policy: dict) -> dict` and `evaluate_epipolar(matches: np.ndarray, geometry: dict) -> dict` (matches are Nx4 left/right pixel coordinates) with median/p95 vertical residuals, static jitter, ghosting, recovery and sequence uncertainty.
 
-- [ ] RED: add `test_duplicate_frame_not_fresh`, `test_clock_mismatch_rejected`, `test_historical_depth_not_observed`, `test_motion_occlusion_recovery`, `test_sparse_reference_not_dense_edges`.
-- [ ] Run `python -m pytest tests/test_zed_evaluate_temporal.py -q`; expect missing temporal evaluator failure.
-- [ ] Implement separate temporal-off/on strata with effective stabilization/tracking/filling settings; never combine them into instantaneous parity.
-- [ ] Define controlled acquisition records: surveyed planes 0.3–8 m, 1–8-pixel thin geometry, edges, low/repeated texture, reflective/dark materials, 10–30 s static sequences and camera/object motion; use independent scanner/LiDAR support for complex geometry only with recorded registration uncertainty. Retain reference geometry/registration/timestamp uncertainty.
-- [ ] Add factory-versus-effective calibration ablation and vertical epipolar residual measurement; do not use calibration speculation to explain ideal analytic failures.
-- [ ] Add `test_epipolar_residual_identity_and_vertical_offset` to `tests/test_zed_compare_quality.py` and rerun that file with the temporal tests; retain correspondence/inlier-selection provenance separately from independent metric truth.
-- [ ] GREEN: rerun named tests using synthetic sequences; root schedules physical acquisition only with inventoried devices and frozen development/held-out partitions.
-- [ ] Review correlation-aware sequence aggregation and physical-truth limitations; stage explicit Task 5 files and commit `feat: separate physical and temporal quality lanes`.
+- [x] RED: add `test_duplicate_frame_not_fresh`, `test_clock_mismatch_rejected`, `test_historical_depth_not_observed`, `test_motion_occlusion_recovery`, `test_sparse_reference_not_dense_edges`.
+- [x] Run `python -m pytest tests/test_zed_evaluate_temporal.py -q`; expect missing temporal evaluator failure.
+- [x] Implement separate temporal-off/on strata with effective stabilization/tracking/filling settings; never combine them into instantaneous parity.
+- [x] Define controlled acquisition records: surveyed planes 0.3–8 m, 1–8-pixel thin geometry, edges, low/repeated texture, reflective/dark materials, 10–30 s static sequences and camera/object motion; use independent scanner/LiDAR support for complex geometry only with recorded registration uncertainty. Retain reference geometry/registration/timestamp uncertainty.
+- [x] Add factory-versus-effective calibration ablation and vertical epipolar residual measurement; do not use calibration speculation to explain ideal analytic failures.
+- [x] Add `test_epipolar_residual_identity_and_vertical_offset` to `tests/test_zed_compare_quality.py` and rerun that file with the temporal tests; retain correspondence/inlier-selection provenance separately from independent metric truth.
+- [x] GREEN: rerun named tests using synthetic sequences; root schedules physical acquisition only with inventoried devices and frozen development/held-out partitions.
+- [x] Review correlation-aware sequence aggregation and physical-truth limitations; stage explicit Task 5 files and commit `feat: separate physical and temporal quality lanes`.
+
+**Software checkpoint 2026-10-28:** Full CPU regression: 2,423 passed, 37 GPU/camera tests deselected, no skips (133.46 s). Controlled temporal evaluation, strict physical-reference metadata and epipolar diagnostics are implemented with independent functional and CPU performance reviews. The software distinguishes historical output from fresh observations, rejects selected method subsets and contradictory stationary poses, preserves censored recoveries, and requires explicit temporal-off settings for instantaneous parity. Sparse physical references cannot qualify dense thin/boundary labels. The [usage and deterministic evidence](../../controlled-temporal-evaluation.md) retain all synthetic/offline limits. Physical collection, real SDK admission, frozen development/held-out datasets and native temporal qualification remain open; this checkpoint does not establish measured depth quality or 60 FPS.
 
 ### Task 6: Matched performance records after quality
 

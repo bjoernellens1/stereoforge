@@ -477,6 +477,12 @@ def _validate(record, files=None):
     _require(record["input_identity"] == input_identity(record), "canonical input identity changed")
 
 
+def validate_physical_reference(document, *, root=None):
+    """Validate offline independent-reference metadata under an explicit root."""
+    from .physical_reference import validate_physical_reference as validate
+    return validate(document, root=root)
+
+
 def validate_record(record, root):
     """Validate without mutation; hashes/content are checked against root files."""
     with ExitStack() as stack:

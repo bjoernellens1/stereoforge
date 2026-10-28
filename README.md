@@ -345,6 +345,11 @@ and [Fast60 plan](docs/superpowers/plans/2026-10-28-fast60.md).
 
 The next priority is a [common-input ZED SDK quality benchmark](docs/superpowers/plans/2026-10-28-zed-quality-benchmark.md), with independent ground truth and a full-SGM baseline before further Fast60 optimization or promotion.
 
+The offline [controlled temporal and calibration evaluators](docs/controlled-temporal-evaluation.md)
+separate fresh observations, historical output, motion-aligned error, recovery and
+epipolar diagnostics. Their synthetic contract tests do not qualify physical depth,
+SDK parity or live 60 FPS delivery.
+
 An experimental native `DaxaRefinement` now adds independent full-resolution
 local Census matching, LR checks and metric outputs while retaining GPU resources.
 All six radius/subpixel cases pass exact discrete checks and conditional float

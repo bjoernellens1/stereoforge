@@ -69,7 +69,7 @@ def _immutable(array, dtype):
 
 class TruthBundle:
     """Metadata and file fingerprints only; no dataset-sized array cache."""
-    def __init__(self, document, root, hashes, fingerprints, calibrations, frame_paths):
+    def __init__(self, document, root, hashes, fingerprints, calibrations, frame_paths, physical_references):
         self.metadata = deepcopy(document)
         self._frames = {f['input_identity']: deepcopy(f) for f in document['frames']}
         self._root = root
@@ -77,6 +77,7 @@ class TruthBundle:
         self._fingerprints = fingerprints
         self._calibrations = calibrations
         self._frame_paths = frame_paths
+        self.physical_references = deepcopy(physical_references)
 
     def recheck(self):
         """Recheck all admitted fingerprints once at a whole-run boundary."""
@@ -178,7 +179,7 @@ def load_truth(truth, records, *, root):
         # Metadata/budget validation precedes any plane hashing/materialization.
         planes_by_frame = []
         for f in document['frames']:
-            s._keys(f, {'input_identity', 'source_id', 'capture', 'partition', 'calibration',
+            s._keys({k: v for k, v in f.items() if k != 'physical_reference'}, {'input_identity', 'source_id', 'capture', 'partition', 'calibration',
                         'rectified_pixel_identity', 'geometry', 'depth_convention', 'depth', 'masks',
                         'regions', 'registration', 'timestamp_uncertainty'}, 'truth frame')
             s._hex(f['input_identity'], 64, 'input_identity')
@@ -227,16 +228,37 @@ def load_truth(truth, records, *, root):
             s._require(not (p['kind'] == 'analytic' and zero) or generator,
                        'analytic zero bounds require bound generator artifact')
             planes_by_frame.append((f, planes))
+        physical_references = {}
         for f, planes in planes_by_frame:
+            physical_paths = set()
+            if 'physical_reference' in f:
+                def physical(desc):
+                    from .physical_reference import validate_physical_reference
+                    s._require(p['kind'] == 'measured', 'analytic truth cannot claim physical reference')
+                    s._descriptor(desc)
+                    files.check(desc, json_object=True)
+                    reference = validate_physical_reference(files.json[desc['path']], files=files)
+                    metadata = reference['metadata']
+                    s._require(metadata['calibration_sha256'] == f['calibration']['sha256'],
+                               'physical reference calibration mismatch')
+                    for key, bound in (('registration', 'max_error_m'),
+                                       ('timestamp_uncertainty', 'max_error_ns')):
+                        if metadata[key]['status'] == 'available' and f[key]['status'] == 'available':
+                            s._require(f[key]['value'][bound] >= metadata[key]['value'][bound],
+                                       'truth bound understates physical reference ' + key)
+                    physical_paths.update(reference['checked_paths'])
+                    physical_paths.add(desc['path'])
+                    physical_references[f['input_identity']] = reference
+                s._availability(f['physical_reference'], physical, 'physical reference')
             files.check(f['calibration'], json_object=True)
             snapshot = files.json[f['calibration']['path']]
             s._calibration_snapshot(snapshot, 'rectified', f['geometry'], inputs[f['input_identity']]['images'])
             calibrations[f['input_identity']] = snapshot
             for desc in planes:
                 files.check(desc)
-            frame_paths[f['input_identity']] = provenance_paths | {f['calibration']['path']} | {d['path'] for d in planes}
+            frame_paths[f['input_identity']] = provenance_paths | physical_paths | {f['calibration']['path']} | {d['path'] for d in planes}
         files.recheck()
-    bundle = TruthBundle(document, root, hashes, fingerprints, calibrations, frame_paths)
+    bundle = TruthBundle(document, root, hashes, fingerprints, calibrations, frame_paths, physical_references)
     # Admission inspects binary masks and finite sampled truth one frame at a time.
     for identity in seen:
         with bundle.frame(identity):

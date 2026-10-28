@@ -138,15 +138,24 @@ def assert_offline_ast(source):
     tree = ast.parse(source)
     # Keep offline dependencies explicit: importing the runtime engine can pull
     # in hardware even without naming a GPU package in this module.
-    offline_modules = {"", "contextlib", "hashlib", "json", "math", "pathlib", "re", "stat",
+    offline_modules = {"contextlib", "hashlib", "json", "math", "pathlib", "re", "stat",
                        "numpy", "argparse", "os", "tempfile"}
     banned_calls = {"sleep", "wait", "synchronize", "wait_idle", "waitIdle", "device_wait_idle",
                     "vkDeviceWaitIdle", "vkQueueWaitIdle", "system", "popen", "__import__", "import_module"}
     for node in ast.walk(tree):
         if isinstance(node, (ast.Import, ast.ImportFrom)):
-            names = ([alias.name for alias in node.names] if isinstance(node, ast.Import)
-                     else [node.module or ""])
-            assert all(name in offline_modules for name in names), "hardware/process import requires offline review"
+            if isinstance(node, ast.ImportFrom) and node.level:
+                # These exact package-local APIs were reviewed as offline CPU
+                # helpers. An absolute module with the same name is unrelated.
+                reviewed = node.level == 1 and (
+                    (node.module == "physical_reference" and all(
+                        alias.name == "validate_physical_reference" for alias in node.names))
+                    or (node.module is None and all(alias.name == "schema" for alias in node.names)))
+                assert reviewed, "hardware/process import requires offline review"
+            else:
+                names = ([alias.name for alias in node.names] if isinstance(node, ast.Import)
+                         else [node.module or ""])
+                assert all(name in offline_modules for name in names), "hardware/process import requires offline review"
         if isinstance(node, ast.Call):
             name = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
             assert name not in banned_calls, "device/process wait or dispatch"
@@ -195,4 +204,23 @@ def test_actual_datapath_ast_stays_offline_and_hashes_bounded():
 ])
 def test_ast_guard_rejects_hardware_and_hash_regressions(source, message):
     with pytest.raises(AssertionError, match=message):
+        assert_offline_ast(source)
+
+
+def test_ast_guard_allows_only_reviewed_relative_physical_reference():
+    assert_offline_ast('from .physical_reference import validate_physical_reference as validate')
+    assert_offline_ast('from . import schema')
+
+
+@pytest.mark.parametrize('source', [
+    'import physical_reference',
+    'from physical_reference import validate_physical_reference',
+    'from .physical_reference import runtime_engine',
+    'from ..physical_reference import validate_physical_reference',
+    'from . import cuda',
+    'from .cuda import device',
+    'import cupy',
+])
+def test_ast_guard_rejects_absolute_or_unreviewed_local_hardware_modules(source):
+    with pytest.raises(AssertionError, match='hardware/process import'):
         assert_offline_ast(source)

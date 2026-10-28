@@ -11,6 +11,7 @@ import numpy as np
 from . import schema as s
 from .truth import load_truth
 from .quality_metrics import evaluate_frame, paired_decision
+from .epipolar import evaluate_epipolar
 
 DIGEST_ALGORITHM = 'sha256_canonical_sorted_unique_scene_sequence_partition_input_v1'
 
@@ -189,7 +190,9 @@ def compare_quality(records, truth, policy, *, root=None, truth_root=None):
         stratum = _digest(s._calibration_identity(record['calibration']))
         impl = record['implementation']
         label = impl['name'] + ' / ' + str(impl['settings'].get('variant', impl['settings'].get('depth_mode', impl['version'])))
-        methods[method] = dict(method_key=method, label=label, implementation=_method(record))
+        from .evaluate_temporal import temporal_settings
+        settings = temporal_settings(record)
+        methods[method] = dict(method_key=method, label=label, implementation=_method(record), temporal=settings)
         row = dict(input_identity=record['input_identity'], method_key=method, stratum_key=stratum,
                    scene_id=record['scene_id'], sequence_id=record['sequence_id'], partition=record['partition'])
         result['frames'].append(row)
@@ -249,6 +252,20 @@ def compare_quality(records, truth, policy, *, root=None, truth_root=None):
             for reference in sorted(references):
                 comparison = _comparison(rows, candidate, reference, policy, metric_policy,
                                          frames_by_id, result['partition_digest'])
+                if any(methods[m]['temporal']['state'] != 'temporal_off' for m in (candidate, reference)):
+                    comparison['reasons'].append('instantaneous_comparison_requires_explicit_temporal_off')
+                    comparison['parity_qualified'] = False
+                if bundle.metadata['provenance']['kind'] == 'measured' and any(
+                    bundle.physical_references.get(r['input_identity'], {}).get('status') != 'metadata_ready'
+                    for r in rows if r['method_key'] in (candidate, reference)):
+                    comparison['reasons'].append('missing_physical_reference_evidence')
+                    comparison['parity_qualified'] = False
+                if (bundle.metadata['provenance']['kind'] == 'measured' and
+                    set(metric_policy.get('required_regions', [])) & {'thin', 'boundary'} and any(
+                        not bundle.physical_references.get(r['input_identity'], {}).get('dense_geometry_labels_allowed')
+                        for r in rows if r['method_key'] in (candidate, reference))):
+                    comparison['reasons'].append('missing_dense_physical_geometry_labels')
+                    comparison['parity_qualified'] = False
                 comparison.update(stratum_key=stratum, candidate_method=candidate, reference_method=reference)
                 result['comparisons'].append(comparison)
                 reasons.extend(comparison['reasons'])

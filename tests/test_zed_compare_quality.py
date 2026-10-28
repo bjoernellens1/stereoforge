@@ -90,6 +90,8 @@ def test_missing_truth_and_policy_are_explicit(record,tmp_path):
 
 def qualified_fixture(record,tmp_path):
     record['partition']='held_out'
+    record['implementation']['settings']['temporal'] = dict(
+        stabilization=available(0), tracking=available(False), filling=available(False))
     from hashlib import sha256
     import struct
     for name, data in [('depth',struct.pack('<4f',1,1,2,2)),('validity',bytes([1]*4))]:
@@ -275,3 +277,69 @@ def test_earlier_truth_mutated_during_later_frame_rejected(record,tmp_path,monke
     monkeypatch.setattr(module,'evaluate_frame',mutate)
     with pytest.raises(ValueError):compare([record,other],t,policy(),root=tmp_path,truth_root=tmp_path)
     assert len(seen)==2
+
+
+@pytest.mark.parametrize('candidate_on,reference_on', [(True, False), (False, True), (True, True)])
+def test_temporal_on_cannot_qualify_instantaneous_comparison(record, tmp_path, candidate_on, reference_on):
+    records, t, p = qualified_fixture(record, tmp_path)
+    for item, enabled in zip(records, (candidate_on, reference_on)):
+        item['implementation']['settings']['temporal']['stabilization'] = available(50 if enabled else 0)
+    out = compare(records, t, p, root=tmp_path, truth_root=tmp_path)
+    assert out['parity_qualified'] is False
+    assert 'instantaneous_comparison_requires_explicit_temporal_off' in out['comparisons'][0]['reasons']
+
+
+@pytest.mark.parametrize('index', [0, 1])
+def test_unknown_temporal_settings_cannot_qualify_instantaneous_comparison(record, tmp_path, index):
+    records, t, p = qualified_fixture(record, tmp_path)
+    del records[index]['implementation']['settings']['temporal']
+    out = compare(records, t, p, root=tmp_path, truth_root=tmp_path)
+    assert out['parity_qualified'] is False
+    assert 'instantaneous_comparison_requires_explicit_temporal_off' in out['comparisons'][0]['reasons']
+
+
+def test_epipolar_residual_identity_and_vertical_offset():
+    import numpy as np
+    from benchmarks.zed_comparison.compare_quality import evaluate_epipolar
+    from tests.test_zed_epipolar import envelope
+    identity = evaluate_epipolar(np.array([[2., 3., 2., 3.]]), envelope())
+    offset = evaluate_epipolar(np.array([[2., 3., 2., 1.]]), envelope())
+    assert identity['vertical']['absolute_median_px'] == 0
+    assert offset['vertical']['signed_median_px'] == 2
+    assert offset['vertical']['absolute_p95_px'] == 2
+    assert offset['metric_truth'] is False
+    assert offset['quality_qualified'] is False
+
+
+def test_synthetic_measured_truth_without_reference_keeps_metrics_unqualified(record, tmp_path):
+    """Synthetic declarations exercise admission gates, not measured accuracy."""
+    records, t, p = qualified_fixture(record, tmp_path)
+    t['provenance']['kind'] = 'measured'
+    out = compare(records, t, p, root=tmp_path, truth_root=tmp_path)
+    assert all(frame['status'] == 'available' and frame['metrics'] for frame in out['frames'])
+    assert out['parity_qualified'] is False
+    assert 'missing_physical_reference_evidence' in out['comparisons'][0]['reasons']
+
+
+@pytest.mark.parametrize('dense', [False, True])
+def test_synthetic_physical_reference_dense_label_qualification_gate(record, tmp_path, dense):
+    """Dummy artifacts validate structural gates only; no survey was performed."""
+    from tests.test_zed_truth import add_physical_reference, write_physical_manifest
+    records, t, p = qualified_fixture(record, tmp_path)
+    metadata = add_physical_reference(t, tmp_path)
+    # Keep frame bounds conservative relative to the reference and within policy.
+    for frame in t['frames']:
+        frame['registration']['value']['max_error_m'] = .001
+        frame['timestamp_uncertainty']['value']['max_error_ns'] = 10
+    if dense:
+        metadata['sampling'] = 'dense'
+        metadata['dense_geometry_labels'] = True
+        metadata['labels'] = available(deepcopy(metadata['artifact']))
+        write_physical_manifest(t, tmp_path, metadata)
+    admitted = schema.validate_physical_reference(metadata, root=tmp_path)
+    assert admitted['status'] == 'metadata_ready'
+    assert admitted['dense_geometry_labels_allowed'] is dense
+    out = compare(records, t, p, root=tmp_path, truth_root=tmp_path)
+    assert all(frame['status'] == 'available' and frame['metrics'] for frame in out['frames'])
+    assert out['parity_qualified'] is dense
+    assert ('missing_dense_physical_geometry_labels' in out['comparisons'][0]['reasons']) is (not dense)

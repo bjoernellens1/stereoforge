@@ -671,3 +671,11 @@ def test_checked_in_policy_stays_provisional():
     assert loaded["margins"] == dict(completeness_loss_pp=2., relative_mae_ratio=1.1, false_boundary_excess_pp=0.)
     assert loaded["requested_range_m"] == [.3, 8.]
     assert all(value is None for value in loaded["freeze_parameters"].values())
+
+
+def test_physical_capture_without_metric_truth_is_valid(record, tmp_path):
+    record['source']['kind'] = 'physical'
+    record['source']['codec'] = 'raw'
+    record['observation'] = unavailable('raw physical capture has no metric truth')
+    record['input_identity'] = input_identity(record)
+    validate_record(record, tmp_path)
