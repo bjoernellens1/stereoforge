@@ -6,7 +6,7 @@ struct Parameters {
     uint width;uint height;uint source_width;uint source_height;uint coarse_width;uint coarse_height;
     uint radius;uint disparities;uint min_margin;uint subpixel;
     float prior_floor;float max_span;float lr_tolerance;float fx;float baseline;float principal_offset;
-    uint source_low;uint source_high;
+    uint source_low;uint source_high;uint64_t borrowed[4];
 };
 struct Push{uint64_t parameters;};[[vk::push_constant]] Push pc;
 #define p (*(Parameters*)pc.parameters)
@@ -14,7 +14,7 @@ uint* uplane(uint plane){return (uint*)p.output[plane];}float* fplane(uint plane
 [shader("compute")][numthreads(64,1,1)]
 void rectify(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=2*n)return;uint eye=t/n,i=t%n;float* mx=(float*)p.maps[eye*2];float* my=(float*)p.maps[eye*2+1];int qx=preprocess_quantize(mx[i]),qy=preprocess_quantize(my[i]);int x=qx>>5,y=qy>>5;uint fx=uint(qx)&31,fy=uint(qy)&31;uint weights[4]={(32-fx)*(32-fy),fx*(32-fy),(32-fx)*fy,fx*fy};uint3 channels=0;bool full_support=true;uint* original=(uint*)p.original[eye];[unroll]for(uint tap=0;tap<4;++tap){int xx=x+int(tap&1),yy=y+int(tap>>1);bool inside=xx>=0&&yy>=0&&xx<int(p.source_width)&&yy<int(p.source_height);if(weights[tap]!=0&&!inside)full_support=false;if(inside){uint rgb=original[uint(yy)*p.source_width+uint(xx)];channels+=uint3(rgb&255,(rgb>>8)&255,(rgb>>16)&255)*weights[tap];}}channels=(channels+512)>>10;uint color=channels.x|(channels.y<<8)|(channels.z<<16)|0xff000000u;uplane(eye==0?26:29)[i]=color;uplane(27)[t]=preprocess_gray(color);uplane(28)[t]=full_support?1:0;}
 [shader("compute")][numthreads(64,1,1)]
-void census(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=2*n)return;uint eye=t/n,i=t%n,x=i%p.width,y=i/p.width;bool valid=refinement_support(uplane(28)+eye*n,p.width,p.height,x,y);uplane(24)[t]=valid?refinement_census(uplane(27)+eye*n,p.width,x,y):0;uplane(25)[t]=uint(valid);}
+void census(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=2*n)return;uint eye=t/n,i=t%n,x=i%p.width,y=i/p.width;uint* gray=p.borrowed[0]!=0?(uint*)p.borrowed[eye]:uplane(27)+eye*n;uint* support=p.borrowed[0]!=0?(uint*)p.borrowed[2+eye]:uplane(28)+eye*n;bool valid=refinement_support(support,p.width,p.height,x,y);uplane(24)[t]=valid?refinement_census(gray,p.width,x,y):0;uplane(25)[t]=uint(valid);}
 [shader("compute")][numthreads(64,1,1)]
 void match(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=2*n)return;uint eye=t/n,i=t%n,x=i%p.width,y=i/p.width,cn=p.coarse_width*p.coarse_height;
     // Half-pixel 2x coordinates are exactly quarter-integers.

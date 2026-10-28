@@ -3,6 +3,7 @@
 #include <iostream>
 #include <cstring>
 #include <limits>
+#include <cmath>
 #include <type_traits>
 using namespace stereoforge;
 static_assert(std::is_nothrow_assignable_v<DaxaRefinement::Frame&,DaxaRefinement::Frame>);
@@ -29,26 +30,31 @@ static void raw_full_gpu(){
     DaxaDepthConfig cfg{{6,5,3,4},1,2,32};DaxaDepthPipeline depth(low,cfg,context,input);DaxaPreprocess full_pre(high,2,context);
     auto coarse=depth.enqueue(input);auto full=full_pre.enqueue(input);
     DaxaRefinement reference(context,high,coarse),reuse(context,coarse,full);
-    auto a=reference.process(coarse),b=reuse.process(coarse,full);
+    DaxaRefinementConfig borrow_config;borrow_config.borrow_full_frame=true;DaxaRefinement borrowed(context,coarse,full,borrow_config);
+    reject([&]{DaxaRefinement invalid(context,high,coarse,borrow_config);});
+    auto a=reference.process(coarse),b=reuse.process(coarse,full),c=borrowed.process(coarse,full);
     // Submit changing frames through both producers and consumers without host waits.
     auto next_capture=std::make_shared<CaptureFrame>(*source(12));
     for(size_t i=0;i<next_capture->packed_yuyv.size();++i)next_capture->packed_yuyv[i]=i%2?128:235;
     CaptureLease next_source=next_capture;auto next_coarse=depth.enqueue(next_source);auto next_full=full_pre.enqueue(next_source);
-    auto next_a=reference.process(next_coarse),next_b=reuse.process(next_coarse,next_full);
+    auto next_a=reference.process(next_coarse),next_b=reuse.process(next_coarse,next_full),next_c=borrowed.process(next_coarse,next_full);
     check(!reuse.can_process());
     auto x=reference.readback(a),y=reuse.readback(b);
     check(!a.timings().canonical_pack&&std::string_view(a.timings().first_stage_name)=="rectify");
     check(!b.timings().canonical_pack&&std::string_view(b.timings().first_stage_name)=="raw_full_pack");
-    exact_readback(x,y);
-    auto nx=reference.readback(next_a),ny=reuse.readback(next_b);exact_readback(nx,ny);
+    exact_readback(x,y);exact_readback(x,borrowed.readback(c));
+    check(std::string_view(c.timings().first_stage_name)=="borrowed_census"&&std::isnan(c.timings().stage_gpu_ms[0]));
+    reject([&]{c.buffer(DaxaRefinementPlane::Luma);});reject([&]{c.buffer(DaxaRefinementPlane::Support);});
+    check(c.observations().image(DaxaObservationImage::RectifiedLeft).buffer()==full.plane(DaxaPreprocessPlane::RectifiedLeft).buffer());
+    auto nx=reference.readback(next_a),ny=reuse.readback(next_b);exact_readback(nx,ny);exact_readback(nx,borrowed.readback(next_c));
     check(x.luma!=nx.luma);check(a.observations().source()==input&&b.observations().source()==input);
-    reject([&]{reuse.process(coarse,next_full);});
+    reject([&]{reuse.process(coarse,next_full);});reject([&]{borrowed.process(coarse,next_full);});
     reject([&]{DaxaRefinement invalid(context,coarse,next_full);});
-    DaxaPreprocess different_owner(high,2,context);auto foreign=different_owner.enqueue(input);reject([&]{reuse.process(coarse,foreign);});
+    DaxaPreprocess different_owner(high,2,context);auto foreign=different_owner.enqueue(input);reject([&]{reuse.process(coarse,foreign);});reject([&]{borrowed.process(coarse,foreign);});
     auto wrong=high;wrong.geometry->original.eyes[0].cx+=.1;reject([&]{validate_daxa_refinement_geometry(low,wrong);});
     // A retained output keeps both producers alive even when caller leases go away.
-    auto retained=b.observations();full={};coarse={};b={};reuse.collect();check(retained.source()==input);retained.wait();
-    retained={};a={};next_a={};next_b={};next_coarse={};next_full={};reference.collect();reuse.collect();foreign={};different_owner.collect_completed_sources();full_pre.collect_completed_sources();depth.collect();
+    auto retained=b.observations();auto borrowed_retained=c.observations();GeometryConfig vc{12,10,16,12};VirtualView vv;vv.intrinsics={8,8,7,5};vv.source_to_virtual_right[3]=.1f;vv.mode=ViewMode::Preview;DaxaView borrow_view(vc,vv,context,borrowed_retained,2);auto projected=borrow_view.project(borrowed_retained);full={};coarse={};b={};c={};reuse.collect();borrowed.collect();check(!borrowed.can_process());check(borrowed_retained.source()==input);borrowed_retained.wait();borrowed_retained={};projected.wait();borrowed.collect();check(!borrowed.can_process());projected={};borrow_view.collect();borrowed.collect();check(borrowed.can_process());auto recycled=borrowed.process(next_coarse,next_full);recycled.wait();check(recycled.observations().source()==next_source);recycled={};check(retained.source()==input);retained.wait();
+    retained={};a={};next_a={};next_b={};next_c={};next_coarse={};next_full={};reference.collect();reuse.collect();borrowed.collect();foreign={};different_owner.collect_completed_sources();full_pre.collect_completed_sources();depth.collect();
     }
     context->close();check(!context->validation_errors&&!context->validation_warnings);
 }

@@ -25,16 +25,16 @@ endif()
 file(SHA256 "${SF_REFINEMENT_SLANGC}" SF_REFINEMENT_COMPILER_SHA256)
 message(STATUS "Refinement-only compiler${SF_REFINEMENT_SLANGC}, version${SF_REFINEMENT_SLANG_VERSION}, SHA256${SF_REFINEMENT_COMPILER_SHA256}")
 set(sf_refinement_spirv)
-file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/shaders/daxa/refinement.slang" SF_DAXA_REFINEMENT_WRAPPER_SHA256)
-file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/shaders/ops/refinement.slang" SF_DAXA_REFINEMENT_OPS_SHA256)
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS shaders/daxa/refinement.slang shaders/ops/refinement.slang)
+file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/python/stereoforge/shaders/daxa/refinement.slang" SF_DAXA_REFINEMENT_WRAPPER_SHA256)
+file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/python/stereoforge/shaders/ops/refinement.slang" SF_DAXA_REFINEMENT_OPS_SHA256)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS python/stereoforge/shaders/daxa/refinement.slang python/stereoforge/shaders/ops/refinement.slang)
 foreach(entry rectify census match lr metric)
   set(output "${CMAKE_CURRENT_BINARY_DIR}/daxa-refinement-${entry}.spv")
   add_custom_command(OUTPUT "${output}"
-    COMMAND "${SF_REFINEMENT_SLANGC}" "${CMAKE_CURRENT_SOURCE_DIR}/shaders/daxa/refinement.slang"
+    COMMAND "${SF_REFINEMENT_SLANGC}" "${CMAKE_CURRENT_SOURCE_DIR}/python/stereoforge/shaders/daxa/refinement.slang"
       -target spirv -profile spirv_1_5 -restrictive-capability-check -matrix-layout-row-major -fvk-use-scalar-layout -fp-mode precise -O3
       -entry "${entry}" -stage compute -o "${output}"
-    DEPENDS shaders/daxa/refinement.slang shaders/ops/refinement.slang shaders/ops/preprocess.slang shaders/ops/stereo_observation.slang VERBATIM)
+    DEPENDS python/stereoforge/shaders/daxa/refinement.slang python/stereoforge/shaders/ops/refinement.slang python/stereoforge/shaders/ops/preprocess.slang python/stereoforge/shaders/ops/stereo_observation.slang VERBATIM)
   list(APPEND sf_refinement_spirv "${output}")
 endforeach()
 add_custom_target(daxa_refinement_shaders DEPENDS ${sf_refinement_spirv})

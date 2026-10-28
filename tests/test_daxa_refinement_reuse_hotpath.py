@@ -22,9 +22,15 @@ def check_reuse(source):
     barrier = 'src_access=daxa::AccessConsts::COMPUTE_SHADER_WRITE,.dst_access=daxa::AccessConsts::TRANSFER_READ'
     assert barrier in pack and pack.index(barrier) < pack.index('copy_buffer_to_buffer(')
     compute = body(source, '.executes([this,raw,address,pass,count]')
-    assert 'if(canonical&&pass==1)' in compute
-    conditional = compute.split('if(canonical&&pass==1)', 1)[1].split('ti.recorder.write_timestamp', 1)[0]
-    assert 'src_access=daxa::AccessConsts::HOST_WRITE|daxa::AccessConsts::COMPUTE_SHADER_WRITE,.dst_access=daxa::AccessConsts::COMPUTE_SHADER_READ' in conditional
+    src_dst = 'src_access=daxa::AccessConsts::HOST_WRITE|daxa::AccessConsts::COMPUTE_SHADER_WRITE,.dst_access=daxa::AccessConsts::COMPUTE_SHADER_READ'
+    first = 'if(pass==0||(config.borrow_full_frame&&pass==1))'
+    packed = 'if(canonical&&!config.borrow_full_frame&&pass==1)'
+    assert first in compute and packed in compute
+    borrow = compute.split(first, 1)[1].split(packed, 1)[0]
+    canonical = compute.split(packed, 1)[1].split('ti.recorder.write_timestamp', 1)[0]
+    assert src_dst in borrow and src_dst in canonical
+    assert 'reset_timestamps(' in borrow
+
 
 
 def test_reuse_hotpath_contract():
@@ -35,17 +41,25 @@ def test_reuse_hotpath_contract():
     ('source->source_kind==e.full_source_kind', 'true'),
     ('s->full_input=full', 's->full_input={}'),
     ('COMPUTE_SHADER_WRITE,.dst_access=daxa::AccessConsts::TRANSFER_READ', 'COMPUTE_SHADER_WRITE,.dst_access=daxa::AccessConsts::COMPUTE_SHADER_READ'),
+    ('if(pass==0||(config.borrow_full_frame&&pass==1))', 'if(pass==0)'),
+    ('if(canonical&&!config.borrow_full_frame&&pass==1)', 'if(canonical&&pass==1)'),
     ('HOST_WRITE|daxa::AccessConsts::COMPUTE_SHADER_WRITE', 'HOST_WRITE'),
     ('auto& e=*impl_;e.require_thread();require(e.canonical', 'auto& e=*impl_;e.require_thread();e.context->device.wait_idle();require(e.canonical'),
 ])
 def test_reuse_guard_rejects_regressions(before, after):
     source = SOURCE.read_text()
     assert before in source
-    # The host/compute barrier also occurs in pass zero; mutate the final occurrence.
-    if before == 'HOST_WRITE|daxa::AccessConsts::COMPUTE_SHADER_WRITE':
-        pos = source.rfind(before)
-        source = source[:pos] + source[pos:].replace(before, after, 1)
-    else:
-        source = source.replace(before, after, 1)
+    source = source.replace(before, after, 1)
     with pytest.raises(AssertionError):
         check_reuse(source)
+
+
+def test_reuse_guard_rejects_missing_packed_compute_barrier():
+    source = SOURCE.read_text()
+    marker = 'if(canonical&&!config.borrow_full_frame&&pass==1)'
+    start = source.index(marker)
+    before = 'HOST_WRITE|daxa::AccessConsts::COMPUTE_SHADER_WRITE'
+    assert before in source[start:]
+    changed = source[:start] + source[start:].replace(before, 'HOST_WRITE', 1)
+    with pytest.raises(AssertionError):
+        check_reuse(changed)

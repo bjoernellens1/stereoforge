@@ -6,6 +6,8 @@ struct DaxaRefinementConfig {
     unsigned slots=2,radius=4,disparities=128,min_margin=1;
     float prior_confidence_floor=.05f,max_coarse_span=2.f,lr_tolerance=1.f;
     bool subpixel=false;
+    // Experimental: retain and read the two full-frame eyes without GPU packing.
+    bool borrow_full_frame=false;
     void validate()const;
 };
 void validate_daxa_refinement_geometry(const DaxaRectification& coarse,const DaxaRectification& target);
@@ -42,6 +44,9 @@ public:
         void wait()const;bool ready()const;uint64_t generation()const;uint64_t submit_ticket()const;
         uint32_t width()const;uint32_t height()const;
         DaxaObservationFrame observations()const;
+        // Borrow mode has separate eye buffers: buffer(Luma/Support) throws.
+        // readback() reconstructs those logical [eye][y][x] planes after completion.
+        // Rectified RGB buffers and observations reference the retained source frame.
         daxa::BufferId buffer(DaxaRefinementPlane)const;size_t size_bytes(DaxaRefinementPlane)const;
         DaxaRightReferenceMode right_reference_mode()const{return DaxaRightReferenceMode::IndependentLocalCensus;}
         DaxaStereoEstimator estimator()const{return DaxaStereoEstimator::IndependentLocalCensus;}

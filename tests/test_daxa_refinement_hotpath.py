@@ -150,7 +150,7 @@ namespace stereoforge {
     program += definition(source, 'struct DaxaRefinement::Slot') + ';\n'
     program += r'''
 struct DaxaRefinement::Impl{
- bool canonical=false;CaptureSourceKind full_source_kind=CaptureSourceKind::PackedYuyv;
+ DaxaRefinementConfig config{};bool canonical=false;CaptureSourceKind full_source_kind=CaptureSourceKind::PackedYuyv;
  std::shared_ptr<DaxaFoundation> context;std::shared_ptr<const DaxaRectification> coarse_maps,maps;
  std::vector<std::shared_ptr<Slot>> slots;uint64_t next_generation=1,retired=0;
  const std::thread::id thread=std::this_thread::get_id();
