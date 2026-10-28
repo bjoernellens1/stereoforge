@@ -15,7 +15,7 @@ spec.loader.exec_module(runner)
 
 def record(value=1, elapsed=1.0):
     return {'outputs': {key: np.array([value], dtype=np.uint32) for key in runner.OUTPUTS},
-            'pipeline_ms': elapsed, 'transfer_inclusive_ms': elapsed + 1,
+            'pipeline_ms': elapsed, 'transfer_inclusive_ms': elapsed + 1, 'readback_ms': elapsed,
             'gpu_stages_ms': {'aggregate': elapsed}}
 
 
@@ -81,3 +81,15 @@ def test_missing_right_census_rejected():
     r = record(); del r['outputs']['right_census']
     with pytest.raises(ValueError, match='outputs'):
         runner.collect(lambda *_: r, ['odd'], rounds=3)
+
+
+def test_raw_validity_change_is_detected_even_when_boolean_matches(tmp_path):
+    def run(variant, case):
+        r = record()
+        r['outputs']['valid'] = np.array([True], dtype=np.bool_)
+        r['outputs']['raw_validity'] = np.array([2 if variant == 'candidate' else 1], dtype=np.uint32)
+        return r
+    with pytest.raises(ValueError, match='raw_validity'):
+        runner.collect(run, ['validity'], rounds=3, witness_dir=tmp_path)
+    with np.load(next(tmp_path.glob('mismatch-*.npz')), allow_pickle=False) as data:
+        assert data['baseline'][0] == 1 and data['other'][0] == 2

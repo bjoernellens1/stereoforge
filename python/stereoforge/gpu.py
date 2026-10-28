@@ -75,10 +75,14 @@ class VulkanStereo:
         self._pending=None
         timestamps=self.query_pool.get_timestamp_results(0,len(self._stages)*2)
         self.last_timings["gpu_stages_ms"]={name:(timestamps[2*i+1]-timestamps[2*i])*1000 for i,name in enumerate(self._stages)}
+        if self._stages:
+            self.last_timings["gpu_pipeline_ms"]=(timestamps[-1]-timestamps[0])*1000
         self.last_timings['wait_ms']=(perf_counter()-start)*1000
         start=perf_counter();h,w=self.shape;b=self.buffers
         out={name:b[name].to_numpy().view(dtype).reshape(h,w).copy() for name,dtype in [('disparity',np.float32),('confidence',np.float32),('validity',np.uint32)]}
-        out['valid']=out.pop('validity').astype(bool)
+        raw_validity=out.pop('validity')
+        out['valid']=raw_validity.astype(bool)
+        if debug_census: out['raw_validity']=raw_validity
         if debug:
             out['left_census']=b['ld'].to_numpy().view(np.uint32).reshape(h,w).copy()
             out['cost']=b['costs'].to_numpy().view(np.uint32).reshape(h,w,self.D).copy()

@@ -55,7 +55,7 @@ candidate on identical deterministic stereo pairs including non-multiple-of-256
 and disparity counts 1, 127, 128, 255 and 256; 4 and 8 paths; odd and border
 sizes, bounded and unbounded disparity, flat and textured input. Compare
 byte-exact left and right census descriptors and their validity masks, cost,
-aggregate, disparity, confidence and validity results,
+aggregate, disparity, confidence, raw uint32 validity and boolean validity results,
 including old-before and old-after outputs. Save inputs and outputs or their
 content-addressed hashes and retain mismatch witnesses. This verifies these
 fixtures only and does not establish trajectory or application quality.
@@ -92,3 +92,15 @@ path temporarily, and a failed device factory may hide partially created resourc
 The scaffold does not authenticate the runtime, provider, receipt, or loader;
 it is not wired to a GPU entry point. Independent provenance and live provider
 verification are required before it can form part of hardware admission.
+
+The fixture adapter `benchmarks/sintergpu_fixture_execution.py` connects the
+collector to `VulkanStereo.enqueue` and `result` and requests all ten output
+arrays, including raw uint32 validity as well as its boolean view. Its pipeline timing spans the first-to-last GPU stage timestamps;
+transfer-inclusive host timing includes upload, enqueue, synchronization and
+all debug readbacks, and readback time is retained separately. The first shape
+can include allocation and compilation effects, so prewarm each shape and variant
+and record the warmup policy; timestamp precision and GPU behavior remain unqualified. This adapter has
+only been tested with mock engines. It does not establish runtime provenance,
+physical device identity, validation layers, timestamp accuracy or GPU parity;
+it has no standalone hardware entry point. Fixture construction, warmups,
+engine lifetime, provider verification and qualification remain open.

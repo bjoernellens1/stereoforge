@@ -12,7 +12,7 @@ import tempfile
 import numpy as np
 
 OUTPUTS = ('left_census', 'right_census', 'left_census_valid', 'right_census_valid',
-           'cost', 'aggregate', 'disparity', 'confidence', 'valid')
+           'cost', 'aggregate', 'disparity', 'confidence', 'valid', 'raw_validity')
 
 
 def _snapshot(record):
@@ -26,7 +26,7 @@ def _snapshot(record):
             raise ValueError(f'output {name} must be a numeric array')
         snap[name] = np.ascontiguousarray(value).copy()
     timings = {}
-    for name in ('pipeline_ms', 'transfer_inclusive_ms'):
+    for name in ('pipeline_ms', 'transfer_inclusive_ms', 'readback_ms'):
         value = record.get(name)
         if not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
             raise ValueError(f'invalid timing: {name}')
