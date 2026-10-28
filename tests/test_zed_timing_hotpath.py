@@ -25,7 +25,7 @@ SDK = 'benchmarks/zed_comparison/export_sdk.cpp'
 SAMPLER = 'benchmarks/zed_comparison/sdk_benchmark.hpp'
 NATIVE = {
     'apps/daxa_depth_benchmark.cpp':'887aaa07c1b0992c39c0b0c64138888f45fa1ec5c1f0391a0c01bced0ac6a8d3',
-    'apps/daxa_refinement_benchmark.cpp':'fc1952562818ac2c1bd296f850048cdc90a6849a84b77732a88aa53b9bdbbe0f',
+    'apps/daxa_refinement_benchmark.cpp':'daf7139dab1bd90ad9f6c9b80647dd670d7cd23145673428a69d679407579265',
     'apps/daxa_depth_rectified_benchmark.cpp':'9ea025768c2bd2b27b359175acb2c5fc7ef0490090da69b96e9fa1d9702477f3',
 }
 

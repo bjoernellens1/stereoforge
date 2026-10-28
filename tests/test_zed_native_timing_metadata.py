@@ -175,7 +175,7 @@ def test_metadata_patch_preserves_audited_timed_loop_bytes():
     # allocations, helper calls or collection work to the measured population.
     import hashlib
     digests = ('887aaa07c1b0992c39c0b0c64138888f45fa1ec5c1f0391a0c01bced0ac6a8d3',
-               'fc1952562818ac2c1bd296f850048cdc90a6849a84b77732a88aa53b9bdbbe0f',
+               'daf7139dab1bd90ad9f6c9b80647dd670d7cd23145673428a69d679407579265',
                '9ea025768c2bd2b27b359175acb2c5fc7ef0490090da69b96e9fa1d9702477f3')
     for name, expected in zip(APPS, digests):
         source = (ROOT / 'apps' / name).read_text()
@@ -196,20 +196,20 @@ def test_actual_refinement_emission_marks_only_inactive_columns_unavailable(tmp_
 #include <iostream>
 using json=nlohmann::json;using namespace stereoforge;
 json summary(auto const&){return {{"legacy","unchanged"}};}
-json run(bool enabled){unsigned frames=3,warmup=0;constexpr unsigned count=20;
+json run(bool enabled,bool reuse){unsigned frames=3,warmup=0;constexpr unsigned count=20;
  std::array<std::vector<double>,count> samples;
  for(auto& values:samples){values={0.,0.,0.};}
  json result;
 ''' + source[start:end] + '''
  return result;
 }
-int main(){std::cout<<json::array({run(false),run(true)});}
+int main(){std::cout<<json::array({run(false,false),run(true,false),run(true,true)});}
 ''')
     binary = tmp_path / 'refinement'
     subprocess.run([shutil.which('c++'), '-std=c++20', '-Wall', '-Wextra', '-Werror',
                     '-I', str(json_include), '-I', str(ROOT / 'apps'),
                     str(code), '-o', str(binary)], check=True, capture_output=True, text=True)
-    coarse, refined = json.loads(subprocess.check_output([str(binary)], text=True))
+    coarse, refined, reused = json.loads(subprocess.check_output([str(binary)], text=True))
     inactive = {'gpu_target_rectify_ms','gpu_census_ms','gpu_guided_match_ms',
                 'gpu_refined_lr_ms','gpu_refined_metric_ms','gpu_refinement_queue_span_ms'}
     assert coarse['raw_samples_ms'] == refined['raw_samples_ms']
@@ -218,3 +218,7 @@ int main(){std::cout<<json::array({run(false),run(true)});}
         assert coarse[key] == refined[key] == {'legacy':'unchanged'}
         assert coarse['timing_metadata']['columns'][key]['status'] == ('unavailable' if key in inactive else 'available')
         assert refined['timing_metadata']['columns'][key]['status'] == 'available'
+    assert reused['raw_samples_ms']['gpu_raw_reuse_pack_ms'] == [0, 0, 0]
+    assert reused['gpu_raw_reuse_pack_ms'] == {'legacy': 'unchanged'}
+    assert reused['gpu_target_rectify_ms_semantics'] == 'raw_full_pack; legacy field name'
+    assert reused['timing_metadata']['columns']['gpu_raw_reuse_pack_ms']['status'] == 'available'
