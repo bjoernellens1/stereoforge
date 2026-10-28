@@ -336,9 +336,12 @@ The offline profile exporter preserves the original camera RGB/capture and
 recomputes calibrated rectification maps for smaller grids. D96 passed native
 integer/packed and synchronization checks plus a separate frozen-RHI numerical
 comparison on a synthetic 126×19 fixture. This does not establish depth quality
-or live throughput. The matched 720p/D128, 540p/D96 and 360p/D64 matrix and
-selective full-resolution refinement follow the
-[Fast60 plan](docs/superpowers/plans/2026-10-28-fast60.md).
+or live throughput. The matched static GPU means are **31.42–31.79 ms** at
+720p/D128, **15.86–15.98 ms** at 540p/D96 and **5.88–5.99 ms** at 360p/D64;
+360p p99 is **6.21–6.29 ms**. These include preprocessing, both independent stereo
+references, LR and depth metadata. Refinement and View are additional work.
+See the [measurement scopes and raw-sample policy](docs/fast60-multiresolution-evidence.md)
+and [Fast60 plan](docs/superpowers/plans/2026-10-28-fast60.md).
 
 ```bash
 PYTHONPATH=python .venv/bin/python benchmarks/multiresolution_fixture.py \
