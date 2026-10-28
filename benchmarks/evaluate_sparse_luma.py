@@ -1,0 +1,144 @@
+#!/usr/bin/env python3
+"""Paired, frozen-decision comparison of sparse Census and luma costs on development data.
+
+CPU exploratory evidence only; excludes selection work and does not measure GPU time.
+"""
+import argparse
+from collections import Counter
+from dataclasses import asdict
+import json
+from pathlib import Path
+
+import numpy as np
+import compare_daxa_refinement as fixture
+import evaluate_sparse_anchors as base
+import sparse_stereo_reference as single
+import sparse_luma_reference as luma
+import evaluate_sparse_vertical as vertical_scores
+from stereoforge.refinement import census
+
+ROOT = Path(__file__).resolve().parents[1]
+POLICY = {
+    'cell_size': 16, 'disparity_count': 224, 'min_margin': 1,
+    'selectors': ['combined', 'combined_edge'],
+    'matchers': ['single', 'luma'],
+    'correct_error_px': 1.0,
+    'min_correct_all_accepted_numerator': 95,
+    'min_correct_all_accepted_denominator': 100,
+    'thin_surface_min_correct': 2,
+    'thin_surface_accuracy_numerator': 90,
+    'thin_surface_accuracy_denominator': 100,
+    'scope': 'exploratory previously inspected development scene; not held-out qualification',
+}
+
+
+def validate_policy():
+    if (POLICY['correct_error_px'] != base.POLICY['correct_error_px'] or
+            POLICY['min_correct_all_accepted_numerator'] / POLICY['min_correct_all_accepted_denominator'] != base.POLICY['min_correct_fraction_all_accepted']):
+        raise ValueError('scoring policy differs from base evaluator')
+    for key in ('correct_error_px', 'min_correct_all_accepted_numerator', 'min_correct_all_accepted_denominator',
+                'thin_surface_min_correct', 'thin_surface_accuracy_numerator', 'thin_surface_accuracy_denominator'):
+        if POLICY[key] != vertical_scores.POLICY[key]:
+            raise ValueError('thin scorer policy differs')
+    if POLICY['selectors'] != ['combined', 'combined_edge'] or POLICY['matchers'] != ['single', 'luma']:
+        raise ValueError('matcher or selector policy differs')
+    if (POLICY['cell_size'], POLICY['disparity_count'], POLICY['min_margin']) != (16, 224, 1):
+        raise ValueError('matcher settings differ from frozen experiment')
+
+
+def _passes(correct, accepted, num, den):
+    return accepted > 0 and correct * den >= accepted * num
+
+
+def run(coarse, target, family, output):
+    output = Path(output)
+    output.mkdir(parents=True, exist_ok=False)
+    validate_policy()
+    base._write(output / 'policy.json', POLICY)
+    context = fixture.load_context(coarse, target)
+    image = context['images'].astype(np.uint8)
+    support = context['support'].astype(bool)
+    source = str(context['source_id'])
+    hashes = {name: fixture.sha256(path) for name, path in {
+        'coarse_manifest': Path(coarse), 'target_manifest': Path(target),
+        'family_manifest': Path(family), 'fixture_loader_source': ROOT / 'benchmarks/compare_daxa_refinement.py',
+        'single_source': ROOT / 'benchmarks/sparse_stereo_reference.py',
+        'luma_source': ROOT / 'benchmarks/sparse_luma_reference.py',
+        'thin_scorer_source': ROOT / 'benchmarks/evaluate_sparse_vertical.py',
+        'scoring_source': ROOT / 'benchmarks/evaluate_sparse_anchors.py',
+        'evaluator_source': Path(__file__), 'refinement_source': ROOT / 'python/stereoforge/refinement.py',
+    }.items()}
+    hashes.update(luma=base._hash_bytes(image.tobytes()), support=base._hash_bytes(support.tobytes()))
+    association = {'metadata': context.get('metadata'),
+                   'capture': context.get('target', {}).get('capture'),
+                   'calibration': context.get('target', {}).get('calibration'),
+                   'rectified': context.get('target', {}).get('rectified')}
+    runs = {}
+    for selection in POLICY['selectors']:
+        runs[selection] = {}
+        for name, engine in [('single', single), ('luma', luma)]:
+            result = engine.sparse_stereo(image[0], image[1], support[0], support[1], source_id=source,
+                                          cell_size=POLICY['cell_size'], disparities=POLICY['disparity_count'],
+                                          min_margin=POLICY['min_margin'], selection=selection)
+            matches = [asdict(m) for m in result.matches]
+            fw, rev = result.forward_candidates, result.reverse_candidates
+            fops = fw if name == 'single' else result.forward_hamming_upper_bound
+            rops = rev if name == 'single' else result.reverse_hamming_upper_bound
+            fluma = 0 if name == 'single' else result.forward_luma_upper_bound
+            rluma = 0 if name == 'single' else result.reverse_luma_upper_bound
+            if (fops, rops) != (fw, rev) or not (0 <= fluma <= fw and 0 <= rluma <= rev):
+                raise ValueError('descriptor or luma comparison count differs from policy')
+            runs[selection][name] = {
+                'matches': matches, 'forward_candidates': fw, 'reverse_candidates': rev,
+                'forward_hamming_upper_bound': fops, 'reverse_hamming_upper_bound': rops,
+                'forward_luma_upper_bound': fluma, 'reverse_luma_upper_bound': rluma,
+                'selected_by_eye': {eye: sum(m['eye'] == eye for m in matches) for eye in ('left', 'right')},
+                'accepted_by_eye': {eye: sum(m['eye'] == eye and m['valid'] for m in matches) for eye in ('left', 'right')},
+                'reasons_by_eye': {eye: dict(sorted(Counter(m['reason'] for m in matches if m['eye'] == eye).items())) for eye in ('left', 'right')},
+            }
+        points = lambda name: [(m['eye'], m['y'], m['x']) for m in runs[selection][name]['matches']]
+        if points('single') != points('luma'):
+            raise ValueError('paired matchers did not use identical selected points')
+    base._write(output / 'decisions.json', {'policy': POLICY, 'hashes': hashes, 'source_id': source,
+                                          'runs': runs, 'numpy_version': np.__version__, 'association': association})
+    decision_hash = fixture.sha256(output / 'decisions.json')
+    policy_hash = fixture.sha256(output / 'policy.json')
+    validate_policy()
+    if json.loads((output / 'policy.json').read_text()) != POLICY:
+        raise ValueError('persisted policy differs')
+    truth = fixture.load_truth(family, context)
+    cs = np.stack([census(image[i], support[i]).support for i in range(2)])
+    profiles = {}
+    for selection, pair in runs.items():
+        profiles[selection] = {}
+        for name, r in pair.items():
+            eyes = base.evaluate(r['matches'], truth, cs, POLICY['disparity_count'])
+            thin = vertical_scores.thin_surface_scores(r['matches'], truth, cs, POLICY['disparity_count'])
+            for eye in ('left', 'right'):
+                all_row = eyes[eye]['all']
+                eyes[eye]['paired_provisional_gates'] = {
+                    'accuracy_all_accepted': _passes(all_row['correct'], all_row['accepted_total'],
+                                                     POLICY['min_correct_all_accepted_numerator'], POLICY['min_correct_all_accepted_denominator']),
+                    'thin_each_eligible_surface': thin[eye]['passes'],
+                }
+                eyes[eye]['thin_surface_scores'] = thin[eye]['surfaces']
+            profiles[selection][name] = {**{k: v for k, v in r.items() if k != 'matches'}, 'eyes': eyes}
+    report = {'schema': 'stereoforge.sparse_luma_evaluation.v1', 'scope': POLICY['scope'],
+              'work_scope': 'candidate-based upper bounds; luma is evaluated for every supported candidate when a search has at least two candidates; selection and other work excluded',
+              'counterpart_support': 'nearest integer floor(coordinate + 0.5), opposite Census support',
+              'decision_sha256': decision_hash, 'policy_sha256': policy_hash, 'hashes': hashes,
+              'source_id': source, 'numpy_version': np.__version__, 'association': association, 'policy': POLICY, 'profiles': profiles}
+    base._write(output / 'report.json', report)
+    return report
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    for name in ('coarse', 'target', 'family', 'output'):
+        parser.add_argument('--' + name, required=True)
+    args = parser.parse_args()
+    run(args.coarse, args.target, args.family, args.output)
+
+
+if __name__ == '__main__':
+    main()
