@@ -14,7 +14,14 @@ struct CaptureImuSample {
     float temperature_c=0;
     bool sync=false;
 };
+enum class CaptureSourceKind { PackedYuyv,CanonicalRgbMetadata };
+struct CanonicalRgbSource;
 struct CaptureFrame {
+    CaptureSourceKind source_kind=CaptureSourceKind::PackedYuyv;
+    // Canonical RGB keeps original geometry: source_width=2*original eye width,
+    // height=original height, stride_bytes=0 and packed_yuyv empty. RGB planes
+    // live in a separate pitched sidecar defined in canonical_rgb.hpp.
+    std::shared_ptr<const CanonicalRgbSource> canonical_rgb;
     // Full unrectified post-ISP side-by-side source, 2 bytes/pixel YUYV.
     uint32_t source_width=0,height=0,stride_bytes=0;
     uint64_t frame_id=0,camera_timestamp_ns=0,host_ingress_timestamp_ns=0;

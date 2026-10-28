@@ -25,6 +25,7 @@ struct DaxaRefinementReadback {
 };
 struct DaxaRefinementTiming {
     static constexpr unsigned stages=5;
+    bool canonical_pack=false;const char* first_stage_name="rectify";
     std::array<double,stages> stage_gpu_ms{};double total_gpu_ms=0;
     uint64_t start_tick=0,end_tick=0;double timestamp_period=0;uint32_t timestamp_bits=0;
 };
@@ -47,7 +48,11 @@ public:
         DaxaRefinementTiming timings()const;
     };
     DaxaRefinement(std::shared_ptr<DaxaFoundation>,DaxaRectification target,const DaxaDepthPipeline::Frame& prototype,DaxaRefinementConfig={});
-    Frame process(const DaxaDepthPipeline::Frame&);bool can_process()const;size_t collect();
+    // Canonical mode borrows the producer's full planes; no remap/maps exist.
+    DaxaRefinement(std::shared_ptr<DaxaFoundation>,const DaxaDepthPipeline::Frame& coarse_prototype,const DaxaFrame& full_prototype,DaxaRefinementConfig={});
+    Frame process(const DaxaDepthPipeline::Frame&);
+    Frame process(const DaxaDepthPipeline::Frame&,const DaxaFrame& full);
+    bool can_process()const;size_t collect();
     DaxaRefinementReadback readback(const Frame&)const;
     uint64_t requested_buffer_bytes()const;uint64_t completed_source_retirements()const;
     static std::string shader_directory();static std::string shader_identity();

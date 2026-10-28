@@ -50,6 +50,7 @@ def test_actual_adapter_lease_lifecycle_cpu_probe(tmp_path):
 #include <chrono>
 #include <iostream>
 #include <cstdlib>
+#include <stereoforge/canonical_rgb.hpp>
 std::atomic<bool> track=false;unsigned allocations=0;
 void* operator new(size_t n){if(track)++allocations;if(auto p=std::malloc(n?n:1))return p;throw std::bad_alloc();}
 void operator delete(void* p)noexcept{std::free(p);}void operator delete(void* p,size_t)noexcept{std::free(p);}
@@ -57,8 +58,7 @@ namespace daxa {constexpr int QUEUE_MAIN=0;struct BufferId {uint64_t id=0;bool i
 namespace stereoforge {
 struct Device{unsigned polls=0,waits=0;void* get(){return this;}uint64_t oldest_pending_submit_index(){++polls;return 20;}struct Wait{int queue;uint64_t queue_submit_index,timeout;};void wait_on_submit(Wait){++waits;}};
 struct DaxaFoundation{Device device;};
-struct DaxaRectification{unsigned width=7,height=5,eye_width=11,source_height=13,stride_bytes=88;std::string original_identity=std::string(200,'c');};
-struct CaptureFrame{unsigned source_width=22,height=13,stride_bytes=88;std::string calibration_identity=std::string(200,'c'),clock=std::string(200,'t');};using CaptureLease=std::shared_ptr<const CaptureFrame>;
+struct DaxaRectification{unsigned width=7,height=5,eye_width=11,source_height=13,stride_bytes=88;std::string original_identity=std::string(200,'c'),rectified_identity=std::string(200,'r');};
 enum class DaxaPlaneFormat{Rgba8PackedUint32};
 namespace detail{
 SHARED_COMPLETION_HELPERS
@@ -75,7 +75,7 @@ using namespace stereoforge;
 void check(bool b,const char* s){if(!b)throw std::runtime_error(s);}
 int main(){try{
  auto context=std::make_shared<DaxaFoundation>();auto owner=std::make_shared<DaxaDepthPipeline::Owner>();owner->context=context;
- auto slot=std::make_shared<DaxaDepthPipeline::Slot>();slot->preprocessing.maps=std::make_shared<DaxaRectification>();slot->preprocessing.src=std::make_shared<CaptureFrame>();for(unsigned i=0;i<9;++i)slot->outputs[i]={10+i};
+ auto slot=std::make_shared<DaxaDepthPipeline::Slot>();slot->preprocessing.maps=std::make_shared<DaxaRectification>();auto raw=std::make_shared<CaptureFrame>();raw->source_width=22;raw->height=13;raw->stride_bytes=88;raw->calibration_identity=std::string(200,'c');raw->camera_clock_domain=std::string(200,'t');slot->preprocessing.src=raw;for(unsigned i=0;i<9;++i)slot->outputs[i]={10+i};
  auto other_owner=std::make_shared<DaxaDepthPipeline::Owner>();other_owner->context=context;auto other_slot=std::make_shared<DaxaDepthPipeline::Slot>(*slot);DaxaDepthPipeline::Frame other{other_owner,other_slot};
  DaxaDepthPipeline::Frame input{owner,slot};auto initial=slot.use_count();uint64_t checksum=0;constexpr unsigned count=10000;
  track=true;auto start=std::chrono::steady_clock::now();
@@ -86,6 +86,13 @@ int main(){try{
  check(slot.use_count()==initial+2,"bounded retained slot refs");}
  double ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();track=false;
  check(allocations==0&&context->device.polls==0&&context->device.waits==0,"hidden allocation or device polling");check(slot.use_count()==initial,"lease retained after iteration");
+ auto canonical=std::make_shared<CaptureFrame>(*raw);canonical->source_kind=CaptureSourceKind::CanonicalRgbMetadata;canonical->stride_bytes=0;
+ auto rgb=std::make_shared<CanonicalRgbSource>();rgb->backing=std::make_shared<int>(1);rgb->original_calibration_identity=raw->calibration_identity;rgb->rectified_calibration_identity=slot->preprocessing.maps->rectified_identity;
+ for(unsigned i=0;i<4;++i){rgb->rgb[i].width=i<2?11:7;rgb->rgb[i].height=i<2?13:5;}canonical->canonical_rgb=rgb;slot->preprocessing.src=canonical;
+ {auto lease=input.observations();check(lease.source()==canonical,"canonical source association");}
+ rgb->rectified_calibration_identity="wrong";bool rejected=false;try{input.observations();}catch(std::invalid_argument const&){rejected=true;}check(rejected,"canonical calibration mismatch accepted");
+ rgb->rectified_calibration_identity=slot->preprocessing.maps->rectified_identity;rgb->rgb[0].width=10;rejected=false;try{input.observations();}catch(std::invalid_argument const&){rejected=true;}check(rejected,"canonical original grid mismatch accepted");
+ slot->preprocessing.src=raw;
  auto held=input.observations();slot->generation=4;bool stale=false;try{held.width();}catch(std::invalid_argument const&){stale=true;}check(stale,"stale generation accepted");slot->generation=3;
  auto weakslot=std::weak_ptr(slot);auto weakowner=std::weak_ptr(owner);input={};owner.reset();slot.reset();check(!weakslot.expired()&&!weakowner.expired()&&held.source(),"source producer not retained");held={};check(weakslot.expired()&&weakowner.expired(),"hidden ownership cycle");
  std::cout<<"{\"iterations\":"<<count<<",\"allocations\":"<<allocations<<",\"implicit_polls\":0,\"implicit_waits\":0,\"mean_cpu_ms\":"<<ms/count<<",\"checksum\":"<<checksum<<",\"planes\":6,\"rgb_descriptors\":4,\"stale_rejected\":true,\"retained_producer_released\":true}\n";
@@ -99,7 +106,7 @@ int main(){try{
     shared=definition(frame_source,'inline bool completed_submission(')+definition(frame_source,'inline bool available_slot(')
     program=program.replace('SHARED_COMPLETION_HELPERS',shared)
     code=tmp_path/'probe.cpp';code.write_text(program);binary=tmp_path/'probe'
-    built=subprocess.run([compiler,'-std=c++20','-O3',str(code),'-o',str(binary)],capture_output=True,text=True,timeout=60)
+    built=subprocess.run([compiler,'-std=c++20','-O3','-I',str(ROOT/'include'),str(code),'-o',str(binary)],capture_output=True,text=True,timeout=60)
     assert built.returncode==0,built.stderr
     result=subprocess.run([str(binary)],capture_output=True,text=True,timeout=30)
     assert result.returncode==0,result.stderr

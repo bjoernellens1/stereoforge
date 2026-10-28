@@ -1,5 +1,6 @@
 #include <stereoforge/daxa_view_calibration.hpp>
 #include <stereoforge/daxa_view.hpp>
+#include <stereoforge/canonical_rgb.hpp>
 #include <bit>
 #include <iostream>
 #include <stdexcept>
@@ -15,9 +16,41 @@ static DaxaRectification fixture(){
  g.original.right_to_left=g.rectified.right_to_left={1,0,0,.1,0,1,0,0,0,0,1,0,0,0,0,1};g.R1=g.R2={1,0,0,0,1,0,0,0,1};g.P1={8,0,2,0,0,8,1,0,0,0,1,0};g.P2={8,0,2,-.8,0,8,1,0,0,0,1,0};c.geometry=g;
  for(unsigned eye=0;eye<2;++eye)for(unsigned y=0;y<4;++y)for(unsigned x=0;x<6;++x){c.maps[eye*2].push_back(float(x+1));c.maps[eye*2+1].push_back(float(y+1));}return c;
 }
+static CaptureFrame canonical_source(){
+ auto backing=std::make_shared<std::array<std::vector<uint8_t>,6>>();auto sidecar=std::make_shared<CanonicalRgbSource>();
+ for(unsigned i=0;i<6;++i){auto width=i<2?8u:6u,height=i<2?6u:4u,channels=i<4?3u:1u;(*backing)[i].assign(size_t(width)*height*channels,i<4?uint8_t(17+i):uint8_t(1));auto plane=CanonicalRgbPlane{(*backing)[i],width,height,width*channels,i<4?CanonicalRgbFormat::Rgb8:CanonicalRgbFormat::SupportU8};if(i<4)sidecar->rgb[i]=plane;else sidecar->support[i-4]=plane;}
+ sidecar->backing=backing;sidecar->input_identity="analytic-view-record";sidecar->original_pixel_identity="original-rgb8";sidecar->rectified_pixel_identity="rectified-rgb8";sidecar->original_calibration_identity="raw";sidecar->rectified_calibration_identity="rect";
+ CaptureFrame source;source.source_kind=CaptureSourceKind::CanonicalRgbMetadata;source.canonical_rgb=sidecar;source.source_width=16;source.height=6;source.frame_id=11;source.camera_timestamp_ns=91;source.host_ingress_timestamp_ns=101;source.camera_clock_domain="analytic-camera";source.host_clock_domain="analytic-host";source.calibration_identity="raw";source.device_identity="analytic-view";return source;
+}
 int main(int argc,char** argv){try{
  auto c=fixture();GeometryConfig config{6,4,8,6};VirtualView v;v.intrinsics={8,8,3,2};v.source_to_virtual_right[3]=.1f;v.mode=ViewMode::Preview;
  auto cache=prepare_daxa_view_calibration(c,config,v);check(cache.rays.size()==48&&cache.preview_indices.size()==96,"independent grid counts");check(cache.original_width==8&&cache.original_height==6,"retain original dimensions");check(cache.rays[0].x==-.25f&&cache.rays[0].y==-.125f,"rectified unitZ rays");check(cache.effective_view.source_to_virtual_right[3]==.1f,"right baseline once");check(cache.preview_valid_count==96,"full original RGB preview");check(cache.preview_indices[0]==0&&cache.preview_indices[48]==48,"raw eye offsets");
+ // Canonical RGB is calibrated without raw YUYV maps or a fictitious packed stride.
+ auto canonical=c;canonical.stride_bytes=0;for(auto& map:canonical.maps)map.clear();auto canonical_input=canonical_source();validate_canonical_rgb_source(canonical_input,false);
+ reject([&]{prepare_daxa_view_calibration(canonical,config,v);});
+ auto canonical_cache=prepare_daxa_view_calibration(canonical,config,v,canonical_input);check(canonical_cache.rays.size()==cache.rays.size()&&canonical_cache.preview_indices==cache.preview_indices,"canonical empty-map calibrated view setup");
+ check(canonical_cache.association=="canonical-rgb8-grid-model-and-source-association","canonical association must not claim raw map validation");
+ check(canonical_cache.original_width==cache.original_width&&canonical_cache.original_height==cache.original_height&&canonical_cache.preview_valid_count==cache.preview_valid_count,"canonical original RGB namespace preserved");
+ for(size_t i=0;i<cache.rays.size();++i)check(std::memcmp(&canonical_cache.rays[i],&cache.rays[i],sizeof(Ray3))==0,"canonical rectified rays match camera models");
+ check(canonical_cache.effective_view.source_to_virtual_left==cache.effective_view.source_to_virtual_left&&canonical_cache.effective_view.source_to_virtual_right==cache.effective_view.source_to_virtual_right,"canonical camera poses preserved");
+ auto invalid_canonical=canonical;invalid_canonical.stride_bytes=32;reject([&]{prepare_daxa_view_calibration(invalid_canonical,config,v,canonical_input);});
+ invalid_canonical=canonical;invalid_canonical.maps[0].push_back(0);reject([&]{prepare_daxa_view_calibration(invalid_canonical,config,v,canonical_input);});
+ invalid_canonical=canonical;invalid_canonical.original_identity="foreign";reject([&]{prepare_daxa_view_calibration(invalid_canonical,config,v,canonical_input);});
+ invalid_canonical=canonical;invalid_canonical.rectified_identity="foreign";reject([&]{prepare_daxa_view_calibration(invalid_canonical,config,v,canonical_input);});
+ invalid_canonical=canonical;++invalid_canonical.width;reject([&]{prepare_daxa_view_calibration(invalid_canonical,config,v,canonical_input);});
+ invalid_canonical=canonical;invalid_canonical.geometry.reset();reject([&]{prepare_daxa_view_calibration(invalid_canonical,config,v,canonical_input);});
+ invalid_canonical=canonical;invalid_canonical.geometry.value().R1[0]=2;reject([&]{prepare_daxa_view_calibration(invalid_canonical,config,v,canonical_input);});
+ invalid_canonical=canonical;invalid_canonical.geometry.value().P2[3]=-.4;reject([&]{prepare_daxa_view_calibration(invalid_canonical,config,v,canonical_input);});
+ for(auto count:{3u,15u}){invalid_canonical=canonical;invalid_canonical.geometry.value().original.eyes[0].distortion.assign(count,0);reject([&]{prepare_daxa_view_calibration(invalid_canonical,config,v,canonical_input);});}
+ auto invalid_source=canonical_input;invalid_source.canonical_rgb.reset();reject([&]{prepare_daxa_view_calibration(canonical,config,v,invalid_source);});
+ invalid_source=canonical_input;auto foreign_sidecar=std::make_shared<CanonicalRgbSource>(*canonical_input.canonical_rgb);foreign_sidecar->original_calibration_identity="foreign";invalid_source.canonical_rgb=foreign_sidecar;reject([&]{prepare_daxa_view_calibration(canonical,config,v,invalid_source);});
+ invalid_source=canonical_input;invalid_source.source_kind=CaptureSourceKind::PackedYuyv;reject([&]{prepare_daxa_view_calibration(canonical,config,v,invalid_source);});
+ invalid_source=canonical_input;invalid_source.source_kind=static_cast<CaptureSourceKind>(99);reject([&]{prepare_daxa_view_calibration(canonical,config,v,invalid_source);});
+ invalid_source=canonical_input;invalid_source.packed_yuyv.resize(192);reject([&]{prepare_daxa_view_calibration(canonical,config,v,invalid_source);});
+ invalid_source=canonical_input;invalid_source.calibration_identity="foreign";reject([&]{prepare_daxa_view_calibration(canonical,config,v,invalid_source);});
+ invalid_source=canonical_input;++invalid_source.source_width;reject([&]{prepare_daxa_view_calibration(canonical,config,v,invalid_source);});
+ auto raw_source=canonical_input;raw_source.source_kind=CaptureSourceKind::PackedYuyv;raw_source.canonical_rgb.reset();raw_source.stride_bytes=c.stride_bytes;raw_source.packed_yuyv.resize(192);prepare_daxa_view_calibration(c,config,v,raw_source);
+ auto tampered_maps=c;tampered_maps.maps[0][0]+=.03125f;reject([&]{prepare_daxa_view_calibration(tampered_maps,config,v,raw_source);});
  // rectified_grid_rotation_once: R^T applied once, while preview stays in original namespace.
  auto rotated=c;rotated.geometry->R1=rotated.geometry->R2={1,0,0,0,.8,-.6,0,.6,.8};for(unsigned eye=0;eye<2;++eye)for(unsigned y=0;y<4;++y)for(unsigned x=0;x<6;++x){double qx=(double(x)-2)/8,qy=(double(y)-1)/8,z=-.6*qy+.8;rotated.maps[eye*2][y*6+x]=float(8*qx/z+3);rotated.maps[eye*2+1][y*6+x]=float(8*(.8*qy+.6)/z+2);}auto rotated_cache=prepare_daxa_view_calibration(rotated,config,v);check(std::abs(rotated_cache.effective_view.source_to_virtual_left[6]-.6f)<1e-6,"rectified_grid_rotation_once");check(rotated_cache.preview_indices==cache.preview_indices,"original preview ignores rectified rotation");
  // shared_raw_cell_distinct_virtual_points: never round rectified geometry onto a raw canvas.

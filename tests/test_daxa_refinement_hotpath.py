@@ -24,7 +24,7 @@ def check_hotpath(source):
                   'DaxaObservationFrame DaxaRefinement::Frame::observations(',
                   '.executes([this,raw,address,pass,count]')
     hot = '\n'.join(body(source, s) for s in signatures)
-    assert not re.search(r'\b(?:new|make_shared|make_unique|malloc|calloc|realloc|resize|reserve|push_back|emplace_back|wait\w*|readback\w*|create_\w+|destroy_\w+|register_buffer|add_task|memcpy|memmove|sha256|strict_json|validate_daxa_refinement_geometry)\s*(?:<[^;()]*>)?\s*\(|\b(?:TaskGraph|vector|ifstream|ofstream)\b', hot)
+    assert not re.search(r'\b(?:new|make_shared|make_unique|malloc|calloc|realloc|resize|reserve|push_back|emplace_back|wait\w*|readback\w*|create_\w+|destroy_\w+|register_buffer|add_task|memcpy|memmove|sha256|strict_json|validate_daxa_refinement_geometry|validate_daxa_rectified_input_geometry)\s*(?:<[^;()]*>)?\s*\(|\b(?:TaskGraph|vector|ifstream|ofstream)\b', hot)
     assert not re.search(r'graph(?:->|\.)complete\s*\(', hot)
     assert not re.search(r'\b(?:new|delete)\b', hot)
     process = body(source, signatures[0])
@@ -38,13 +38,21 @@ def check_hotpath(source):
     collection = body(source, 'size_t DaxaRefinement::collect(')
     assert collection.count('oldest_pending_submit_index(') == collection.count('collect_garbage(') == 1
     retirement = body(source, 'size_t collect_at(')
-    assert 'detail::available_slot(s.use_count(),s->submit,boundary)' in retirement and 's->input={}' in retirement
+    assert 'detail::available_slot(s.use_count(),s->submit,boundary)' in retirement and 's->input={}' in retirement and 's->full_input={}' in retirement
     adapter = body(source, signatures[5])
     assert 'std::array<daxa::BufferId,6>' in adapter and 'std::array<DaxaObservationImageView,4>' in adapter
     assert '&slot_->generation,generation_,slot_->submit' in adapter
     assert 'slot_->input.observations()' in adapter
     assert 'HOST_WRITE|daxa::AccessConsts::COMPUTE_SHADER_WRITE' in source
     assert 'graph.submit({});graph.complete({});' in source
+    canonical = body(source, 'DaxaRefinement::Frame DaxaRefinement::process(DaxaDepthPipeline::Frame const& input,DaxaFrame const& full)')
+    assert not re.search(r'\b(?:new|make_shared|make_unique|resize|reserve|wait\w*|readback\w*|memcpy|sha256|validate_daxa_rectified_input_geometry)\s*(?:<[^;()]*>)?\s*\(|\bvector\b', canonical)
+    assert canonical.count('oldest_pending_submit_index(') == 1
+    assert canonical.index('source==full.source()') < canonical.index('oldest_pending_submit_index(')
+    assert canonical.index('s->input=input') < canonical.index('graph->execute(')
+    assert canonical.index('s->full_input=full') < canonical.index('graph->execute(')
+    assert 'full.calibration()==e.maps' in canonical
+    assert 'catch(...){s->submit=d.latest_queue_submit_index(daxa::QUEUE_MAIN);throw;}' in canonical
 
 
 def test_no_per_frame_alloc_wait_readback_matrix_validation():
@@ -85,6 +93,7 @@ def build_probe(tmp_path, mutate=lambda s: s):
 #include <cstdint>
 #include <iostream>
 #include <memory>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -102,8 +111,9 @@ struct TaskGraph;
 namespace stereoforge {
 struct Device{uint64_t latest=0,boundary=0,polls=0,waits=0,gc=0;void* get(){return this;}uint64_t oldest_pending_submit_index(){++polls;return boundary;}uint64_t latest_queue_submit_index(int){return latest;}void collect_garbage(){++gc;}struct Address{uint64_t id;uint64_t value(){return id;}};Address device_address(daxa::BufferId id){return {id.id};}struct Host{uint64_t id;void* value(){return reinterpret_cast<void*>(id);}};Host buffer_host_address(daxa::BufferId id){return {id.id};}struct Wait{int queue;uint64_t queue_submit_index,timeout;};void wait_on_submit(Wait){++waits;}};
 struct DaxaFoundation{Device device;};
-struct DaxaRectification{unsigned width=8,height=6,eye_width=20,source_height=16,stride_bytes=160;std::string original_identity;};
-struct CaptureFrame{uint64_t frame_id=7;unsigned source_width=40,height=16,stride_bytes=160;std::string calibration_identity,device_identity,host_clock_domain;};using CaptureLease=std::shared_ptr<const CaptureFrame>;
+struct DaxaRectification{unsigned width=8,height=6,eye_width=20,source_height=16,stride_bytes=160;std::string original_identity,rectified_identity;};
+enum class CaptureSourceKind{PackedYuyv,CanonicalRgbMetadata};struct CanonicalRgbSource;
+struct CaptureFrame{CaptureSourceKind source_kind=CaptureSourceKind::PackedYuyv;std::shared_ptr<const CanonicalRgbSource> canonical_rgb;std::vector<uint8_t> packed_yuyv;uint64_t frame_id=7;unsigned source_width=40,height=16,stride_bytes=160;std::string calibration_identity,device_identity,host_clock_domain;};using CaptureLease=std::shared_ptr<const CaptureFrame>;
 namespace detail{
 '''
     program += definition(frame, 'inline bool completed_submission(') + definition(frame, 'inline bool available_slot(')
@@ -114,6 +124,20 @@ struct Pre{std::shared_ptr<const DaxaRectification> maps;CaptureLease src;auto c
 class DaxaDepthPipeline{public:struct Owner{std::shared_ptr<DaxaFoundation> context;};struct Slot{std::array<daxa::BufferId,9> outputs{};uint64_t generation=1,submit=1;Pre preprocessing;};class Frame{public:std::shared_ptr<Owner> owner_;std::shared_ptr<Slot> slot_;uint64_t generation_=1;void validate()const{if(!slot_||generation_!=slot_->generation)throw std::invalid_argument("stale input");}explicit operator bool()const{return bool(slot_);}DaxaObservationFrame observations()const;CaptureLease source()const{return slot_->preprocessing.src;}DaxaRightReferenceMode right_reference_mode()const{return DaxaRightReferenceMode::IndependentSGM;}daxa::BufferId buffer(DaxaDepthPlane p)const{return slot_->outputs[unsigned(p)];}struct Image{daxa::BufferId id;auto buffer()const{return id;}};Image image(DaxaPreprocessPlane p)const{return {slot_->preprocessing.plane(p).buffer()};}void wait()const{++owner_->context->device.waits;}};};
 }
 '''
+    program += r'''
+namespace stereoforge {
+class DaxaFrame{public:
+ std::shared_ptr<DaxaFoundation> context;std::shared_ptr<const DaxaRectification> maps;CaptureLease src;std::shared_ptr<int> lifetime;std::array<daxa::BufferId,8> buffers{};
+ explicit operator bool()const{return bool(src);}auto calibration()const{return maps;}auto source()const{return src;}
+ uint64_t context_id()const{return reinterpret_cast<uintptr_t>(context->device.get());}
+ struct Image{daxa::BufferId id;auto buffer()const{return id;}};
+ Image plane(DaxaPreprocessPlane p)const{return {buffers[unsigned(p)]};}
+};
+}
+'''
+    canonical_header = (ROOT / 'include/stereoforge/canonical_rgb.hpp').read_text()
+    program += canonical_header[canonical_header.index('namespace stereoforge {'):canonical_header.index('inline void validate_canonical_rgb_source(')] + '}\n'
+    program += '\nnamespace stereoforge {\n' + definition(canonical_header, 'inline bool canonical_rgb_grid_association(') + '\n}\n'
     program += re.sub(r'\brequire\b', 'observation_require', common_source[common_source.index('namespace stereoforge {'):])
     program += '\nnamespace stereoforge {\n' + definition((ROOT / 'src/daxa_depth.cpp').read_text(), 'DaxaObservationFrame DaxaDepthPipeline::Frame::observations(') + '\n}\n'
     program += header[header.index('namespace stereoforge {'):].replace('class DaxaRefinement {', 'class DaxaRefinement { public:', 1)
@@ -126,11 +150,12 @@ namespace stereoforge {
     program += definition(source, 'struct DaxaRefinement::Slot') + ';\n'
     program += r'''
 struct DaxaRefinement::Impl{
+ bool canonical=false;
  std::shared_ptr<DaxaFoundation> context;std::shared_ptr<const DaxaRectification> coarse_maps,maps;
  std::vector<std::shared_ptr<Slot>> slots;uint64_t next_generation=1,retired=0;
  const std::thread::id thread=std::this_thread::get_id();
 '''
-    for signature in ('void require_thread(', 'size_t collect_at(', 'std::array<daxa::BufferId,5> input_buffers('):
+    for signature in ('void require_thread(', 'size_t collect_at(', 'std::array<daxa::BufferId,5> input_buffers(', 'std::array<daxa::BufferId,6> full_buffers('):
         program += definition(source, signature)
     program += '};\n'
     for signature in ('DaxaRefinement::Frame::Frame(', 'DaxaRefinement::Frame& DaxaRefinement::Frame::operator=(',
@@ -141,9 +166,11 @@ struct DaxaRefinement::Impl{
                       'uint32_t DaxaRefinement::Frame::height(', 'daxa::BufferId DaxaRefinement::Frame::buffer(',
                       'size_t DaxaRefinement::Frame::size_bytes(', 'DaxaObservationFrame DaxaRefinement::Frame::observations('):
         program += definition(source, signature)
+    program += definition(source, 'DaxaRefinement::Frame DaxaRefinement::process(DaxaDepthPipeline::Frame const& input,DaxaFrame const& full)')
     # Constructor setup is the only mock boundary: no Vulkan, maps or shader setup.
     program += r'''
 DaxaRefinement::DaxaRefinement(std::shared_ptr<DaxaFoundation>,DaxaRectification,DaxaDepthPipeline::Frame const&,DaxaRefinementConfig){}
+DaxaRefinement::DaxaRefinement(std::shared_ptr<DaxaFoundation>,DaxaDepthPipeline::Frame const&,DaxaFrame const&,DaxaRefinementConfig){}
 }
 using namespace stereoforge;
 void check(bool value,char const* message){if(!value)throw std::runtime_error(message);}
@@ -170,6 +197,16 @@ int main(int argc,char** argv){try{
  for(unsigned n=0;n<frames;++n){stage.collect();check(stage.can_process(),"preupload admission failed");auto out=stage.process(inputs[n%3]);auto observation=out.observations();auto copied=observation;auto moved=std::move(copied);copied=observation;copied={};check(observation.context()==context&&observation.map_owner()==target&&observation.source()==captures[n%3],"common owner/source association");check(observation.width()==16&&observation.height()==12&&observation.layers()==2,"target observation geometry");check(observation.ancestry().kind()==DaxaObservationAncestryKind::SingleMeasured&&observation.ancestry().capacity()==1,"wrong independent ancestry");for(unsigned p=0;p<6;++p){check(observation.buffer(DaxaObservationPlane(p))==engine->slots[0]->output[p+3],"metric plane binding");checksum+=observation.size_bytes(DaxaObservationPlane(p));}for(unsigned p=0;p<4;++p){auto image=observation.image(DaxaObservationImage(p));check(image.width()==(p<2?20:16)&&image.height()==(p<2?16:12),"RGB extent");auto expected=p<2?100+unsigned(p==0?DaxaPreprocessPlane::OriginalLeft:DaxaPreprocessPlane::OriginalRight):engine->slots[0]->output[p==2?26:29].id;check(image.buffer().id==expected,"RGB buffer association");checksum+=image.buffer().id;}check(params[0].source_id==captures[n%3]->frame_id,"current ID lost");for(unsigned p=0;p<5;++p)check(engine->slots[0]->input_nodes[p].updates==updates+n+1,"unexpected binding update count");finish();}
  double ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();track=false;
  check(allocations==0&&context->device.waits==0,"allocation or implicit wait in warmed actual source");check(context->device.polls-polls==3*frames,"admission/process/collect poll count");check(context->device.gc-gc==frames,"explicit collect GC count");check(context->device.latest-latest==frames,"graph reuse count");check(engine->slots.size()==2,"slot registry grew");stage.collect();for(auto const& s:engine->slots)check(!s->input,"source retained after completion");for(auto const& input:inputs)check(input.slot_.use_count()==1,"deep upstream source chain retained");
+ // Canonical mode retains both sources, updates six full nodes and rejects
+ // unrelated leases/exact owners before submission. No setup/GPU is mocked as evidence.
+ engine->canonical=true;DaxaFrame full;full.context=context;full.maps=target;full.src=captures[0];for(unsigned p=0;p<8;++p)full.buffers[p]={4000+p};
+ auto canonical=stage.process(inputs[0],full);auto current=context->device.latest;auto full_bad=full;full_bad.src=captures[1];bool bad=false;try{stage.process(inputs[0],full_bad);}catch(std::invalid_argument const&){bad=true;}check(bad&&context->device.latest==current,"foreign full source admitted");
+ full_bad=full;full_bad.maps=std::make_shared<DaxaRectification>(*target);bad=false;try{stage.process(inputs[0],full_bad);}catch(std::invalid_argument const&){bad=true;}check(bad&&context->device.latest==current,"foreign full owner admitted");
+ canonical={};check(bool(engine->slots[0]->full_input)&&stage.collect()==0,"pending full input released");finish();check(stage.collect()==1&&!engine->slots[0]->full_input,"completed full input retained");
+ candidate->graph->fail=2;previous=context->device.latest;failed=false;try{stage.process(inputs[0],full);}catch(std::runtime_error const&){failed=true;}check(failed&&candidate->submit==previous+1&&bool(candidate->input)&&bool(candidate->full_input),"partial canonical sources not pinned");check(stage.collect()==0,"partial full source released before equality");finish();candidate->graph->fail=0;check(stage.collect()==1&&!candidate->full_input,"partial canonical source not retired");
+ auto canonical_polls=context->device.polls;allocations=0;track=true;for(unsigned n=0;n<10000;++n){stage.collect();check(stage.can_process(),"canonical preupload admission failed");auto out=stage.process(inputs[0],full);auto lease=out.observations();finish();}track=false;check(allocations==0&&context->device.waits==0&&context->device.polls-canonical_polls==30000,"canonical hotpath allocation/wait/poll regression");stage.collect();
+ full_bad={};full.lifetime=std::make_shared<int>(7);auto full_lifetime=std::weak_ptr(full.lifetime);auto retained_full=stage.process(inputs[0],full);auto retained_common=retained_full.observations();full={};retained_full={};finish();check(stage.collect()==0&&!full_lifetime.expired(),"common lease failed to retain full producer");retained_common={};check(stage.collect()==1&&full_lifetime.expired(),"full producer leaked after common retirement");
+ engine->canonical=false;
  auto held=stage.process(inputs[1]);finish();auto lease=held.observations();auto weak=std::weak_ptr(engine);held={};stage.impl_.reset();engine.reset();check(!weak.expired()&&lease.width()==16&&lease.source()==captures[1],"facade destruction invalidated common lease");lease={};check(weak.expired(),"producer ownership cycle");
  std::cout<<"{\"frames\":"<<frames<<",\"identity_bytes\":"<<bytes<<",\"application_allocations\":"<<allocations<<",\"implicit_waits\":0,\"snapshots\":"<<3*frames<<",\"explicit_collect_gc_calls\":"<<frames<<",\"slots\":2,\"binding_nodes_per_slot\":40,\"mean_mock_host_ms\":"<<ms/frames<<",\"checksum\":"<<checksum<<",\"partial_submit_pins_source\":true,\"common_lease_survives_facade\":true,\"scope\":\"actual production process/admission/retirement/Depth+common adapters; mocked GPU/setup only\"}\n";
  }catch(std::exception const& e){track=false;std::cerr<<e.what()<<'\n';return 1;}}
@@ -192,7 +229,7 @@ def test_actual_process_admission_retirement(tmp_path, identity_bytes):
     assert row['snapshots'] == 30000 and row['partial_submit_pins_source'] and row['common_lease_survives_facade']
 
 
-@pytest.mark.parametrize('mutation', ['allocation', 'wait', 'pending', 'external', 'partial_ticket', 'retirement'])
+@pytest.mark.parametrize('mutation', ['allocation', 'wait', 'pending', 'external', 'partial_ticket', 'retirement', 'full_retirement', 'full_retention', 'full_source', 'full_owner'])
 def test_executing_probe_detects_regressions(tmp_path, mutation):
     def alter(source):
         if mutation in ('allocation', 'wait'):
@@ -207,6 +244,14 @@ def test_executing_probe_detects_regressions(tmp_path, mutation):
             marker = 'catch(...){s->submit=d.latest_queue_submit_index(daxa::QUEUE_MAIN);throw;}'
             assert marker in source
             return source.replace(marker, 'catch(...){s->submit=0;throw;}')
+        if mutation == 'full_retirement':
+            return source.replace('s->full_input={}', '')
+        if mutation == 'full_retention':
+            return source.replace('s->full_input=full;', '')
+        if mutation == 'full_source':
+            return source.replace('source==full.source()', 'true')
+        if mutation == 'full_owner':
+            return source.replace('full.calibration()==e.maps', 'true')
         assert 's->input={}' in source
         return source.replace('s->input={}', '')
     run = subprocess.run([str(build_probe(tmp_path, alter))], capture_output=True, text=True, timeout=30)
@@ -233,3 +278,76 @@ def test_benchmark_admits_before_upload_and_separates_diagnostics():
             check_benchmark(source.replace(marker, marker + operation, 1))
     with pytest.raises(AssertionError):
         check_benchmark(source.replace('stage->can_process()', 'true'))
+
+
+def test_canonical_pack_exact_copy_offsets(tmp_path):
+    source = SOURCE.read_text()
+    actual = definition(source, 'struct CanonicalPackCopy') + ';\n' + definition(source, 'constexpr std::array<CanonicalPackCopy,6> canonical_pack_copies(')
+    program = tmp_path / 'pack.cpp'
+    program.write_text('#include <array>\n#include <cstddef>\n#include <cassert>\n' + actual + r'''
+int main(){
+ for(size_t pixels: {size_t(1),size_t(35),size_t(1280*720)}){
+  auto c=canonical_pack_copies(pixels);const unsigned destinations[]={26,29,27,27,28,28};
+  for(unsigned i=0;i<6;++i){assert(c[i].source==i);assert(c[i].output==destinations[i]);assert(c[i].size==pixels*4);assert(c[i].offset==((i==3||i==5)?pixels*4:0));}
+ }
+}
+''')
+    binary = tmp_path / 'pack'
+    subprocess.run(['c++', '-std=c++20', '-Wall', '-Wextra', '-Werror', str(program), '-o', str(binary)], check=True)
+    subprocess.run([str(binary)], check=True)
+    assert 'if(!canonical)for(unsigned p=0;p<4;++p){map_buffers' in source
+    assert 'for(unsigned pass=canonical?1u:0u;pass<passes;++pass){auto words=shader' in source
+    pack = body(source, '.executes([raw,copies,full_views,out]')
+    assert 'copy_buffer_to_buffer' in pack and 'dispatch' not in pack
+    assert 'dst_offset=copy.offset' in pack and 'size=copy.size' in pack
+    assert not re.search(r'\b(?:wait|readback|make_shared|resize|sha256)\b', pack)
+
+
+@pytest.mark.parametrize('mutation', [None, 'removed', 'wrong_destination'])
+def test_canonical_pack_executing_barrier_order(tmp_path, mutation):
+    source = SOURCE.read_text()
+    pack = body(source, '.executes([raw,copies,full_views,out]')
+    barrier = 'ti.recorder.pipeline_barrier({.src_access=daxa::AccessConsts::COMPUTE_SHADER_WRITE,.dst_access=daxa::AccessConsts::TRANSFER_READ});'
+    assert pack.count(barrier) == 1
+    if mutation == 'removed':
+        pack = pack.replace(barrier, '')
+    elif mutation == 'wrong_destination':
+        pack = pack.replace('dst_access=daxa::AccessConsts::TRANSFER_READ', 'dst_access=daxa::AccessConsts::COMPUTE_SHADER_READ')
+    actual = definition(source, 'struct CanonicalPackCopy') + ';\n' + definition(source, 'constexpr std::array<CanonicalPackCopy,6> canonical_pack_copies(')
+    program = tmp_path / 'barrier.cpp'
+    program.write_text(r'''
+#include <array>
+#include <cstddef>
+#include <cassert>
+namespace daxa {
+struct AccessConsts {static constexpr unsigned COMPUTE_SHADER_WRITE=1,TRANSFER_READ=2,COMPUTE_SHADER_READ=4;};
+enum class PipelineStageFlagBits {TOP_OF_PIPE,TRANSFER};
+}
+struct Barrier {unsigned src_access,dst_access;};
+struct Reset {unsigned query_pool,start_index,count;};
+struct Timestamp {unsigned query_pool;daxa::PipelineStageFlagBits pipeline_stage;unsigned query_index;};
+struct Copy {unsigned src_buffer,dst_buffer;size_t dst_offset,size;};
+struct Recorder {
+ unsigned barrier_count=0,copies=0,sequence=0,last_barrier=0;
+ std::array<Copy,6> recorded{};
+ void reset_timestamps(Reset){++sequence;}
+ void write_timestamp(Timestamp){++sequence;}
+ void pipeline_barrier(Barrier b){assert(b.src_access==daxa::AccessConsts::COMPUTE_SHADER_WRITE);assert(b.dst_access==daxa::AccessConsts::TRANSFER_READ);assert(copies==0);++barrier_count;last_barrier=++sequence;}
+ void copy_buffer_to_buffer(Copy c){assert(barrier_count==1&&last_barrier&&last_barrier<++sequence);assert(copies<6);recorded[copies++]=c;}
+};
+struct TaskInterface {Recorder& recorder;struct Buffer {unsigned id;};Buffer get(unsigned v){return {v};}};
+struct Slot {unsigned queries=7;};
+''' + actual + '\nint main(){\n' + r'''
+ for(size_t pixels:{size_t(1),size_t(35),size_t(1280*720)}){
+  auto copies=canonical_pack_copies(pixels);std::array<unsigned,6> full_views{100,101,102,103,104,105};std::array<unsigned,30> out{};for(unsigned p=0;p<30;++p)out[p]=200+p;
+  Slot slot;auto* raw=&slot;constexpr unsigned passes=5;Recorder recorder;TaskInterface ti{recorder};
+''' + pack + r'''
+  assert(recorder.barrier_count==1&&recorder.copies==6);
+  for(unsigned i=0;i<6;++i){auto c=recorder.recorded[i];assert(c.src_buffer==100+i);assert(c.dst_buffer==200+copies[i].output);assert(c.dst_offset==copies[i].offset);assert(c.size==pixels*4);}
+ }
+}
+''')
+    binary = tmp_path / 'barrier'
+    subprocess.run(['c++', '-std=c++20', '-Wall', '-Wextra', '-Werror', str(program), '-o', str(binary)], check=True)
+    run = subprocess.run([str(binary)], capture_output=True, text=True)
+    assert (run.returncode == 0) == (mutation is None), run.stderr

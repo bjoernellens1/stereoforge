@@ -29,6 +29,9 @@ DaxaDepthReadback daxa_depth_reference(const DaxaDepthConfig&,MetricCalibration,
 enum class DaxaDepthPlane:unsigned { LRDisparity,LRStereoConfidence,LRValidity,Depth,MetricConfidence,MetricValidity,Provenance,SourceIds,AgeNs };
 struct DaxaDepthTiming {
     DaxaPreprocessTiming preprocessing;
+    bool preprocessing_timings_available=true;
+    bool combined_gpu_timing_available=true; // Producer upload through metric; unavailable for external inputs.
+    double stereo_to_metric_gpu_ms=0;
     DaxaStereoTiming left,right;
     bool per_reference_stereo_timings_available=true;
     DaxaStereoTiming paired_stereo; // Phase intervals contain both references; no isolated eye timings.
@@ -59,7 +62,13 @@ public:
         MetricCalibration metric_calibration()const;DaxaDepthTiming timings()const;
         DaxaStereo::Frame stereo_frame(DaxaStereoReference)const; // SharedCensusSequential GPU producer lease; independently consumes aligned stereo capacity.
     };
+private:
+    Frame submit_preprocessed(DaxaFrame,uint64_t,unsigned,const std::shared_ptr<Slot>&);
+public:
     DaxaDepthPipeline(DaxaRectification,DaxaDepthConfig,std::shared_ptr<DaxaFoundation>,CaptureLease prototype);
+    // External producer mode: binds its exact immutable calibration/foundation once.
+    DaxaDepthPipeline(DaxaDepthConfig,std::shared_ptr<DaxaFoundation>,const DaxaFrame& prototype);
+    Frame enqueue_preprocessed(const DaxaFrame&); // Exact setup-bound calibration/context; no producer upload.
     Frame enqueue(CaptureLease); // No wait/readback/application heap allocation. Full ring rejects before upload.
     size_t collect();void drain();
     DaxaDepthReadback readback(const Frame&)const; // Explicit diagnostic boundary only.
@@ -68,6 +77,8 @@ public:
     DaxaStereoReadback readback_stereo(const Frame&,DaxaStereoReference,bool include_intermediates=true)const;
     void check_derived_stereo_integer(const Frame&,const DaxaPreprocessReadback& expected_images)const;
     void check_stereo_integer(const Frame&,const DaxaPreprocessReadback& expected_images)const;
+    // Combined bytes include owned preprocessing in raw mode; external mode reports
+    // depth-owned stereo+metric bytes only. Report producer allocation separately.
     uint64_t completed_output_retirements()const;uint64_t requested_observation_bytes()const;uint64_t requested_combined_buffer_bytes()const;
     double last_upload_cpu_ms()const;
     static void validate_pair(const DaxaFrame&,const DaxaStereo::Frame&,const DaxaStereo::Frame&);

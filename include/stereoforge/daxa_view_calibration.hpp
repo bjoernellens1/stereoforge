@@ -13,4 +13,7 @@ struct DaxaViewCalibration {
     std::string association="opencv4.14-effective-quantized-map-model-validation";
 };
 DaxaViewCalibration prepare_daxa_view_calibration(const DaxaRectification&,GeometryConfig,VirtualView const&);
+// Setup-only typed source admission. Canonical RGB validates retained camera/grid
+// association without requiring raw YUYV remap tables or a packed source stride.
+DaxaViewCalibration prepare_daxa_view_calibration(const DaxaRectification&,GeometryConfig,VirtualView const&,const CaptureFrame&);
 }

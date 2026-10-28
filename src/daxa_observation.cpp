@@ -1,11 +1,12 @@
 #include <stereoforge/daxa_observation.hpp>
 #include <stereoforge/daxa_preprocess.hpp>
+#include <stereoforge/canonical_rgb.hpp>
 #include <stdexcept>
 #include <utility>
 namespace stereoforge {
 namespace {void require(bool v,const char* m){if(!v)throw std::invalid_argument(m);}}
 DaxaObservationFrame::DaxaObservationFrame(std::shared_ptr<DaxaFoundation> context,std::shared_ptr<void> owner,std::shared_ptr<void> lease,const uint64_t* live_generation,uint64_t generation,uint64_t submit,std::shared_ptr<const DaxaRectification> maps,CaptureLease source,std::array<daxa::BufferId,6> planes,std::array<DaxaObservationImageView,4> images,DaxaObservationAncestryView ancestry):context_(std::move(context)),owner_(std::move(owner)),lease_(std::move(lease)),maps_(std::move(maps)),source_(std::move(source)),live_generation_(live_generation),generation_(generation),submit_(submit),planes_(planes),images_(images),ancestry_(ancestry){
-    validate();require(context_->device.get()&&maps_&&source_&&submit_,"observation requires submitted producer/context/maps/source");width_=maps_->width;height_=maps_->height;if(ancestry_.kind()==DaxaObservationAncestryKind::SingleMeasured)ancestry_=DaxaObservationAncestryView(size_t(width_)*height_*2);require(width_&&height_&&source_->source_width==2*maps_->eye_width&&source_->height==maps_->source_height&&source_->stride_bytes==maps_->stride_bytes&&source_->calibration_identity==maps_->original_identity,"observation source/grid association mismatch");
+    validate();require(context_->device.get()&&maps_&&source_&&submit_,"observation requires submitted producer/context/maps/source");width_=maps_->width;height_=maps_->height;if(ancestry_.kind()==DaxaObservationAncestryKind::SingleMeasured)ancestry_=DaxaObservationAncestryView(size_t(width_)*height_*2);require(width_&&height_&&source_->source_width==2*maps_->eye_width&&source_->height==maps_->source_height&&(source_->source_kind==CaptureSourceKind::CanonicalRgbMetadata?canonical_rgb_grid_association(*source_,maps_->eye_width,maps_->source_height,maps_->width,maps_->height,maps_->original_identity,maps_->rectified_identity):source_->stride_bytes==maps_->stride_bytes)&&source_->calibration_identity==maps_->original_identity,"observation source/grid association mismatch");
     for(auto id:planes_)require(!id.is_empty(),"missing observation plane");
     for(unsigned i=0;i<4;++i)require(!images_[i].buffer().is_empty()&&images_[i].width()==(i<2?maps_->eye_width:width_)&&images_[i].height()==(i<2?maps_->source_height:height_),"observation RGB shape mismatch");
 

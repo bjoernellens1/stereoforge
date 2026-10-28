@@ -19,6 +19,8 @@ namespace {
 uint64_t ingress_now(){return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();}
 constexpr size_t max_imu=8192,max_string=65536,max_payload=256*1024*1024;
 void validate(const CaptureFrame& f){
+    if(f.source_kind!=CaptureSourceKind::PackedYuyv||f.canonical_rgb)
+        throw std::invalid_argument("raw capture requires packed YUYV source");
     if(!f.source_width||f.source_width%4||f.source_width>8192||!f.height||f.height>8192||f.stride_bytes!=f.source_width*2||f.packed_yuyv.size()!=size_t(f.stride_bytes)*f.height||f.packed_yuyv.size()>max_payload||!f.camera_timestamp_ns||f.camera_clock_domain.empty()||f.host_clock_domain.empty()||f.imu_samples.size()>max_imu)
         throw std::invalid_argument("invalid packed YUYV frame dimensions, timestamp, clock or sample count");
     for(auto* s:{&f.camera_clock_domain,&f.host_clock_domain,&f.calibration_identity,&f.device_identity,&f.controls_json,&f.control_status,&f.controls_clock_domain,&f.sensor_status,&f.imu_clock_domain,&f.imu_association})
@@ -189,6 +191,8 @@ struct RecordIO {
     void floating(float& f){uint32_t bits=std::bit_cast<uint32_t>(f);number(bits);if(in)f=std::bit_cast<float>(bits);}
 };
 void record(RecordIO& io,CaptureFrame& f){
+    if(io.in&&(f.source_kind!=CaptureSourceKind::PackedYuyv||f.canonical_rgb))
+        throw std::invalid_argument("raw replay requires packed YUYV destination");
     io.number(f.source_width);io.number(f.height);io.number(f.stride_bytes);io.number(f.frame_id);io.number(f.camera_timestamp_ns);io.number(f.host_ingress_timestamp_ns);
     io.text(f.camera_clock_domain);io.text(f.host_clock_domain);io.text(f.calibration_identity);io.text(f.device_identity);io.text(f.controls_json);io.text(f.control_status);io.number(f.controls_timestamp_ns);io.text(f.controls_clock_domain);
     io.text(f.sensor_status);io.text(f.imu_clock_domain);io.text(f.imu_association);io.number(f.sensor_dropped_count);

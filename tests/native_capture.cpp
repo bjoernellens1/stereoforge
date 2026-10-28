@@ -31,6 +31,7 @@ int main(int argc,char** argv){try {
     }
     rejects([]{auto c=config();c.queue_capacity=0;NativeCapture bad(c,source(1));});
     rejects([]{auto c=config();c.pool_capacity=c.queue_capacity;NativeCapture bad(c,source(1));});
+    check(CaptureFrame{}.source_kind==CaptureSourceKind::PackedYuyv&&!CaptureFrame{}.canonical_rgb,"default source is packed YUYV");
     CaptureLease held;
     {NativeCapture cap(config(),source(20,true));for(int i=0;i<2000&&cap.metrics().running;++i)std::this_thread::sleep_for(1ms);check(!cap.metrics().running,"source must end");
      auto m=cap.metrics();check(m.source_frames==20,"source count");check(m.queue_drops==18,"bounded queue drops");check(m.source_frame_gaps==19,"gaps");
@@ -38,9 +39,11 @@ int main(int argc,char** argv){try {
      check(held->source_width==8&&held->stride_bytes==16,"full source width");held->require_calibration();cap.stop();m=cap.metrics();check(m.queued_frames==1,"one unread frame remains queued after stop");conserved(m);}
     check(held->packed_yuyv[0]==19,"lease survives facade destruction");
     auto dir=std::filesystem::temp_directory_path()/("stereoforge-native-capture-test-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));std::filesystem::remove_all(dir);
+    {auto tagged=*held;tagged.source_kind=CaptureSourceKind::CanonicalRgbMetadata;PackedCaptureWriter writer(dir);rejects([&]{writer.append(tagged);});writer.close();check(std::filesystem::file_size(dir/"capture.sfp")==20,"canonical source rejected before writing record bytes");check(read_packed_capture(dir).empty(),"canonical source does not increment raw record count");std::filesystem::remove_all(dir);}
     {auto raw=*held;raw.host_ingress_timestamp_ns=0;raw.host_clock_domain="fixture_unknown_host";PackedCaptureWriter writer(dir);writer.append(raw);writer.append(raw);writer.close();}
     rejects([&]{read_packed_capture(dir,1);});rejects([&]{read_packed_capture(dir,4,1);});
     auto frames=read_packed_capture(dir);check(frames.size()==2,"record count");
+    {auto replay=packed_replay_source(dir);CaptureFrame tagged;tagged.source_kind=CaptureSourceKind::CanonicalRgbMetadata;tagged.frame_id=777;rejects([&]{replay(tagged,1ms);});check(tagged.source_kind==CaptureSourceKind::CanonicalRgbMetadata&&tagged.frame_id==777,"raw replay rejects canonical destination before mutation");auto raw_replay=packed_replay_source(dir);CaptureFrame raw;check(raw_replay(raw,1ms)==CaptureSourceStatus::recorded_frame,"raw v1 replay record");check(raw.source_kind==CaptureSourceKind::PackedYuyv&&!raw.canonical_rgb&&raw.packed_yuyv==held->packed_yuyv,"default raw v1 replay preserves source and bytes");}
     check(frames[0].packed_yuyv==held->packed_yuyv&&frames[0].controls_json==held->controls_json,"lossless packed and controls");
     check(frames[0].imu_samples[0].angular_velocity_deg_s[2]==6,"lossless IMU");
     {auto c=config();c.queue_policy=CaptureQueuePolicy::wait_for_consumer;NativeCapture cap(c,packed_replay_source(dir));auto a=cap.read(100ms);auto b=cap.read(100ms);check(a&&b,"replay preserves duplicate records");check(a->frame_id==b->frame_id,"replay record identity");check(a->host_ingress_timestamp_ns==0&&a->host_clock_domain=="fixture_unknown_host","replay preserves zero ingress and original domain");cap.stop();conserved(cap.metrics(),false);}

@@ -5,6 +5,10 @@
 #include <type_traits>
 using namespace stereoforge;
 static_assert(std::is_nothrow_assignable_v<DaxaRefinement::Frame&,DaxaRefinement::Frame>);
+static_assert(std::is_constructible_v<DaxaRefinement,std::shared_ptr<DaxaFoundation>,const DaxaDepthPipeline::Frame&,const DaxaFrame&,DaxaRefinementConfig>);
+using CanonicalRefinementProcess=DaxaRefinement::Frame(DaxaRefinement::*)(const DaxaDepthPipeline::Frame&,const DaxaFrame&);
+static_assert(std::is_same_v<decltype(static_cast<CanonicalRefinementProcess>(&DaxaRefinement::process)),CanonicalRefinementProcess>);
+
 static_assert(!std::is_constructible_v<DaxaRefinement::Frame,std::shared_ptr<DaxaFoundation>,daxa::BufferId>);
 void check(bool v){if(!v)throw std::runtime_error("refinement contract failed");}
 template<class F>void reject(F f){try{f();}catch(std::invalid_argument const&){return;}throw std::runtime_error("invalid refinement accepted");}

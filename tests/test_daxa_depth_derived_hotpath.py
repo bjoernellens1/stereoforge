@@ -13,7 +13,7 @@ import pytest
 
 from test_kernel_variant_hotpath import body
 from test_daxa_depth_pair_hotpath import build_pair_bookkeeping_probe
-from test_daxa_depth_shared_census_hotpath import check_shared_hotpath
+from test_daxa_depth_shared_census_hotpath import check_depth_setup_constructors, check_shared_hotpath
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -147,8 +147,10 @@ def check_derived_storage_and_graph(stereo, depth):
     accounting = body(depth, 'uint64_t DaxaDepthConfig::requested_buffer_bytes(')
     assert 'if(right_reference_mode==DaxaRightReferenceMode::LeftAggregatedSelection)total-=slots*packed' in accounting
     assert 'total<2ull*1024*1024*1024' in accounting
+    check_depth_setup_constructors(depth)
+    setup = body(depth, 'void setup(DaxaFrame& pre)')
+    assert setup.index('left->process(pre)') < setup.index('SharedCensusSequential)l.wait()') < setup.index('right->process(pre)')
     constructor = body(depth, 'Impl(DaxaRectification maps,DaxaDepthConfig c,')
-    assert constructor.index('left->process(pre)') < constructor.index('SharedCensusSequential)l.wait()') < constructor.index('right->process(pre)')
     assert 'left->allocated_bytes()+right->allocated_bytes()+allocated==combined_allocated' in constructor
 
 

@@ -84,6 +84,7 @@ def check_shared_storage(stereo, depth):
     assert 'allocated+=n*4' in setup
     accounting = body(depth, 'uint64_t DaxaDepthConfig::requested_buffer_bytes(')
     assert 'if(stereo_schedule==DaxaDepthStereoSchedule::SharedCensusSequential)total-=16*n*slots' in accounting, 'actual bytes drop by one quartet per aligned slot'
+    check_depth_setup_constructors(depth)
     constructor = body(depth, 'Impl(DaxaRectification maps,DaxaDepthConfig c,')
     assert 'left->allocated_bytes()+right->allocated_bytes()+allocated==combined_allocated' in constructor
 
@@ -185,8 +186,18 @@ def test_shared_memory_guard_rejects_unaccounted_duplicate_quartet():
         check_shared_storage(stereo, depth.replace(marker, 'total-=0', 1))
 
 
+def check_depth_setup_constructors(depth):
+    for signature in ('Impl(DaxaRectification maps,DaxaDepthConfig c,',
+                      'Impl(DaxaDepthConfig c,std::shared_ptr<DaxaFoundation> foundation,const DaxaFrame& prototype)'):
+        constructor = body(depth, signature)
+        assert constructor.count('setup_device();') == 1
+        assert constructor.count('setup(pre);') == 1
+        assert constructor.index('setup_device();') < constructor.index('setup(pre);') < constructor.index('finish_setup();')
+
+
 def check_shared_bootstrap_order(depth):
-    constructor = body(depth, 'Impl(DaxaRectification maps,DaxaDepthConfig c,')
+    check_depth_setup_constructors(depth)
+    constructor = body(depth, 'void setup(DaxaFrame& pre)')
     left = constructor.index('left->process(pre)')
     shared_wait = constructor.index('if(c.stereo_schedule==DaxaDepthStereoSchedule::SharedCensusSequential)l.wait()')
     right = constructor.index('right->process(pre)')
@@ -212,3 +223,22 @@ def test_shared_bootstrap_guard_rejects_cross_graph_write_after_write_regression
         depth = depth.replace(marker, '', 1).replace('r.wait();', marker+'r.wait();', 1)
     with pytest.raises((AssertionError, ValueError)):
         check_shared_bootstrap_order(depth)
+
+
+@pytest.mark.parametrize('signature', [
+    'Impl(DaxaRectification maps,DaxaDepthConfig c,',
+    'Impl(DaxaDepthConfig c,std::shared_ptr<DaxaFoundation> foundation,const DaxaFrame& prototype)',
+])
+@pytest.mark.parametrize('mutation', ['remove_device', 'remove_setup', 'late_device'])
+def test_shared_bootstrap_guard_checks_both_constructor_setup_paths(signature, mutation):
+    depth = (ROOT/'src/daxa_depth.cpp').read_text()
+    constructor = body(depth, signature)
+    if mutation == 'remove_device':
+        changed = constructor.replace('setup_device();', '', 1)
+    elif mutation == 'remove_setup':
+        changed = constructor.replace('setup(pre);', '', 1)
+    else:
+        changed = constructor.replace('setup_device();', '', 1).replace('setup(pre);', 'setup(pre);setup_device();', 1)
+    assert changed != constructor
+    with pytest.raises((AssertionError, ValueError)):
+        check_shared_bootstrap_order(depth.replace(constructor, changed, 1))

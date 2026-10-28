@@ -68,7 +68,9 @@ def test_span_guard_rejects_duplicate_fetch():
 
 
 def check_depth_submission(source, header):
-    enqueue = body(source, 'DaxaDepthPipeline::Frame DaxaDepthPipeline::enqueue(')
+    admission = body(source, 'DaxaDepthPipeline::Frame DaxaDepthPipeline::enqueue(')
+    assert 'return submit_preprocessed(std::move(pre),oldest,pair_index,slot)' in admission
+    enqueue = admission + body(source, 'DaxaDepthPipeline::Frame DaxaDepthPipeline::submit_preprocessed(')
     retire = body(source, 'size_t collect_at(')
     forbidden = r'\b(?:make_shared|make_unique|allocate|create_buffer|create_memory|create_command_recorder|wait_idle|wait_on_submit|readback|inspect|memcpy|malloc|calloc|realloc|resize|reserve|push_back|metric_calibration|sha_file|strict_json)(?:<[^;()]*>)?\s*\('
     assert not re.search(forbidden, enqueue+retire), 'depth admission/retirement must not allocate, wait, copy images, or validate geometry'
@@ -117,7 +119,7 @@ def test_callbacks_and_cross_graph_visibility_do_not_retain_prototype_frames():
     source=(ROOT/'src/daxa_depth.cpp').read_text()
     callbacks=re.findall(r'task\.executes\(\[([^]]*)\]',source)
     assert callbacks and all(not re.search(r'\b(?:pre|prototype|left|right|l|r)\b',c) for c in callbacks), 'graph callbacks cannot hide frame/producer ownership cycles'
-    assert 'l={};r={};pre={};prototype.reset();' in source, 'setup prototype leases must be released'
+    assert 'l={};r={};pre={};' in body(source,'void setup(DaxaFrame& pre)') and 'setup(pre);prototype.reset();finish_setup();' in body(source,'Impl(DaxaRectification maps,DaxaDepthConfig c,'), 'setup prototype leases must be released'
     assert 'AccessConsts::HOST_WRITE|daxa::AccessConsts::COMPUTE_SHADER_WRITE' in source
     assert '.dst_access=daxa::AccessConsts::COMPUTE_SHADER_READ' in source
     assert 'task.reads(inputs[6]).reads(inputs[7])' in source
@@ -187,7 +189,7 @@ class DaxaDepthPipeline {public:struct Slot {DaxaFrame preprocessing;DaxaStereo:
  std::array<uint64_t,8> input_buffers(const DaxaFrame&,const DaxaStereo::Frame&,const DaxaStereo::Frame&){return {};}};
  std::shared_ptr<Impl> impl_;
  class Frame {public:std::shared_ptr<Impl> owner_;std::shared_ptr<Slot> slot_;uint64_t generation_=0;Frame()=default;Frame(std::shared_ptr<Impl> o,std::shared_ptr<Slot> s):owner_(o),slot_(s),generation_(s->generation){}void validate()const;};
- Frame enqueue(CaptureLease);static void validate_pair(const DaxaFrame&,const DaxaStereo::Frame&,const DaxaStereo::Frame&);
+ Frame submit_preprocessed(DaxaFrame,uint64_t,unsigned,const std::shared_ptr<Slot>&);Frame enqueue(CaptureLease);static void validate_pair(const DaxaFrame&,const DaxaStereo::Frame&,const DaxaStereo::Frame&);
 };
 '''
     program += definition(pre,'DaxaFrame DaxaPreprocess::enqueue_at(')
@@ -195,7 +197,7 @@ class DaxaDepthPipeline {public:struct Slot {DaxaFrame preprocessing;DaxaStereo:
     program += definition(stereo,'size_t DaxaStereo::collect_completed_inputs_at(')
     # Actual production depth bookkeeping, pairing, frame validity and staging copy.
     program += definition(depth,'size_t collect_at(').replace('size_t collect_at(', 'size_t DaxaDepthPipeline::Impl::collect_at(',1)
-    for signature in ('void DaxaDepthPipeline::validate_pair(', 'DaxaDepthPipeline::Frame DaxaDepthPipeline::enqueue(', 'void DaxaDepthPipeline::Frame::validate('):
+    for signature in ('void DaxaDepthPipeline::validate_pair(', 'DaxaDepthPipeline::Frame DaxaDepthPipeline::submit_preprocessed(', 'DaxaDepthPipeline::Frame DaxaDepthPipeline::enqueue(', 'void DaxaDepthPipeline::Frame::validate('):
         program += definition(depth,signature)
     program += r'''
 }
@@ -405,3 +407,57 @@ def test_depth_lease_guard_rejects_another_hidden_producer_escape():
     header = (ROOT/'include/stereoforge/daxa_depth.hpp').read_text() + '\nDaxaStereo::Frame hidden_producer();\n'
     with pytest.raises(AssertionError, match='only the explicit'):
         check_depth_submission(source, header)
+
+
+def check_external_depth_boundary(source, stereo):
+    setup=body(source,'Impl(DaxaDepthConfig c,')
+    admission=body(source,'DaxaDepthPipeline::Frame DaxaDepthPipeline::enqueue_preprocessed(')
+    validate=body(source,'void validate_input(')
+    submit=body(source,'DaxaDepthPipeline::Frame DaxaDepthPipeline::submit_preprocessed(')
+    assert 'prototype.owner_->context==context' in setup
+    assert 'calibration->metric_calibration()' in setup
+    assert not re.search(r'DaxaPreprocess|requested_buffer_bytes|requested_bytes|maps\.validate\(|calibration->validate\(',setup), 'external setup must not allocate/validate raw preprocessing'
+    assert 'combined_allocated=left->allocated_bytes()+right->allocated_bytes()+allocated' in setup
+    assert 'input.owner_->context==context' in validate and 'maps==calibration' in validate
+    assert 'source->frame_id<=uint64_t(INT64_MAX)' in validate
+    assert 'source->calibration_identity==maps->original_identity' in validate
+    assert 'source->source_width==2*maps->eye_width' in validate and 'source->height==maps->source_height' in validate
+    assert not re.search(r'metric_calibration\(|\.geometry|sha256|strict_json',admission+validate)
+    assert admission.count('oldest_pending_submit_index(')==1
+    assert admission.index('e.validate_input(input)')<admission.index('oldest_pending_submit_index(')<admission.index('e.collect_at(oldest)')<admission.index('detail::available_slot(')<admission.index('e.left->pair_slot_at(oldest)')<admission.index('return submit_preprocessed(input,oldest,pair_index,slot)')
+    assert not re.search(r'enqueue_at|make_shared|make_unique|wait_|readback|memcpy|create_|push_back|resize',admission+validate+submit), 'external path must be resident and bounded'
+    execute=submit.index('slot->graph->execute({})')
+    for retained in ('slot->preprocessing=std::move(pre)','slot->left=std::move(left)','slot->right=std::move(right)'):
+        assert retained in submit and submit.index(retained)<execute, 'metric submission must retain every producer before execute'
+    assert 'catch(...){slot->submit=d.latest_queue_submit_index(daxa::QUEUE_MAIN);throw;}' in submit
+    assert 'if(preprocessing)preprocessing->collect_completed_sources_at(oldest)' in body(source,'size_t collect_at(')
+    timing=body(source,'DaxaDepthTiming DaxaDepthPipeline::Frame::timings(')
+    assert 'out.preprocessing_timings_available=bool(owner_->preprocessing)' in timing
+    assert 'if(owner_->preprocessing)out.preprocessing=owner_->preprocessing->timings' in timing
+    assert 'std::numeric_limits<double>::quiet_NaN()' in timing
+    assert 'result[6]-stereo.start_tick' in timing and 'stereo.timestamp_bits==owner_->timestamp_bits' in timing
+    assert 'if(out.combined_gpu_timing_available)out.combined_gpu_ms=' in timing
+    for signature in ('DaxaStereoTiming DaxaStereo::Frame::timings(', 'DaxaStereoTiming DaxaStereo::pair_timings('):
+        values=body(stereo,signature)
+        assert values.count('daxa_timeline_query_pool_query_results(')==1
+        assert 'out.start_tick=results[0]' in values
+        assert 'out.timestamp_period=' in values and 'out.timestamp_bits=' in values
+    for signature in ('DaxaPreprocessReadback DaxaDepthPipeline::readback_images(', 'DaxaDepthStereoInput DaxaDepthPipeline::readback_stereo(', 'double DaxaDepthPipeline::last_upload_cpu_ms('):
+        assert 'require(bool(impl_->preprocessing)' in body(source,signature), 'external raw-only diagnostics must reject explicitly'
+
+
+def test_external_depth_keeps_exact_owner_resident_admission_and_explicit_timing_boundary():
+    check_external_depth_boundary((ROOT/'src/daxa_depth.cpp').read_text(),(ROOT/'src/daxa_stereo.cpp').read_text())
+
+
+@pytest.mark.parametrize('before,after',[
+    ('maps==calibration','maps->rectified_identity==calibration->rectified_identity'),
+    ('if(preprocessing)preprocessing->collect_completed_sources_at(oldest)','preprocessing->collect_completed_sources_at(oldest)'),
+    ('slot->preprocessing=std::move(pre)',''),
+    ('out.start_tick=results[0]','out.start_tick=0'),
+])
+def test_external_depth_guards_reject_owner_retention_nullable_and_fake_span_regressions(before,after):
+    source=(ROOT/'src/daxa_depth.cpp').read_text();stereo=(ROOT/'src/daxa_stereo.cpp').read_text()
+    assert before in source+stereo
+    with pytest.raises(AssertionError):
+        check_external_depth_boundary(source.replace(before,after),stereo.replace(before,after))

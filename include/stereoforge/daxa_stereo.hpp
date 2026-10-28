@@ -34,6 +34,8 @@ struct DaxaStereoTiming {
     static constexpr unsigned max_stages=22;
     unsigned stage_count=0;
     double total_gpu_ms=0;
+    uint64_t start_tick=0; // Existing first query, shared main-queue timestamp domain.
+    double timestamp_period=0;uint32_t timestamp_bits=0;
     std::array<double,max_stages> stage_gpu_ms{};
 };
 // Scalar diagnostic oracle and independent lane-chunk CPU model. No device use.

@@ -149,7 +149,7 @@ class DaxaDepthPipeline {public:struct Slot {DaxaFrame preprocessing;DaxaStereo:
  std::array<uint64_t,8> input_buffers(const DaxaFrame&,const DaxaStereo::Frame&,const DaxaStereo::Frame&){return {};}};
  std::shared_ptr<Impl> impl_;
  class Frame {public:std::shared_ptr<Impl> owner_;std::shared_ptr<Slot> slot_;uint64_t generation_=0;Frame()=default;Frame(std::shared_ptr<Impl> o,std::shared_ptr<Slot> s):owner_(o),slot_(s),generation_(s->generation){}void validate()const;};
- Frame enqueue(CaptureLease);static void validate_pair(const DaxaFrame&,const DaxaStereo::Frame&,const DaxaStereo::Frame&);
+ Frame submit_preprocessed(DaxaFrame,uint64_t,unsigned,const std::shared_ptr<Slot>&);Frame enqueue(CaptureLease);static void validate_pair(const DaxaFrame&,const DaxaStereo::Frame&,const DaxaStereo::Frame&);
 };
 '''
     program += definition(pre,'DaxaFrame DaxaPreprocess::enqueue_at(')
@@ -159,7 +159,7 @@ class DaxaDepthPipeline {public:struct Slot {DaxaFrame preprocessing;DaxaStereo:
     program += definition(stereo,'std::array<DaxaStereo::Frame,2> DaxaStereo::process_pair_at(')
     # Actual production depth bookkeeping, pairing, frame validity and staging copy.
     program += definition(depth,'size_t collect_at(').replace('size_t collect_at(', 'size_t DaxaDepthPipeline::Impl::collect_at(',1)
-    for signature in ('void DaxaDepthPipeline::validate_pair(', 'DaxaDepthPipeline::Frame DaxaDepthPipeline::enqueue(', 'void DaxaDepthPipeline::Frame::validate('):
+    for signature in ('void DaxaDepthPipeline::validate_pair(', 'DaxaDepthPipeline::Frame DaxaDepthPipeline::submit_preprocessed(', 'DaxaDepthPipeline::Frame DaxaDepthPipeline::enqueue(', 'void DaxaDepthPipeline::Frame::validate('):
         program += definition(depth,signature)
     program += r'''
 }
@@ -237,13 +237,17 @@ def test_actual_pair_depth_admission_retirement_and_upload_have_zero_warm_alloca
 
 
 def check_pair_depth_admission(depth):
-    enqueue=body(depth,'DaxaDepthPipeline::Frame DaxaDepthPipeline::enqueue(')
+    admission=body(depth,'DaxaDepthPipeline::Frame DaxaDepthPipeline::enqueue(')
+    assert 'return submit_preprocessed(std::move(pre),oldest,pair_index,slot)' in admission
+    enqueue=admission+body(depth,'DaxaDepthPipeline::Frame DaxaDepthPipeline::submit_preprocessed(')
     assert enqueue.count('oldest_pending_submit_index(')==1
     assert enqueue.index('e.collect_at(oldest)')<enqueue.index('detail::available_slot(')<enqueue.index('e.left->pair_slot_at(oldest)')<enqueue.index('e.preprocessing->enqueue_at(')<enqueue.index('e.left->process_pair_at(')
     assert 'process_pair_at(pre,oldest,pair_index)' in enqueue
     assert 'slot->preprocessing=std::move(pre)' in enqueue and 'slot->left=std::move(left)' in enqueue and 'slot->right=std::move(right)' in enqueue
     setup=body(depth,'Impl(DaxaRectification maps,DaxaDepthConfig c,')
-    assert setup.index('l={};r={};pre={};prototype.reset()')<setup.index('left->setup_pair(*right'), 'pair setup cannot retain prototype Frame/slot'
+    assert setup.index('setup(pre);prototype.reset();')<setup.index('finish_setup()'), 'raw prototype must drop before pair setup'
+    assert 'l={};r={};pre={};' in body(depth,'void setup(DaxaFrame& pre)')
+    assert 'left->setup_pair(*right' in body(depth,'void finish_setup()'), 'pair setup cannot retain prototype Frame/slot'
     timing=body(depth,'DaxaDepthTiming DaxaDepthPipeline::Frame::timings(')
     assert 'out.per_reference_stereo_timings_available=false' in timing
     assert 'out.paired_stereo=owner_->left->pair_timings(slot_->left,slot_->right)' in timing
