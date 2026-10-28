@@ -6,11 +6,22 @@
 
 **Architecture:** Daxa is the proposed production owner of the Vulkan device, resources and TaskGraph; it is an alternative to the existing Slang RHI runtime, not a layer on that runtime. Retain the working RHI path and its byte-bound fixtures as the frozen migration/comparison reference until the Daxa foundation and matched proof of concept pass. SlangPy remains optional research; ncnn Vulkan is an optional later model component.
 
-**Tech Stack:** Linux, C++20, ZED Open Capture, Vulkan, pinned Daxa + Linux Slang SDK, CMake/Ninja; optional ncnn after classical qualification. No CUDA, HIP, ROCm or TensorRT.
+**Tech Stack:** Linux, C++20, ZED Open Capture, Vulkan, pinned Daxa + Linux Slang SDK, CMake/Ninja; optional ncnn after classical qualification. No CUDA, HIP, ROCm or TensorRT in the production runtime. An isolated optional NVIDIA ZED SDK benchmark is a reference tool, not a production dependency.
 
 **Spec:** The user-approved seven-stage plan and its contracts in [requirements-audit.md](../../requirements-audit.md), [architecture.md](../../architecture.md), and the three 2026-10-27 attachments: “High-performance GPU kernel development strategy,” “Automatic kernel fusion and GPU execution graphs,” and, superseding their framework choices, “StereoForge: simplify the GPU stack.” This document records the resulting decisions so execution does not depend on local attachment paths.
 
 ## Global Constraints
+
+**Quality-first priority amendment, 2026-10-28:** Follow the updated
+[Fast60 plan](2026-10-28-fast60.md) and
+[common-input ZED comparison plan](2026-10-28-zed-quality-benchmark.md) before
+further Fast60 optimization/promotion. Establish full-SGM quality on exported SDK
+frames with effective calibration and independent truth, then evaluate Fast60
+against executed `NEURAL_LIGHT` and additional supported profiles. Provisional
+non-inferiority, thin/near-field and held-out gates precede sustained 60 Hz/ROS
+qualification. No SDK parity or superiority claim follows from synthetic timing,
+SDK agreement alone or vendor accuracy tables. Missing SDK access leaves parity
+unqualified while portable benchmark and classical engineering work continue.
 
 - Production target: **C++20 + Daxa TaskGraph + Slang**, with Daxa as the one GPU owner for the classical/temporal/view pipeline. This is a migration decision and plan; Daxa is not installed, adopted or qualified by this document.
 - No custom Vulkan abstraction, task graph/synchronization scheduler, arbitrary fusion compiler, general GPU auto-tuner or custom neural execution engine. No parallel production RHI/Daxa device owners. An optional ncnn component may own a separate Vulkan context only behind an explicit owned-copy/completion boundary; this does not block the classical pipeline.

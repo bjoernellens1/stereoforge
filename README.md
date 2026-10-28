@@ -343,6 +343,8 @@ references, LR and depth metadata. Refinement and View are additional work.
 See the [measurement scopes and raw-sample policy](docs/fast60-multiresolution-evidence.md)
 and [Fast60 plan](docs/superpowers/plans/2026-10-28-fast60.md).
 
+The next priority is a [common-input ZED SDK quality benchmark](docs/superpowers/plans/2026-10-28-zed-quality-benchmark.md), with independent ground truth and a full-SGM baseline before further Fast60 optimization or promotion.
+
 An experimental native `DaxaRefinement` now adds independent full-resolution
 local Census matching, LR checks and metric outputs while retaining GPU resources.
 All six radius/subpixel cases pass exact discrete checks and conditional float

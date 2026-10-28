@@ -5,6 +5,19 @@ Follow [the design](../specs/2026-10-28-fast60-refinement-design.md) and parent
 no further approval menu is needed. Root owns architecture/GPU/publication.
 Workers preserve shared dirty files and take one explicit ownership surface.
 
+## 2026-10-28 quality-first amendment
+
+The [common-input SDK benchmark](2026-10-28-zed-quality-benchmark.md) now precedes
+further optimization or promotion under the revised [parent plan](2026-10-28-fast60.md).
+R0–R2 are implemented; R3 has conditional six-case agreement and resource stress,
+with global arithmetic boundaries still open. R4 has incomplete exploratory
+timing and substantial measured world-quality loss, not a qualified Fast60 result.
+Preserve these artifacts and the full-resolution SGM baseline. Do not automatically
+implement the old next recovery step merely because it is listed below: first
+establish common-input full-SGM/SDK quality, then choose the refinement change
+from missing-prior, ambiguity, support and regularization evidence. Physical and
+held-out truth gates cannot be replaced by agreement with proprietary depth.
+
 1. **R0 contract and scalar reference.** Add independent Python CPU reference and
    tests for full-frame radii2/4/8, prediction/geometry/support/independent-eye
    matching, integer uniqueness, subpixel cases, LR/metric/provenance and bounded
@@ -37,6 +50,10 @@ Workers preserve shared dirty files and take one explicit ownership surface.
    unique capture→GPU→consumer with frame age/drops/queues/sharing pressure. Keep
    targets unpromoted until measured. Publish bounded evidence incrementally.
 
-No compact-SGM, motion-control, neural or vendor expansion blocks this experiment.
+SDK availability does not block portable benchmark contracts or independent-truth
+evaluation, but executed SDK evidence is required for competitive parity claims.
+The isolated reference runner never becomes a CUDA dependency of the production
+pipeline. Native recovery/ROI, compact-SGM and portable neural candidates remain
+unpromoted until the common quality/performance gates pass.
 New reusable kernels enter SinterGPU only through separately authorized candidate
 intake/review; no automatic production/default integration.
