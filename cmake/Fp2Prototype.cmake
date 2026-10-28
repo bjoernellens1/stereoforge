@@ -57,3 +57,28 @@ add_dependencies(fp2_image_fixture fp2_prototype_shader fp2_image_shader)
 if(BUILD_TESTING)
   add_test(NAME fp2_image_cpu_contracts COMMAND fp2_image_fixture --cpu-only)
 endif()
+
+set(sf_fp2_census_shader "${CMAKE_CURRENT_SOURCE_DIR}/python/stereoforge/shaders/daxa/fp2_census.slang")
+set(sf_fp2_census_helper "${CMAKE_CURRENT_SOURCE_DIR}/python/stereoforge/shaders/ops/refinement.slang")
+set(sf_fp2_census_host "${CMAKE_CURRENT_SOURCE_DIR}/apps/fp2_census_fixture.cpp")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${sf_fp2_census_shader}" "${sf_fp2_census_helper}" "${sf_fp2_census_host}")
+file(SHA256 "${sf_fp2_census_shader}" SF_FP2_CENSUS_SHADER_SHA256)
+file(SHA256 "${sf_fp2_census_helper}" SF_FP2_CENSUS_HELPER_SHA256)
+file(SHA256 "${sf_fp2_census_host}" SF_FP2_CENSUS_HOST_SHA256)
+set(sf_fp2_census_spirv "${CMAKE_CURRENT_BINARY_DIR}/fp2-census.spv")
+add_custom_command(OUTPUT "${sf_fp2_census_spirv}"
+  COMMAND "${SF_DAXA_SLANGC}" "${sf_fp2_census_shader}" -target spirv -profile spirv_1_5 -restrictive-capability-check -matrix-layout-row-major -fvk-use-scalar-layout -O3 -entry census_image -stage compute -o "${sf_fp2_census_spirv}"
+  DEPENDS "${sf_fp2_census_shader}" "${sf_fp2_census_helper}" VERBATIM)
+set(sf_fp2_census_identity "${CMAKE_CURRENT_BINARY_DIR}/fp2_census_identity.hpp")
+add_custom_command(OUTPUT "${sf_fp2_census_identity}"
+  COMMAND "${CMAKE_COMMAND}" -DINPUT=${sf_fp2_census_spirv} -DOUTPUT=${sf_fp2_census_identity} -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Fp2CensusIdentity.cmake"
+  DEPENDS "${sf_fp2_census_spirv}" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Fp2CensusIdentity.cmake" VERBATIM)
+add_custom_target(fp2_census_shader DEPENDS "${sf_fp2_census_spirv}" "${sf_fp2_census_identity}")
+add_executable(fp2_census_fixture apps/fp2_census_fixture.cpp)
+target_link_libraries(fp2_census_fixture PRIVATE stereoforge_daxa_foundation)
+target_include_directories(fp2_census_fixture PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+target_compile_definitions(fp2_census_fixture PRIVATE SF_FP2_SPIRV_PATH="${sf_fp2_spirv}" SF_FP2_SHADER_SHA256="${SF_FP2_SHADER_SHA256}" SF_FP2_HOST_SHA256="${SF_FP2_HOST_SHA256}" SF_FP2_COMPILER_PATH="${SF_DAXA_SLANGC}" SF_FP2_COST_SPIRV_PATH="${sf_fp2_cost_spirv}" SF_FP2_COST_SHADER_SHA256="${SF_FP2_COST_SHADER_SHA256}" SF_FP2_CENSUS_SPIRV_PATH="${sf_fp2_census_spirv}" SF_FP2_CENSUS_SHADER_SHA256="${SF_FP2_CENSUS_SHADER_SHA256}" SF_FP2_CENSUS_HELPER_SHA256="${SF_FP2_CENSUS_HELPER_SHA256}" SF_FP2_CENSUS_HOST_SHA256="${SF_FP2_CENSUS_HOST_SHA256}")
+add_dependencies(fp2_census_fixture fp2_prototype_shader fp2_image_shader fp2_census_shader)
+if(BUILD_TESTING)
+  add_test(NAME fp2_census_cpu_contracts COMMAND fp2_census_fixture --cpu-only)
+endif()
