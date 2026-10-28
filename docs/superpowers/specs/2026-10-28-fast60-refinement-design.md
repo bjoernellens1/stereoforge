@@ -73,7 +73,7 @@ is invalid. Select the lowest-disparity minimum deterministically. Second-best
 is the minimum over all other supported hypotheses, including equal-cost ties.
 Require integer `second-best - best >= min_margin`, initially min_margin=1;
 ties therefore fail. Confidence is `(second-best-best)/max(second-best,1)` in
-float32, an interval-dependent matching score, not calibrated uncertainty or
+float32 and clipped to [0,1], an interval-dependent matching score, not calibrated uncertainty or
 full-search uniqueness. A winner at a restricted interval endpoint is raw- and
 metric-invalid when recovery is disabled, even if LR would agree. It can become
 valid only through a subsequent accepted unrestricted search. Global domain
@@ -92,8 +92,11 @@ neighbour disparity span2 pixels, min_margin1 and target LR tolerance1 pixel.
 They are reported configurable experimental settings, held fixed across radius
 comparisons; held-out thresholds are not tuned from test results.
 
-After independent matches finish, apply the existing nearest-correspondence LR
-and axial-depth conventions on the target geometry. Every metric-valid output
+After independent matches finish, use the target nearest-correspondence LR and
+axial-depth conventions. Pin the coordinate graph to separately rounded float32:
+`t=f32(f32(x) +/- f32(d))`, then `u=f32(t+f32(0.5))`, then `floor(u)`.
+The new compiler profile forbids contraction/reassociation of those operations;
+integer and mask agreement is still checked independently. Every metric-valid output
 requires actual target-resolution evidence in both images plus final LR and
 support acceptance. Failed verification remains invalid. Predictions have their
 own diagnostic validity and never populate measured metric planes.
@@ -161,3 +164,21 @@ coverage, correct completeness, false accepts, thin/edge recovery and baseline
 disagreement. Freeze development thresholds before held-out quality evaluation.
 No default promotion or live60 claim without the existing physical/quality and
 ten-minute unique-frame/age/drop/bounded-queue gates.
+
+## Current qualification boundary
+
+The CPU reference and analytic original-camera truth generator pass their owning
+checks and independent review. The thin-scene construction controls actual Left
+full-grid phases 0/0.25/0.5 and centreline widths 1/2/4 pixels; Right projections are
+recorded independently. A 720p/360p family is exported with 114 audited artifacts,
+including a genuine thin surface lost by coarse Right centre sampling. This is
+synthetic development truth, not physical held-out camera accuracy.
+
+The guided native stage is being qualified separately. Slang 2026.12 does not
+emit the required NoContraction decorations on this direct-SPIR-V path; the new
+refinement-only build pins the official 2026.19 archive by SHA256. Its compiled
+43 floating arithmetic operations carry NoContraction, with no relaxed precision,
+fast-math or FMA, while 62 existing shader binaries remain unchanged. Coarse and
+refinement compiler identities are reported separately. The tag is unsigned;
+archive-digest verification is not a claim of signed-tag verification. Native
+GPU numerical/mask/lifetime, performance and recovery/ROI gates remain open.
