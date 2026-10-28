@@ -228,7 +228,7 @@ def validate_report(report,manifest,metadata,metric,identity,profile,frames,warm
 
 
 def validate_bounds(disparities,paths,p1,p2,frames,warmup,slots,wave_size,validation_only):
-    if any(type(v) is not int for v in (disparities,paths,p1,p2,frames,warmup,slots,wave_size)) or disparities not in ((16,32,64,128) if validation_only else (32,64,128)) or paths not in (4,8) or not 0<=p1<=p2<=10000 or paths*p2>65535 or not 1<=frames<=300 or not 0<=warmup<=30 or slots not in (1,2) or wave_size not in (32,64) or (not validation_only and (frames<30 or warmup<3)):raise ValueError('invalid bounded combined profile/counts')
+    if any(type(v) is not int for v in (disparities,paths,p1,p2,frames,warmup,slots,wave_size)) or disparities not in ((16,32,64,96,128) if validation_only else (32,64,96,128)) or paths not in (4,8) or not 0<=p1<=p2<=10000 or paths*p2>65535 or not 1<=frames<=300 or not 0<=warmup<=30 or slots not in (1,2) or wave_size not in (32,64) or (not validation_only and (frames<30 or warmup<3)):raise ValueError('invalid bounded combined profile/counts')
 
 
 def run_comparison(manifest_path,rhi,native,compiler,output,disparities=128,paths=4,p1=8,p2=32,frames=30,warmup=3,slots=2,wave_size=32,validation=False,validation_only=False,stereo_schedule="sequential"):

@@ -207,8 +207,8 @@ def main():
     p.add_argument('--include-shuffle',action='store_true',help='Also compare packed-shuffle; implies specialized/packed, not quad/D128')
     p.add_argument('--check-integer-reference',action='store_true',help='Run exact integer oracle after timing, including direct packed words; excludes compound float oracle')
     a=p.parse_args();frames=a.frames if a.frames is not None else (1 if a.validation_only else 30);warmup=a.warmup if a.warmup is not None else (0 if a.validation_only else 3)
-    if min(a.width,a.height)<5 or a.width*a.height>1280*720 or a.disparities not in ((16,32,64,128) if a.validation_only else (32,64,128)) or a.paths not in (4,8) or not 0<=a.p1<=a.p2<=10000 or a.subpixel not in (0,1) or a.slots not in (1,2) or not 0<a.seed<=0xffffffff:
-        p.error('bounded profile requires <=720p, D32/64/128 (D16 also in validation-only), paths4/8, valid penalties/subpixel/slots/seed')
+    if min(a.width,a.height)<5 or a.width*a.height>1280*720 or a.disparities not in ((16,32,64,96,128) if a.validation_only else (32,64,96,128)) or a.paths not in (4,8) or not 0<=a.p1<=a.p2<=10000 or a.subpixel not in (0,1) or a.slots not in (1,2) or not 0<a.seed<=0xffffffff:
+        p.error('bounded profile requires <=720p, D32/64/96/128 (D16 also in validation-only), paths4/8, valid penalties/subpixel/slots/seed')
     if not 1<=frames<=300 or not 0<=warmup<=30 or (not a.validation_only and (frames<30 or warmup<3)):
         p.error('performance requires30..300samples/3..30warmups; smaller counts require --validation-only')
     profile={key:getattr(a,key) for key in PROFILE_FIELDS};profile['subpixel']=bool(a.subpixel)

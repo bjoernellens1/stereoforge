@@ -114,3 +114,13 @@ def test_real_cli_small_and_720p_commands_without_children(tmp_path):
         assert calls['right'][calls['right'].index('--wave-size')+1]=='64'
         assert '--dump-intermediates' not in calls['right']
         for key in ('rhi','right'):assert '--validation' in calls[key]
+
+
+@pytest.mark.parametrize('validation_only',[False,True])
+def test_d96_right_profile_admission_preserves_independent_integer_gate(tmp_path,validation_only):
+    p=dict(profile(),width=13,height=7,disparities=96)
+    right.validate_bounds(p,1 if validation_only else 30,0 if validation_only else 3,2,32,1234567,validation_only)
+    commands=right.commands(Path('/rhi'),Path('/daxa'),tmp_path,p,1,0,2,32,True,True)
+    assert all(c[c.index('--disparities')+1]=='96' for c in commands.values())
+    assert '--check-integer-reference' in commands['right'] and '--reference' in commands['right']
+    assert commands['right'][commands['right'].index('--reference')+1]=='right'

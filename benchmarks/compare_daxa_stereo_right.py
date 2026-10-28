@@ -36,7 +36,7 @@ def native_identities(rhi,daxa,compiler):
 
 def validate_bounds(profile,frames,warmup,slots,wave_size,seed,validation_only):
     if set(profile)!=set(base.PROFILE_FIELDS) or any(type(profile[k]) is not int for k in base.PROFILE_FIELDS if k!='subpixel') or type(profile['subpixel']) is not bool:raise ValueError('typed complete profile required')
-    if not 5<=profile['width']<=1280 or not 5<=profile['height']<=720 or profile['disparities'] not in ((16,32,64,128) if validation_only else (32,64,128)) or profile['paths'] not in (4,8) or not 0<=profile['p1']<=profile['p2']<=10000:raise ValueError('unsupported bounded right profile')
+    if not 5<=profile['width']<=1280 or not 5<=profile['height']<=720 or profile['disparities'] not in ((16,32,64,96,128) if validation_only else (32,64,96,128)) or profile['paths'] not in (4,8) or not 0<=profile['p1']<=profile['p2']<=10000:raise ValueError('unsupported bounded right profile')
     if any(type(x) is not int for x in (frames,warmup,slots,wave_size,seed)) or not 1<=frames<=300 or not 0<=warmup<=30 or slots not in (1,2) or wave_size not in (32,64) or not 0<seed<=0xffffffff or (not validation_only and (frames<30 or warmup<3)):raise ValueError('bounded counts/profile required; smaller counts only validation')
     base.packed_contract(profile)
 

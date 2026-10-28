@@ -377,3 +377,15 @@ def test_shuffle_opt_in_implies_c_b_without_quad_or_d128(tmp_path):
         assert all(calls[key]==old[key] for key in old)
         assert calls['packed-shuffle'][calls['packed-shuffle'].index('--variant')+1]=='packed-shuffle'
         assert 'packed-d128' not in calls and 'packed-quad' not in calls
+
+
+@pytest.mark.parametrize('validation_only',[False,True])
+def test_d96_cli_is_admitted_before_child_dispatch(tmp_path,monkeypatch,validation_only):
+    class Admitted(Exception):pass
+    monkeypatch.setattr(compare,'create_output',lambda _:(_ for _ in ()).throw(Admitted()))
+    argv=['compare','--output',str(tmp_path/'out'),'--compiler','/unused','--width','13','--height','7','--disparities','96','--include-specialized','--check-integer-reference']
+    if validation_only:argv.append('--validation-only')
+    monkeypatch.setattr(sys,'argv',argv)
+    with pytest.raises(Admitted):compare.main()
+    p=dict(profile(),width=13,height=7,disparities=96)
+    assert compare.packed_contract(p)['packing_bits']==8

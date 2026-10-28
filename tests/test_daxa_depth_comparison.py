@@ -361,3 +361,9 @@ def test_shared_census_memory_is_one_quartet_per_slot(paths,p2,slots):
     new=depth.requested_bytes_for_schedule(m,p,slots,'shared-census-sequential')
     assert new[0]==old[0]
     assert old[1]-new[1]==16*13*7*slots
+
+
+@pytest.mark.parametrize('validation_only',[False,True])
+def test_d96_profile_admission_keeps_existing_penalties_counts_and_lr_gate(validation_only):
+    depth.validate_bounds(96,4,8,32,1 if validation_only else 30,0 if validation_only else 3,2,32,validation_only)
+    with pytest.raises(ValueError):depth.validate_bounds(96,4,40,32,30,3,2,32,validation_only)

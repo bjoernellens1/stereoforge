@@ -329,3 +329,19 @@ Depth → Temporal → View GPU means are **36.67–37.73 ms**; general floating
 reference gates and live/physical quality remain open. See the
 [temporal contract](docs/daxa-temporal-contract.md) and
 [measurements and limitations](docs/daxa-temporal-evidence.md).
+
+## Fast60 multiresolution experiment
+
+The offline profile exporter preserves the original camera RGB/capture and
+recomputes calibrated rectification maps for smaller grids. D96 passed native
+integer/packed and synchronization checks plus a separate frozen-RHI numerical
+comparison on a synthetic 126×19 fixture. This does not establish depth quality
+or live throughput. The matched 720p/D128, 540p/D96 and 360p/D64 matrix and
+selective full-resolution refinement follow the
+[Fast60 plan](docs/superpowers/plans/2026-10-28-fast60.md).
+
+```bash
+PYTHONPATH=python .venv/bin/python benchmarks/multiresolution_fixture.py \
+  --source-manifest DONOR/manifest.json --output FRESH_PROFILE \
+  --width 960 --height 540
+```
