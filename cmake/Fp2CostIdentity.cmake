@@ -1,0 +1,5 @@
+if(NOT EXISTS "${INPUT}" OR NOT DEFINED OUTPUT)
+  message(FATAL_ERROR "FP2 cost SPIR-V identity input/output missing")
+endif()
+file(SHA256 "${INPUT}" digest)
+file(WRITE "${OUTPUT}" "#pragma once\n#define SF_FP2_COST_SPIRV_SHA256 \"${digest}\"\n")
