@@ -12,7 +12,7 @@ KEYS = ('enqueue_cpu_ms', 'wait_cpu_ms', 'timestamp_query_cpu_ms', 'host_wall_ms
         'gpu_metric_metadata_ms', 'gpu_combined_queue_span_ms')
 
 
-def test_actual_reporter_preserves_chronology_and_old_summaries(tmp_path):
+def test_actual_reporter_preserves_chronology_and_old_summaries(tmp_path,json_include):
     source = SOURCE.read_text()
     start = source.index('json raw_samples_report(')
     end = source.index('\nvoid verify(', start)
@@ -43,7 +43,7 @@ int main(){
     assert compiler
     binary = tmp_path / 'report'
     subprocess.run([compiler, '-std=c++20', '-Wall', '-Wextra', '-Werror',
-                    '-I', str(ROOT / 'build/daxa/_deps/sf_native_json-src'),
+                    '-I', str(json_include),
                     str(code), '-o', str(binary)], check=True, capture_output=True, text=True)
     result = json.loads(subprocess.check_output([str(binary)], text=True))
     assert result['unchanged']

@@ -242,7 +242,7 @@ def test_quality_empty_truth_and_large_finite_errors():
     assert math.isfinite(huge['rmse_m']) and huge['rmse_m']==1.e300
 
 
-def test_legacy_summary_matches_actual_cpp_sorted_accumulation(tmp_path,monkeypatch):
+def test_legacy_summary_matches_actual_cpp_sorted_accumulation(tmp_path,monkeypatch,json_include):
     import json
     import shutil
     import subprocess
@@ -258,7 +258,7 @@ def test_legacy_summary_matches_actual_cpp_sorted_accumulation(tmp_path,monkeypa
                    '\nint main(){std::vector<double> v={'+','.join(repr(v) for v in values)+'}; std::cout<<summary(v);}')
     compiler=shutil.which('c++'); assert compiler
     binary=tmp_path/'summary'
-    subprocess.run([compiler,'-std=c++20','-Wall','-Wextra','-Werror','-I',str(matrix.ROOT/'build/daxa/_deps/sf_native_json-src'),str(cpp),'-o',str(binary)],check=True,capture_output=True,text=True)
+    subprocess.run([compiler,'-std=c++20','-Wall','-Wextra','-Werror','-I',str(json_include),str(cpp),'-o',str(binary)],check=True,capture_output=True,text=True)
     actual=json.loads(subprocess.check_output([str(binary)],text=True))
     chronological=0.
     for value in values:chronological+=value
