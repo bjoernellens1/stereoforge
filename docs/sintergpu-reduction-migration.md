@@ -118,3 +118,13 @@ The public entry point unconditionally blocks because loaded runtime, Vulkan
 provider and ICD provenance are not verified. The internal coordinator is not
 an authorization or a safe entry point for physical hardware; lock lifetime,
 immutable environment and full evidence capture still require a reviewed caller.
+
+The CPU-tested selection helper accepts an explicit 16-byte Slang RHI adapter
+identifier and vendor/device IDs, rejects device-type overrides, requires one
+matching enumerated adapter, and requests a Vulkan device using that identifier.
+The caller must hold the canonical lock before enumeration and creation and
+check the returned device's same-device UUID receipt before shader work. RHI's
+identifier can represent either a platform LUID or a UUID: the helper does not
+assume it equals the desired UUID or prove the mapping. Provider/runtime and
+ICD provenance, actual selected-device identity and selection behavior remain
+unverified on hardware; the public GPU entry remains blocked.
