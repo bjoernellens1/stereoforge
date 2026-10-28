@@ -21,6 +21,17 @@ STEREO = ROOT / 'src/daxa_stereo.cpp'
 FRAME = ROOT / 'include/stereoforge/daxa_frame.hpp'
 
 
+def test_reused_raw_upload_orders_previous_transfer_write_and_compute_read():
+    source = PREPROCESS.read_text()
+    upload = body(source, '"bounded packed source upload").reads(views[Staging]).writes(views[Raw]).executes(')
+    before_copy = upload.split('ti.recorder.copy_buffer_to_buffer(', 1)[0]
+    barrier = re.search(r'ti\.recorder\.pipeline_barrier\s*\(\s*\{(.*?)\}\s*\)', before_copy, re.S)
+    assert barrier, 'reused Raw requires a pre-copy dependency across submissions'
+    fields = barrier.group(1)
+    assert re.search(r'\.src_access\s*=\s*daxa::AccessConsts::TRANSFER_WRITE\s*\|\s*daxa::AccessConsts::COMPUTE_SHADER_READ', fields)
+    assert re.search(r'\.dst_access\s*=\s*daxa::AccessConsts::TRANSFER_WRITE', fields)
+
+
 def check_submission_hotpath(preprocess, stereo):
     enqueue = body(preprocess, 'DaxaFrame DaxaPreprocess::enqueue_at(')
     process = body(stereo, 'DaxaStereo::Frame DaxaStereo::process_at(')

@@ -236,3 +236,51 @@ redistribution, patent clearance, or ownership of third-party trademarks.
 Re-evaluate when adding copied code, models, assets, changing dependency pins, or
 shipping binaries. Public naming does not imply endorsement by Stereolabs, AMD,
 NVIDIA, Khronos, or the dependency authors.
+
+## Optional ROS 2 and Zenoh follow-up (2026-10-28)
+
+The native ROS integration discovers separately installed ROS 2 packages; it
+is optional and does not import their implementation sources into this tree.
+Upstream Jazzy package manifests declare Apache-2.0 for
+[ament_cmake](https://raw.githubusercontent.com/ament/ament_cmake/jazzy/ament_cmake/package.xml),
+[rclcpp](https://raw.githubusercontent.com/ros2/rclcpp/jazzy/rclcpp/package.xml),
+[sensor_msgs](https://raw.githubusercontent.com/ros2/common_interfaces/jazzy/sensor_msgs/package.xml),
+and [std_msgs](https://raw.githubusercontent.com/ros2/common_interfaces/jazzy/std_msgs/package.xml).
+These declarations concern those packages; their transitive dependencies are
+not covered by the declarations. Jazzy branch links are moving references,
+not exact identities for every deployed package.
+
+The disposable Jazzy experiment installed `rmw_zenoh_cpp` 0.2.11; the
+[upstream 0.2.11 package manifest](https://raw.githubusercontent.com/ros2/rmw_zenoh/0.2.11/rmw_zenoh_cpp/package.xml)
+declares Apache-2.0 and BSD for the included simplified xxHash code. The
+[actual xxHash source header](https://raw.githubusercontent.com/ros2/rmw_zenoh/0.2.11/rmw_zenoh_cpp/src/detail/simplified_xxhash3.cpp)
+identifies BSD-2-Clause terms with source and binary notice requirements. The
+[0.2.11 vendor wrapper manifest](https://raw.githubusercontent.com/ros2/rmw_zenoh/0.2.11/zenoh_cpp_vendor/package.xml)
+declares Apache-2.0. Zenoh C++'s [project notice](https://github.com/eclipse-zenoh/zenoh-cpp/blob/af381b420cc8837ac7da42c9984594ef8f110e90/NOTICE.md)
+states EPL-2.0 OR Apache-2.0; that choice applies to the component carrying the
+notice, not automatically to every linked or vendored dependency.
+
+The upstream [0.2.11 vendor recipe](https://github.com/ros2/rmw_zenoh/blob/0.2.11/zenoh_cpp_vendor/CMakeLists.txt)
+selects Zenoh C++ revision `af381b420cc8837ac7da42c9984594ef8f110e90` and,
+by default, Zenoh C revision `05bd370343b5161ca9269649b9a914c9c2dc4170`;
+for Cargo 1.75 through less than 1.88 it selects
+`b31348fa7f94f44f1f7b049c111a710e970a2725`. The recipe supports a system Zenoh
+alternative and names Zenoh revision `2687c51352121f006e3a603ce07925a8ad0b295c`
+in its comments. These are **upstream recipe references**, not proof that the
+installed binary was built from that exact dependency closure. The
+[Jazzy release record](https://github.com/ros2-gbp/rmw_zenoh-release) identifies
+release `0.2.11-1` and its package set.
+
+For source-only publication, these separately obtained dependencies introduce
+no newly identified blocker in the examined manifests and notices; this is not
+a complete legal clearance. A binary or container distribution requires a
+separate inventory of the actual deployed package builds, linked and bundled
+libraries, Zenoh C and Rust crate closure, applicable license choices,
+notices, and corresponding-source obligations. Those exact binary contents
+and Rust crate licenses have not been verified here. User authorization to
+perform SDK comparisons is distinct from written permission by Stereolabs;
+the vendor permission limitation recorded above remains applicable.
+
+A read-only GitHub repository query on 2026-10-28 reported
+[`bjoernellens1/stereoforge`](https://github.com/bjoernellens1/stereoforge)
+as public. This observation does not establish when or why visibility changed.

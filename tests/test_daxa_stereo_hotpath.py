@@ -360,7 +360,7 @@ void operator delete(void* p)noexcept{std::free(p);}void operator delete[](void*
 void operator delete(void* p,std::size_t)noexcept{std::free(p);}void operator delete[](void* p,std::size_t)noexcept{std::free(p);}
 namespace stereoforge {
 enum class DaxaStereoReference { Left,Right };
-enum class DaxaSgmVariant { Baseline,Wave,Packed,PackedSpecialized,PackedD128,PackedQuad,PackedShuffle };
+enum class DaxaSgmVariant { Baseline,Wave,Packed,PackedSpecialized,PackedD128,PackedQuad,PackedShuffle,PackedSpecializedOverwrite };
 class DaxaStereo {public:static void validate_shape(StereoConfig,unsigned,std::optional<MetricCalibration>,DaxaSgmVariant variant=DaxaSgmVariant::Baseline,DaxaStereoReference reference=DaxaStereoReference::Left);static void validate(StereoConfig,std::span<const uint32_t>,std::span<const uint32_t>,unsigned,std::optional<MetricCalibration>,DaxaSgmVariant variant=DaxaSgmVariant::Baseline,DaxaStereoReference reference=DaxaStereoReference::Left);static uint32_t packed_bits(StereoConfig);};
 '''
     for enum in ('DaxaRightReferenceMode', 'DaxaStereoEstimator'):

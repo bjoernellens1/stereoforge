@@ -18,7 +18,7 @@ from benchmarks.zed_comparison import schema, truth, quality_metrics, native_obs
 
 ROOT = Path(__file__).resolve().parents[1]
 ARTIFACTS = ROOT/'artifacts/zed-task4/performance'
-MODULES = ('truth', 'quality_metrics', 'native_observation', 'compare_quality', 'schema', 'native_input')
+MODULES = ('truth', 'quality_metrics', 'native_observation', 'compare_quality', 'schema', 'native_input', 'native_profile')
 
 
 def sources():
@@ -39,7 +39,7 @@ def guard(source):
                 assert all(alias.name.split('.')[0] in allowed for alias in node.names), 'non-CPU dependency'
             if isinstance(node, ast.ImportFrom):
                 if node.level:
-                    assert node.module in ('truth', 'quality_metrics', 'native_input', 'physical_reference', 'evaluate_temporal', 'epipolar') or (node.module is None and all(alias.name == 'schema' for alias in node.names)), 'non-CPU local dependency'
+                    assert node.module in ('truth', 'quality_metrics', 'native_input', 'native_profile', 'physical_reference', 'evaluate_temporal', 'epipolar') or (node.module is None and all(alias.name == 'schema' for alias in node.names)), 'non-CPU local dependency'
                 else:
                     assert node.module.split('.')[0] in allowed, 'non-CPU dependency'
             if isinstance(node, ast.Call):
@@ -86,6 +86,7 @@ def test_actual_sources_preserve_offline_bounded_cpu_boundaries():
     ('quality_metrics', 'import math', 'import torch\nimport math'),
     ('truth', 'import numpy as np', 'import cupy as cp\nimport numpy as np'),
     ('truth', 'import numpy as np', 'from . import cuda\nimport numpy as np'),
+    ('native_profile', 'from copy import deepcopy', 'import torch\nfrom copy import deepcopy'),
     ('quality_metrics', '    depth = np.asarray(depth, dtype=np.float64)', '    for pixel in depth.flat: pass\n    depth = np.asarray(depth, dtype=np.float64)'),
     ('quality_metrics', '    depth = np.asarray(depth, dtype=np.float64)', '    for row in range(depth.shape[0]): pass\n    depth = np.asarray(depth, dtype=np.float64)'),
     ('quality_metrics', '    depth = np.asarray(depth, dtype=np.float64)', '    device.synchronize()\n    depth = np.asarray(depth, dtype=np.float64)'),

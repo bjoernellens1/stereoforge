@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.16)
+project(stereoforge_ros_transport LANGUAGES CXX)
+find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(sensor_msgs REQUIRED)
+add_executable(transport transport.cpp)
+target_compile_features(transport PRIVATE cxx_std_20)
+ament_target_dependencies(transport rclcpp sensor_msgs)

@@ -10,6 +10,7 @@ struct DaxaDepthConfig {
     uint32_t required_wave_size=32;
     DaxaDepthStereoSchedule stereo_schedule=DaxaDepthStereoSchedule::Sequential;
     DaxaRightReferenceMode right_reference_mode=DaxaRightReferenceMode::IndependentSGM;
+    DaxaSgmVariant stereo_variant=DaxaSgmVariant::PackedSpecialized;
     void validate()const;
     uint64_t requested_buffer_bytes(const DaxaRectification&)const;
 };

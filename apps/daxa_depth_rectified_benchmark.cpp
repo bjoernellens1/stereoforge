@@ -1,5 +1,6 @@
 #include "timing_metadata.hpp"
 #include "daxa_refinement_common.hpp"
+#include "stereo_estimator_metadata.hpp"
 #include <stereoforge/canonical_record.hpp>
 #include <stereoforge/daxa_rectified_input.hpp>
 #include <cmath>
@@ -13,7 +14,7 @@ struct CanonicalOptions {
         for(int i=1;i<argc;++i) {
             std::string key=argv[i];
             if(key=="--validation") { check(!validation,"duplicate validation option");validation=true;continue; }
-            check(key=="--manifest"||key=="--output"||key=="--variant"||key=="--frames"||key=="--warmup"||key=="--radius"||key=="--dump-prefix","unknown canonical benchmark option");
+            check(key=="--manifest"||key=="--output"||key=="--variant"||key=="--stereo-variant"||key=="--frames"||key=="--warmup"||key=="--radius"||key=="--dump-prefix","unknown canonical benchmark option");
             check(++i<argc,"missing option value");
             check(values.emplace(key,argv[i]).second,"duplicate option");
         }
@@ -29,13 +30,7 @@ DaxaRectification grid(DaxaRectifiedGeometry const& geometry) {
     out.geometry=geometry; // Canonical input has no raw layout or remapping tables.
     return out;
 }
-json shader_hashes(std::string const& directory,std::string const& prefix) {
-    json result=json::object();
-    for(auto const& entry:std::filesystem::directory_iterator(directory))
-        if(entry.is_regular_file()&&entry.path().extension()==".spv"&&entry.path().filename().string().starts_with(prefix))
-            result[entry.path().filename().string()]=daxa_preprocess_file_sha256(entry.path());
-    return result;
-}
+using stereoforge::native_estimator::shader_hashes;
 void dump_depth_plane(json& files,std::string const& prefix,char const* name,auto const& plane) {
     auto path=prefix+"."+name;write(path,plane.data(),plane.size()*sizeof(typename std::remove_reference_t<decltype(plane)>::value_type));
     files[name]={{"path",path},{"sha256",daxa_preprocess_file_sha256(path)},{"elements",plane.size()}};
@@ -63,6 +58,8 @@ int main(int argc,char** argv) { try {
     auto variant=options.values.contains("--variant")?options.values.at("--variant"):"full_sgm";
     check(variant=="full_sgm"||variant=="coarse_refine","unknown canonical benchmark variant");
     bool refine=variant=="coarse_refine";
+    auto stereo_variant=options.values.contains("--stereo-variant")?options.values.at("--stereo-variant"):"packed-specialized";
+    check(stereo_variant=="packed-specialized"||stereo_variant=="packed-specialized-overwrite","unknown stereo variant");
     auto record=load_canonical_record(options.values.at("--manifest"));
     auto full=grid(record.full_geometry);
     std::optional<DaxaRectification> coarse;
@@ -72,6 +69,7 @@ int main(int argc,char** argv) { try {
     auto const& stereo_grid=refine?*coarse:full;
     depth_config.stereo={stereo_grid.width,stereo_grid.height,refine?64u:128u,4,8,32,true};
     depth_config.slots=2;depth_config.right_reference_mode=DaxaRightReferenceMode::IndependentSGM;
+    depth_config.stereo_variant=stereo_variant=="packed-specialized-overwrite"?DaxaSgmVariant::PackedSpecializedOverwrite:DaxaSgmVariant::PackedSpecialized;
     depth_config.validate();
     DaxaRefinementConfig refinement_config;refinement_config.slots=2;refinement_config.radius=radius;refinement_config.validate();
 
@@ -136,7 +134,7 @@ int main(int argc,char** argv) { try {
         }
     }
     auto calibration=full.metric_calibration();auto const& source=*record.frame.source;
-    json result={{"schema","stereoforge.daxa_depth_rectified_benchmark.v1"},{"variant",variant},{"frames",frames},{"warmup",warmup},{"slots",2},{"radius",radius},{"subpixel",refine?refinement_config.subpixel:depth_config.stereo.subpixel},{"sgm_subpixel",depth_config.stereo.subpixel},
+    json result={{"schema","stereoforge.daxa_depth_rectified_benchmark.v1"},{"variant",variant},{"stereo_variant",DaxaStereo::variant_name(depth_config.stereo_variant)},{"frames",frames},{"warmup",warmup},{"slots",2},{"radius",radius},{"subpixel",refine?refinement_config.subpixel:depth_config.stereo.subpixel},{"sgm_subpixel",depth_config.stereo.subpixel},
         {"scope","static_repeated_canonical_record; no_live_quality_or_pipeline_FPS_claim"},{"percentile_policy","nearest_rank_ceil_p_times_N_minus1"},
         {"manifest_sha256",record.manifest_sha256},{"record_sha256",record.record_sha256},{"geometry_supplement_sha256",record.geometry_supplement_sha256},{"coarse_calibration_sha256",record.coarse_calibration_sha256},
         {"producer",record.producer},{"record_ordinal",record.ordinal},{"source_id",source.frame_id},{"camera_timestamp_ns",source.camera_timestamp_ns},
@@ -152,7 +150,14 @@ int main(int argc,char** argv) { try {
         {"producer_shader_identity",DaxaRectifiedInput::shader_identity()},{"depth_shader_identity",DaxaDepthPipeline::shader_identity()},
         {"producer_spirv_sha256",shader_hashes(DaxaRectifiedInput::shader_directory(),"daxa-rectified-input-")},{"depth_spirv_sha256",shader_hashes(DaxaDepthPipeline::shader_directory(),"daxa-depth-")}};
     result["requested_combined_buffer_bytes"]=producer->requested_bytes()+depth->requested_combined_buffer_bytes()+(refinement?refinement->requested_buffer_bytes():0);
+    // Both paths above are instantaneous; neither constructs a tracker,
+    // temporal depth filter, or hole-filling stage. This is effective runtime
+    // metadata, not an inference about older reports lacking the field.
+    result["temporal"]=stereoforge::native_estimator::instantaneous();
     result["stereo_spirv_sha256"]=shader_hashes(DaxaStereo::shader_directory(),"daxa-stereo-");
+    if(!refinement&&depth_config.stereo_variant==DaxaSgmVariant::PackedSpecialized)result["effective_estimator"]=stereoforge::native_estimator::profile(depth_config,result["temporal"],
+        result["stereo_spirv_sha256"],result["depth_spirv_sha256"],SF_DAXA_COMPILER_SHA256);
+    else if(!refinement){result["effective_estimator"]=nullptr;result["estimator_identity_status"]="experimental_variant_not_qualified_for_canonical_estimator_identity";}
     result["shader_hash_scope"]="compiled shader family bundles; includes unused variants";
     result["manifest_path"]=std::filesystem::absolute(options.values.at("--manifest")).string();
     result["camera_clock_domain"]=source.camera_clock_domain;result["host_clock_domain"]=source.host_clock_domain;

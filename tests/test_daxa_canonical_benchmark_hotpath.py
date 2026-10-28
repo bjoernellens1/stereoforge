@@ -198,3 +198,10 @@ def test_report_distinguishes_sgm_and_final_subpixel_settings():
     assert '{"subpixel",refine?refinement_config.subpixel:depth_config.stereo.subpixel}' in source
     assert '{"sgm_subpixel",depth_config.stereo.subpixel}' in source
     assert 'result["refinement_subpixel"]=refinement_config.subpixel;' in source
+
+
+def test_instantaneous_metadata_is_reported_after_measured_loop():
+    src=(ROOT/'apps/daxa_depth_rectified_benchmark.cpp').read_text()
+    assert 'DaxaTemporal' not in src
+    assert 'result["temporal"]' not in body(src, LOOP)
+    assert src.index('result["temporal"]') > src.index('auto calibration=full.metric_calibration()')

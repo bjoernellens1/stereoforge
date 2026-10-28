@@ -151,8 +151,12 @@ SGM work: aggregation remains dense over the configured disparity range.
   metadata handling still include CPU work.
 - Native stereo and geometry stage APIs expose asynchronous GPU buffers, leases, and completion;
   an end-to-end native camera-to-mapping application is not qualified.
-- No neural model is qualified. ncnn/IREE integration, ROS2, map feedback,
+- No neural model is qualified. ncnn/IREE integration, map feedback,
   calibrated uncertainty, and other GPU vendors remain gated extensions.
+- Experimental ROS 2 publisher and same-process GPU handoff are available;
+  sustained live-camera delivery is not qualified. Their native executables
+  default to `rmw_zenoh_cpp`, which must be installed, and respect explicit
+  `RMW_IMPLEMENTATION` overrides. See [ROS middleware setup](docs/ros-zenoh.md).
 - No physical metric ground truth was available. Camera rectification screening
   and numerical parity do not establish metric surface accuracy.
 - Native `--validation` fails when Khronos validation is unavailable. A signed

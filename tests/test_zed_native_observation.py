@@ -9,6 +9,8 @@ import numpy as np
 import pytest
 from benchmarks.zed_comparison import schema
 from benchmarks.zed_comparison.native_observation import export_native_observation
+from benchmarks.zed_comparison.native_observation import _settings
+from test_zed_native_profile import PROFILE
 from test_zed_native_input import native_record
 from benchmarks.zed_comparison.native_input import _canonical, SAMPLING_PROFILE
 
@@ -50,6 +52,26 @@ def executed(native_record,tmp_path):
 def export(executed,tmp_path):
     _,source,_,report,dump=executed
     return export_native_observation(report,source,dump,tmp_path/'output')
+
+
+def test_effective_profile_requires_matching_executed_metadata(executed):
+    report = deepcopy(executed[2])
+    profile = deepcopy(PROFILE)
+    report.update(width=profile['width'], height=profile['height'], temporal=profile['temporal'],
+                  stereo_spirv_sha256=profile['stereo_spirv_sha256'],
+                  depth_spirv_sha256=profile['depth_spirv_sha256'], effective_estimator=profile)
+    report['shader_compiler']['compiler_sha256'] = profile['compiler_sha256']
+    assert _settings(report)['effective_estimator'] == profile
+    for key, value in [('width', 640), ('sgm_directions', 8), ('sgm_subpixel', False),
+                       ('stereo_spirv_sha256', {'daxa-stereo-census.spv': 'd'*64})]:
+        changed = deepcopy(report)
+        changed[key] = value
+        with pytest.raises(ValueError):
+            _settings(changed)
+    changed = deepcopy(report)
+    changed['shader_compiler']['compiler_sha256'] = 'f'*64
+    with pytest.raises(ValueError):
+        _settings(changed)
 
 
 def test_exact_left_bytes_complete_bundle(executed,tmp_path):
@@ -157,3 +179,24 @@ def test_materialization_snapshot_rechecks(executed,tmp_path,monkeypatch,case):
     monkeypatch.setattr(module.shutil,'copyfile',mutate)
     with pytest.raises(ValueError):export(executed,tmp_path)
     assert not (tmp_path/'output').exists()
+
+
+def test_explicit_temporal_settings_are_preserved_and_old_reports_stay_unknown(executed,tmp_path):
+    from benchmarks.zed_comparison.evaluate_temporal import temporal_settings
+    _,source_path,report,report_path,dump=executed
+    old=schema.load_records([export(executed,tmp_path)])[0]
+    assert temporal_settings(old)['state']=='unknown'
+    report['temporal']={'stabilization':{'status':'available','value':0},
+                        'tracking':{'status':'available','value':False},
+                        'filling':{'status':'available','value':False}}
+    report_path.write_text(json.dumps(report))
+    newer=schema.load_records([export_native_observation(report_path,source_path,dump,tmp_path/'with-temporal')])[0]
+    assert temporal_settings(newer)['state']=='temporal_off'
+    assert newer['implementation']['settings']['temporal']==report['temporal']
+
+
+def test_malformed_explicit_temporal_metadata_is_rejected(executed,tmp_path):
+    _,_,report,report_path,_=executed
+    report['temporal']={'stabilization':{'status':'available','value':True}}
+    report_path.write_text(json.dumps(report))
+    with pytest.raises(ValueError): export(executed,tmp_path)

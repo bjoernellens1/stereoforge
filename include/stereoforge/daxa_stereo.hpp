@@ -17,7 +17,7 @@ enum class DaxaStereoEstimator { IndependentSGM,LeftAggregatedSelection,Independ
 enum class DaxaLRDependency { IndependentReferences,LeftAggregatedCorrelated };
 // Reserved native observation value; valid derived observations use this on both layers.
 enum class DaxaDepthProvenance : uint32_t { Invalid=0,IndependentStereo=1,LeftAggregatedStereo=5 };
-enum class DaxaSgmVariant { Baseline,Wave,Packed,PackedSpecialized,PackedD128,PackedQuad,PackedShuffle };
+enum class DaxaSgmVariant { Baseline,Wave,Packed,PackedSpecialized,PackedD128,PackedQuad,PackedShuffle,PackedSpecializedOverwrite };
 enum class DaxaStereoPlane : unsigned { Disparity,Confidence,Validity,Depth,DepthValidity,Costs,Sums,LeftCensus,RightCensus,LeftCensusValid,RightCensusValid,PackedPenalties };
 struct DaxaStereoReadback {
     DaxaStereoReference reference=DaxaStereoReference::Left;

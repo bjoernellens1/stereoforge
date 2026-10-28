@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# ROS middleware is selected before the application starts. Router ownership is
+# explicit, so stopping an app never kills a shared router.
+set -euo pipefail
+usage() {
+    printf '%s\n' 'Usage: stereoforge-ros router | run [--rmw IMPLEMENTATION] -- COMMAND [ARG...]' >&2
+}
+if [[ $# -lt 1 ]]; then usage; exit 2; fi
+mode=$1; shift
+case "$mode" in
+    router)
+        if [[ $# -ne 0 ]]; then usage; exit 2; fi
+        if ! command -v ros2 >/dev/null || ! ros2 pkg prefix rmw_zenoh_cpp >/dev/null 2>&1; then
+            printf '%s\n' 'rmw_zenoh_cpp is unavailable; source ROS and install its Zenoh RMW package.' >&2
+            exit 1
+        fi
+        exec ros2 run rmw_zenoh_cpp rmw_zenohd
+        ;;
+    run)
+        if [[ ${1-} == --rmw ]]; then
+            if [[ $# -lt 2 || -z $2 ]]; then usage; exit 2; fi
+            export RMW_IMPLEMENTATION=$2; shift 2
+        elif [[ ! ${RMW_IMPLEMENTATION+x} ]]; then
+            export RMW_IMPLEMENTATION=rmw_zenoh_cpp
+        fi
+        if [[ ${1-} != -- || $# -lt 2 ]]; then usage; exit 2; fi
+        shift
+        if [[ ! ${RMW_IMPLEMENTATION} =~ ^[a-zA-Z0-9_]+$ ]]; then
+            printf '%s\n' 'RMW_IMPLEMENTATION must be an installed ROS middleware package name.' >&2
+            exit 1
+        fi
+        if ! command -v ros2 >/dev/null || ! ros2 pkg prefix "$RMW_IMPLEMENTATION" >/dev/null 2>&1; then
+            printf 'ROS middleware %s is unavailable; source ROS and install it, or explicitly select another RMW.\n' "$RMW_IMPLEMENTATION" >&2
+            exit 1
+        fi
+        exec "$@"
+        ;;
+    *) usage; exit 2 ;;
+esac

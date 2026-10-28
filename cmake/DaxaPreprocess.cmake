@@ -54,3 +54,12 @@ option(STEREOFORGE_DAXA_DEPTH "Build staged shared-context dual-reference depth 
 if(STEREOFORGE_DAXA_DEPTH)
   include("${CMAKE_CURRENT_LIST_DIR}/DaxaDepth.cmake")
 endif()
+
+if(BUILD_TESTING)
+  add_executable(daxa_stereo_overwrite_parity tests/daxa_stereo_overwrite_parity.cpp)
+  target_link_libraries(daxa_stereo_overwrite_parity PRIVATE stereoforge_daxa_preprocess)
+  foreach(wave 32 64)
+    add_test(NAME daxa_stereo_overwrite_parity_${wave} COMMAND daxa_stereo_overwrite_parity ${wave})
+    set_tests_properties(daxa_stereo_overwrite_parity_${wave} PROPERTIES LABELS "vulkan;hardware;daxa")
+  endforeach()
+endif()

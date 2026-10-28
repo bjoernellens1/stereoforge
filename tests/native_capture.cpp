@@ -47,6 +47,12 @@ int main(int argc,char** argv){try {
     check(frames[0].packed_yuyv==held->packed_yuyv&&frames[0].controls_json==held->controls_json,"lossless packed and controls");
     check(frames[0].imu_samples[0].angular_velocity_deg_s[2]==6,"lossless IMU");
     {auto c=config();c.queue_policy=CaptureQueuePolicy::wait_for_consumer;NativeCapture cap(c,packed_replay_source(dir));auto a=cap.read(100ms);auto b=cap.read(100ms);check(a&&b,"replay preserves duplicate records");check(a->frame_id==b->frame_id,"replay record identity");check(a->host_ingress_timestamp_ns==0&&a->host_clock_domain=="fixture_unknown_host","replay preserves zero ingress and original domain");cap.stop();conserved(cap.metrics(),false);}
+    {auto longer=dir/"long-replay";{PackedCaptureWriter writer(longer);for(unsigned i=1;i<=20;++i){auto frame=*held;frame.frame_id=i;frame.camera_timestamp_ns=i*100;frame.packed_yuyv[0]=static_cast<uint8_t>(i);writer.append(frame);}writer.close();}
+      auto c=config();c.queue_policy=CaptureQueuePolicy::wait_for_consumer;NativeCapture cap(c,packed_replay_source(longer));
+      for(int i=0;i<500&&cap.metrics().queue_high_watermark<c.queue_capacity;++i)std::this_thread::sleep_for(1ms);
+      check(cap.metrics().queue_high_watermark==c.queue_capacity&&cap.metrics().running,"replay waits at full queue during delayed consumer setup");
+      for(unsigned i=1;i<=20;++i){auto f=cap.read(500ms);check(f&&f->frame_id==i&&f->packed_yuyv[0]==i,"delayed replay preserves every recorded frame in order");}
+      cap.stop();auto m=cap.metrics();check(m.queue_drops==0&&m.no_slot_drops==0&&m.delivered_frames==20,"delayed replay has no capture drops");conserved(m,false);std::filesystem::remove_all(longer);}
     {auto path=dir/"capture.sfp";std::fstream file(path,std::ios::in|std::ios::out|std::ios::binary);file.seekp(-1,std::ios::end);char b=0;file.write(&b,1);}rejects([&]{read_packed_capture(dir);});
     std::filesystem::remove_all(dir);
     {auto bad=source(1);NativeCapture cap(config(),[bad](CaptureFrame& f,auto t)mutable{auto s=bad(f,t);f.packed_yuyv.clear();return s;});rejects([&]{cap.read(100ms);});}

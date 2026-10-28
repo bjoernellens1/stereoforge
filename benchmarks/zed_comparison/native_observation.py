@@ -93,12 +93,32 @@ def _settings(report):
                    'max_coarse_span', 'min_margin', 'lr_tolerance', 'recovery', 'final_right_reference_mode']
     settings = {key: deepcopy(report[key]) for key in fields}
     settings['search_bounds'] = dict(min_disparity=0, max_disparity_exclusive=128)
+    if 'temporal' in report:
+        # Validate only explicit effective metadata. Absence remains unknown;
+        # old reports must never be retroactively labelled temporal-off.
+        from .evaluate_temporal import temporal_settings
+        temporal_settings({'implementation': {'settings': {'temporal': report['temporal']}}})
+        settings['temporal'] = deepcopy(report['temporal'])
     for key in ('shader_compiler', 'refinement_shader_compiler', 'producer_shader_identity',
                 'depth_shader_identity', 'refinement_shader_identity', 'producer_spirv_sha256',
                 'stereo_spirv_sha256', 'depth_spirv_sha256', 'refinement_spirv_sha256', 'shader_hash_scope'):
         if key in report:
             _require(type(report[key]) in (dict, str) and bool(report[key]), 'invalid compiler/shader identity')
             settings[key] = deepcopy(report[key])
+    if 'effective_estimator' in report:
+        from .native_profile import validate_full_sgm_profile
+        _require(variant == 'full_sgm', 'effective SGM profile requires full SGM')
+        profile = validate_full_sgm_profile(report['effective_estimator'])
+        for name, report_name in (('width', 'width'), ('height', 'height'),
+                                  ('disparities', 'sgm_disparities'), ('paths', 'sgm_directions'),
+                                  ('subpixel', 'sgm_subpixel'), ('temporal', 'temporal'),
+                                  ('stereo_spirv_sha256', 'stereo_spirv_sha256'),
+                                  ('depth_spirv_sha256', 'depth_spirv_sha256')):
+            _require(name in profile and report_name in report and profile[name] == report[report_name],
+                     'native estimator/report mismatch: ' + name)
+        _require(profile['compiler_sha256'] == report.get('shader_compiler', {}).get('compiler_sha256'),
+                 'native estimator/compiler mismatch')
+        settings['effective_estimator'] = profile
     return settings
 
 
