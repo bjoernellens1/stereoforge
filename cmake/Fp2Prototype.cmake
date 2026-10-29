@@ -279,3 +279,29 @@ target_link_libraries(fp2_subgroup_tiny PRIVATE stereoforge_daxa_foundation)
 target_include_directories(fp2_subgroup_tiny PRIVATE "${CMAKE_CURRENT_BINARY_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/_deps/vma-src/include")
 target_compile_definitions(fp2_subgroup_tiny PRIVATE SF_FP2_SPIRV_PATH="${sf_fp2_spirv}" SF_FP2_SHADER_SHA256="${SF_FP2_SHADER_SHA256}" SF_FP2_HOST_SHA256="${SF_FP2_HOST_SHA256}" SF_FP2_COMPILER_PATH="${SF_DAXA_SLANGC}" SF_FP2_SELECT_SHADER_SHA256="${SF_FP2_SELECT_SHADER_SHA256}" SF_FP2_RESIDENT_TINY_HOST_SHA256="${SF_FP2_SUBGROUP_TINY_SHA256}" SF_FP2_NO_PATH_SHADER_SHA256="${SF_FP2_SUBGROUP_SHADER_SHA256}" SF_FP2_SUM_RESET_SHADER_SHA256="${SF_FP2_SUM_RESET_SHADER_SHA256}" SF_FP2_LUT_HOST_SHA256="${SF_FP2_LUT_HOST_SHA256}" SF_FP2_SELECT_DIR="${CMAKE_CURRENT_BINARY_DIR}")
 add_dependencies(fp2_subgroup_tiny fp2_prototype_shader fp2_select_shaders fp2_resident_shaders fp2_subgroup_shader)
+
+# Isolated disparity-fused scanline experiment.
+set(sf_fp2_fused_shader "${CMAKE_CURRENT_SOURCE_DIR}/python/stereoforge/shaders/daxa/fp2_banded_fused.slang")
+set(sf_fp2_fused_host "${CMAKE_CURRENT_SOURCE_DIR}/apps/fp2_fused_fixture.cpp")
+set(sf_fp2_fused_tiny "${CMAKE_CURRENT_SOURCE_DIR}/apps/fp2_fused_tiny.cpp")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${sf_fp2_fused_shader}" "${sf_fp2_fused_host}" "${sf_fp2_fused_tiny}")
+file(SHA256 "${sf_fp2_fused_shader}" SF_FP2_FUSED_SHADER_SHA256)
+file(SHA256 "${sf_fp2_fused_host}" SF_FP2_FUSED_HOST_SHA256)
+file(SHA256 "${sf_fp2_fused_tiny}" SF_FP2_FUSED_TINY_SHA256)
+add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/fp2-fused.spv"
+  COMMAND "${SF_DAXA_SLANGC}" "${sf_fp2_fused_shader}" -target spirv -profile spirv_1_5 -restrictive-capability-check -matrix-layout-row-major -fvk-use-scalar-layout -O3 -entry aggregate -stage compute -o "${CMAKE_CURRENT_BINARY_DIR}/fp2-fused.spv"
+  DEPENDS "${sf_fp2_fused_shader}" VERBATIM)
+add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/fp2-fused.hpp"
+  COMMAND "${CMAKE_COMMAND}" -DINPUT=${CMAKE_CURRENT_BINARY_DIR}/fp2-fused.spv -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/fp2-fused.hpp -DSYMBOL=SF_FP2_FUSED_SPIRV_SHA256 -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Fp2ResidentIdentity.cmake"
+  DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/fp2-fused.spv" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Fp2ResidentIdentity.cmake" VERBATIM)
+add_custom_target(fp2_fused_shader DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/fp2-fused.hpp")
+add_executable(fp2_fused_fixture apps/fp2_fused_fixture.cpp)
+target_link_libraries(fp2_fused_fixture PRIVATE stereoforge_daxa_foundation)
+target_include_directories(fp2_fused_fixture PRIVATE "${CMAKE_CURRENT_BINARY_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/_deps/vma-src/include")
+target_compile_definitions(fp2_fused_fixture PRIVATE SF_FP2_SPIRV_PATH="${sf_fp2_spirv}" SF_FP2_SHADER_SHA256="${SF_FP2_SHADER_SHA256}" SF_FP2_HOST_SHA256="${SF_FP2_HOST_SHA256}" SF_FP2_COMPILER_PATH="${SF_DAXA_SLANGC}" SF_FP2_COST_SPIRV_PATH="${sf_fp2_cost_spirv}" SF_FP2_COST_SHADER_SHA256="${SF_FP2_COST_SHADER_SHA256}" SF_FP2_CENSUS_SPIRV_PATH="${sf_fp2_census_spirv}" SF_FP2_CENSUS_SHADER_SHA256="${SF_FP2_CENSUS_SHADER_SHA256}" SF_FP2_CENSUS_HELPER_SHA256="${SF_FP2_CENSUS_HELPER_SHA256}" SF_FP2_SELECT_SHADER_SHA256="${SF_FP2_SELECT_SHADER_SHA256}" SF_FP2_LUT_HOST_SHA256="${SF_FP2_LUT_HOST_SHA256}" SF_FP2_INTEGRATED_RESET_SHA256="${SF_FP2_INTEGRATED_RESET_SHA256}" SF_FP2_SELECT_DIR="${CMAKE_CURRENT_BINARY_DIR}" SF_FP2_INTEGRATED_SPIRV_PATH="${sf_fp2_integrated_spv}" SF_FP2_RESIDENT_HOST_SHA256="${SF_FP2_FUSED_HOST_SHA256}" SF_FP2_NO_PATH_SHADER_SHA256="${SF_FP2_FUSED_SHADER_SHA256}" SF_FP2_SUM_RESET_SHADER_SHA256="${SF_FP2_SUM_RESET_SHADER_SHA256}")
+add_dependencies(fp2_fused_fixture fp2_prototype_shader fp2_image_shader fp2_census_shader fp2_select_shaders fp2_integrated_shader fp2_resident_shaders fp2_fused_shader)
+add_executable(fp2_fused_tiny apps/fp2_fused_tiny.cpp)
+target_link_libraries(fp2_fused_tiny PRIVATE stereoforge_daxa_foundation)
+target_include_directories(fp2_fused_tiny PRIVATE "${CMAKE_CURRENT_BINARY_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/_deps/vma-src/include")
+target_compile_definitions(fp2_fused_tiny PRIVATE SF_FP2_SPIRV_PATH="${sf_fp2_spirv}" SF_FP2_SHADER_SHA256="${SF_FP2_SHADER_SHA256}" SF_FP2_HOST_SHA256="${SF_FP2_HOST_SHA256}" SF_FP2_COMPILER_PATH="${SF_DAXA_SLANGC}" SF_FP2_SELECT_SHADER_SHA256="${SF_FP2_SELECT_SHADER_SHA256}" SF_FP2_RESIDENT_TINY_HOST_SHA256="${SF_FP2_FUSED_TINY_SHA256}" SF_FP2_NO_PATH_SHADER_SHA256="${SF_FP2_FUSED_SHADER_SHA256}" SF_FP2_SUM_RESET_SHADER_SHA256="${SF_FP2_SUM_RESET_SHADER_SHA256}" SF_FP2_LUT_HOST_SHA256="${SF_FP2_LUT_HOST_SHA256}" SF_FP2_SELECT_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+add_dependencies(fp2_fused_tiny fp2_prototype_shader fp2_select_shaders fp2_resident_shaders fp2_fused_shader)
