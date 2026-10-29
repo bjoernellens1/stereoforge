@@ -1,0 +1,9 @@
+# Generated ROS and Pixi artifacts
+build/
+install/
+log/
+.pixi/
+.venv/
+__pycache__/
+**/*.pyc
+.pytest_cache/

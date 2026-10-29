@@ -1,0 +1,49 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+  - Class: rviz_common/Views
+    Name: Views
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/Image
+      Enabled: true
+      Image Topic: /stereoforge/rectified_rgb
+      Max Value: 1
+      Min Value: 0
+      Name: Rectified RGB
+      Normalize Range: true
+      Transport Hint: raw
+    - Class: rviz_default_plugins/Image
+      Enabled: true
+      Image Topic: /stereoforge/depth
+      Max Value: 10
+      Min Value: 0
+      Name: Depth (m)
+      Normalize Range: false
+      Transport Hint: raw
+  Global Options:
+    Background Color: 48; 48; 48
+    Fixed Frame: stereoforge_camera
+    Frame Rate: 30
+  Name: root
+  Tools:
+    - Class: rviz_default_plugins/Interact
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/FocusCamera
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 10
+      Focal Point: {X: 0, Y: 0, Z: 0}
+      Focal Shape Fixed Size: false
+      Focal Shape Size: 0.05
+      Invert Z Axis: false
+      Name: Current View
+      Pitch: 0.785
+      Target Frame: <Fixed Frame>
+      Yaw: 0.785
+Window Geometry:
+  Height: 900
+  Width: 1400

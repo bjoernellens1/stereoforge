@@ -1,0 +1,29 @@
+[workspace]
+name = "stereoforge-ros"
+channels = [
+  "https://prefix.dev/robostack-jazzy",
+  "https://prefix.dev/conda-forge",
+]
+platforms = ["linux-64"]
+
+[dependencies]
+ros-jazzy-desktop = "*"
+ros-jazzy-rmw-zenoh-cpp = "*"
+ros-dev-tools = "*"
+cmake = "*"
+ninja = "*"
+pkg-config = "*"
+cxx-compiler = "*"
+# Keep RViz's Linux GUI/runtime ABI explicit rather than relying only on
+# transitive ros-jazzy-desktop dependencies.
+libegl = "*"
+libgl = "*"
+libglvnd = "*"
+libglx = "*"
+libopengl = "*"
+libxcb = "*"
+libvulkan-headers = "*"
+qt-main = "*"
+vulkan-validation-layers = "*"
+wayland = "*"
+xorg-libx11 = "*"

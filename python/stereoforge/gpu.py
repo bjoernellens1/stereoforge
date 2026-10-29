@@ -3,6 +3,7 @@ from pathlib import Path
 from time import perf_counter
 import numpy as np
 from .reference import DIRECTIONS
+from ._reduction_source import reduction_source
 
 class VulkanStereo:
     def __init__(self,max_disparity=128,paths=4,p1=8,p2=32,subpixel=True,debug=False):
@@ -13,8 +14,8 @@ class VulkanStereo:
         self.device=s.create_device(s.DeviceType.vulkan,enable_debug_layers=debug,enable_cuda_interop=False)
         self.device_name=self.device.info.adapter_name
         self.D=max_disparity; self.paths=paths; self.p1=p1;self.p2=p2;self.subpixel=subpixel
-        source=(Path(__file__).parent/'shaders/stereo/sgm.slang').read_text()
-        module=self.device.load_module_from_source('stereoforge_sgm',source)
+        source, _, self.shader_identity = reduction_source(Path(__file__).parent/'shaders/stereo/sgm.slang')
+        module=self.device.load_module_from_source('stereoforge_sgm_' + self.shader_identity['source_sha256'],source.decode())
         self.kernels={name:self.device.create_compute_kernel(self.device.link_program([module],[module.entry_point(name)])) for name in ('census','cost','aggregate','select')}
         self.buffers={};self.shape=None;self.last_timings={};self._pending=None
         self.query_pool=self.device.create_query_pool(s.QueryType.timestamp,32)
