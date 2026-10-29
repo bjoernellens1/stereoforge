@@ -305,3 +305,13 @@ target_link_libraries(fp2_fused_tiny PRIVATE stereoforge_daxa_foundation)
 target_include_directories(fp2_fused_tiny PRIVATE "${CMAKE_CURRENT_BINARY_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/_deps/vma-src/include")
 target_compile_definitions(fp2_fused_tiny PRIVATE SF_FP2_SPIRV_PATH="${sf_fp2_spirv}" SF_FP2_SHADER_SHA256="${SF_FP2_SHADER_SHA256}" SF_FP2_HOST_SHA256="${SF_FP2_HOST_SHA256}" SF_FP2_COMPILER_PATH="${SF_DAXA_SLANGC}" SF_FP2_SELECT_SHADER_SHA256="${SF_FP2_SELECT_SHADER_SHA256}" SF_FP2_RESIDENT_TINY_HOST_SHA256="${SF_FP2_FUSED_TINY_SHA256}" SF_FP2_NO_PATH_SHADER_SHA256="${SF_FP2_FUSED_SHADER_SHA256}" SF_FP2_SUM_RESET_SHADER_SHA256="${SF_FP2_SUM_RESET_SHADER_SHA256}" SF_FP2_LUT_HOST_SHA256="${SF_FP2_LUT_HOST_SHA256}" SF_FP2_SELECT_DIR="${CMAKE_CURRENT_BINARY_DIR}")
 add_dependencies(fp2_fused_tiny fp2_prototype_shader fp2_select_shaders fp2_resident_shaders fp2_fused_shader)
+
+# Isolated fused recurrence stage profiler.
+set(sf_fp2_fused_stage_host "${CMAKE_CURRENT_SOURCE_DIR}/apps/fp2_fused_stage.cpp")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${sf_fp2_fused_stage_host}")
+file(SHA256 "${sf_fp2_fused_stage_host}" SF_FP2_FUSED_STAGE_HOST_SHA256)
+add_executable(fp2_fused_stage apps/fp2_fused_stage.cpp)
+target_link_libraries(fp2_fused_stage PRIVATE stereoforge_daxa_foundation)
+target_include_directories(fp2_fused_stage PRIVATE "${CMAKE_CURRENT_BINARY_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/_deps/vma-src/include")
+target_compile_definitions(fp2_fused_stage PRIVATE SF_FP2_SPIRV_PATH="${sf_fp2_spirv}" SF_FP2_SHADER_SHA256="${SF_FP2_SHADER_SHA256}" SF_FP2_HOST_SHA256="${SF_FP2_HOST_SHA256}" SF_FP2_COMPILER_PATH="${SF_DAXA_SLANGC}" SF_FP2_COST_SPIRV_PATH="${sf_fp2_cost_spirv}" SF_FP2_COST_SHADER_SHA256="${SF_FP2_COST_SHADER_SHA256}" SF_FP2_CENSUS_SPIRV_PATH="${sf_fp2_census_spirv}" SF_FP2_CENSUS_SHADER_SHA256="${SF_FP2_CENSUS_SHADER_SHA256}" SF_FP2_CENSUS_HELPER_SHA256="${SF_FP2_CENSUS_HELPER_SHA256}" SF_FP2_SELECT_SHADER_SHA256="${SF_FP2_SELECT_SHADER_SHA256}" SF_FP2_LUT_HOST_SHA256="${SF_FP2_LUT_HOST_SHA256}" SF_FP2_INTEGRATED_RESET_SHA256="${SF_FP2_INTEGRATED_RESET_SHA256}" SF_FP2_SELECT_DIR="${CMAKE_CURRENT_BINARY_DIR}" SF_FP2_INTEGRATED_SPIRV_PATH="${sf_fp2_integrated_spv}" SF_FP2_RESIDENT_HOST_SHA256="${SF_FP2_FUSED_STAGE_HOST_SHA256}" SF_FP2_NO_PATH_SHADER_SHA256="${SF_FP2_FUSED_SHADER_SHA256}" SF_FP2_SUM_RESET_SHADER_SHA256="${SF_FP2_SUM_RESET_SHADER_SHA256}")
+add_dependencies(fp2_fused_stage fp2_prototype_shader fp2_image_shader fp2_census_shader fp2_select_shaders fp2_integrated_shader fp2_resident_shaders fp2_fused_shader)
