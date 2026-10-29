@@ -10,6 +10,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <thread>
+#include <limits.h>
 #ifdef SF_NATIVE_CAPTURE_ZED
 #include "videocapture.hpp"
 #include "sensorcapture.hpp"
@@ -18,6 +19,22 @@ namespace stereoforge {
 namespace {
 uint64_t ingress_now(){return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();}
 constexpr size_t max_imu=8192,max_string=65536,max_payload=256*1024*1024;
+bool zed_sysfs_serial(const std::string& expected){
+    std::error_code error;
+    for(const auto& entry:std::filesystem::directory_iterator("/sys/class/hidraw",error)){
+        if(error)break;
+        auto link=entry.path()/"device";
+        char resolved[PATH_MAX];
+        if(!::realpath(link.c_str(),resolved))continue;
+        auto path=std::filesystem::path(resolved);
+        for(unsigned depth=0;depth<8&&!path.empty();++depth,path=path.parent_path()){
+            std::ifstream vendor(path/"idVendor"),product(path/"idProduct"),serial(path/"serial");
+            std::string v,p,s;std::getline(vendor,v);std::getline(product,p);std::getline(serial,s);
+            if(v=="2b03"&&p=="f781"&&s==expected)return true;
+        }
+    }
+    return false;
+}
 void validate(const CaptureFrame& f){
     if(f.source_kind!=CaptureSourceKind::PackedYuyv||f.canonical_rgb)
         throw std::invalid_argument("raw capture requires packed YUYV source");
@@ -62,8 +79,8 @@ public:
         if(serial<=0){
             constexpr std::string_view supported_serial="26041639";
             constexpr std::string_view supported_identity="40ed5e0bce10cb535e5c252c6e028d2a34b374d9f8af6a08161fffbb750d9390";
-            if(c.device_serial_override!=supported_serial||c.calibration_identity!=supported_identity)
-                throw std::runtime_error("unidentified camera serial; explicit supported device_serial_override and matching calibration are required");
+            if(c.device_serial_override!=supported_serial||c.calibration_identity!=supported_identity||!zed_sysfs_serial(c.device_serial_override))
+                throw std::runtime_error("unidentified camera serial; explicit supported serial, calibration, and HID/sysfs ZED2 identity are required");
             serial=std::stoi(std::string(supported_serial));overridden=true;
         }
         device_="zed:"+std::to_string(serial)+(overridden?":serial_override":"");
