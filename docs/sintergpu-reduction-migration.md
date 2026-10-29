@@ -135,3 +135,14 @@ warmups immediately before the measured runs for each fixture, avoiding a shape
 change between warmup and measurement. These hashes identify input bytes only;
 they do not establish fixture origin, independently validate outputs or supply
 runtime/provider provenance. The coordinator remains blocked from GPU use.
+
+`benchmarks/sintergpu_controlled_runner.py` wires adapter selection, the shared
+lock and same-device receipt check to the coordinator. After device teardown,
+it writes and fsyncs a temporary file, exclusively links it to the result path,
+and fsyncs the directory. It attempts rollback on publication errors; an
+interrupted process or failed rollback still requires inspection and must not be
+accepted merely because a result file exists. Its provider
+gate currently fails unconditionally before SlangPy import or device creation.
+Only CPU mocks have exercised this orchestration. Provider and ICD identity,
+validation activation, complete environment provenance, real fixture coverage,
+and hardware timing/parity remain unverified.
