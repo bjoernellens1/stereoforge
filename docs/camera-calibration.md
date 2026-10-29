@@ -55,8 +55,11 @@ expected calibration identity hash. The narrowly gated `--device-serial
 `40ed5e0bce10cb535e5c252c6e028d2a34b374d9f8af6a08161fffbb750d9390`; frames
 are marked `zed:26041639:serial_override` and publisher diagnostics record the
 override. It still requires Open Capture to initialize the confirmed ZED2
-video node and produce real frames. Do not use it to assign calibration to an
-arbitrary video device.
+video node and produce real frames. The host independently confirmed the
+physical device through `/sys/class/hidraw/hidraw2` and its USB parent
+(`idVendor=2b03`, `idProduct=f781`, `serial=26041639`); runtime does not rely
+on a fragile sysfs traversal for that evidence. Do not use the override to
+assign calibration to an arbitrary video device.
 
 To grant only the current user access to the identified ZED2 sensor interface:
 
