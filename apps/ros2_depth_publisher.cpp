@@ -48,7 +48,7 @@ bool thread_cpu_now(std::uint64_t& value) noexcept {
     return value<=static_cast<std::uint64_t>(INT64_MAX);
 }
 struct Options {
-    std::string source,manifest,replay,mode="depth",map,frame,run,trace,reliability="best_effort",stereo_variant="packed-specialized";
+    std::string source,manifest,replay,mode="depth",map,frame,run,trace,reliability="best_effort",stereo_variant="packed-specialized",device_serial;
     std::string pipeline_mode="full-sgm",coarse_manifest;
     std::string depth_topic="/stereoforge/depth",rgb_topic="/stereoforge/rectified_rgb";
     unsigned fps=60,disparities=128,warmup=5,max_frames=100000;int device_id=-1;double duration=600,subscriber_wait=0;bool validation=false,thread_cpu_timing=false;
@@ -57,7 +57,7 @@ unsigned number(const std::string& s,unsigned lo,unsigned hi){size_t n=0;auto v=
 Options parse(int argc,char** argv){
     Options o;
     for(int i=1;i<argc;++i){std::string a=argv[i];
-        if(a=="--help"){std::cout<<"--source camera|replay --manifest FILE --clock-map FILE --frame-id ID --run-id ID --trace FILE [--replay DIR --mode depth|rgb|depth-rgb --duration-seconds N --subscriber-wait-seconds N --max-frames N --warmup N --disparities N --stereo-variant packed-specialized|packed-specialized-overwrite --pipeline full-sgm|experimental-refinement|experimental-dual-refinement --coarse-manifest FILE --device-id N --depth-topic TOPIC --rgb-topic TOPIC --reliability best_effort|reliable --validation --thread-cpu-timing]\n";std::exit(0);}
+        if(a=="--help"){std::cout<<"--source camera|replay --manifest FILE --clock-map FILE --frame-id ID --run-id ID --trace FILE [--replay DIR --mode depth|rgb|depth-rgb --duration-seconds N --subscriber-wait-seconds N --max-frames N --warmup N --disparities N --stereo-variant packed-specialized|packed-specialized-overwrite --pipeline full-sgm|experimental-refinement|experimental-dual-refinement --coarse-manifest FILE --device-id N --device-serial ID --depth-topic TOPIC --rgb-topic TOPIC --reliability best_effort|reliable --validation --thread-cpu-timing]\n";std::exit(0);}
         if(a=="--validation"){o.validation=true;continue;}if(a=="--thread-cpu-timing"){o.thread_cpu_timing=true;continue;}if(i+1>=argc)throw std::invalid_argument("missing option value");std::string v=argv[++i];
         if(a=="--source")o.source=v;else if(a=="--manifest")o.manifest=v;else if(a=="--replay")o.replay=v;else if(a=="--mode")o.mode=v;
         else if(a=="--clock-map")o.map=v;else if(a=="--frame-id")o.frame=v;else if(a=="--run-id")o.run=v;else if(a=="--trace")o.trace=v;
@@ -66,6 +66,7 @@ Options parse(int argc,char** argv){
         else if(a=="--fps")o.fps=number(v,60,60);else if(a=="--disparities")o.disparities=number(v,32,256);
         else if(a=="--max-frames")o.max_frames=number(v,1,200000);else if(a=="--warmup")o.warmup=number(v,0,30);
         else if(a=="--device-id"){if(v=="-1")o.device_id=-1;else o.device_id=static_cast<int>(number(v,0,255));}
+        else if(a=="--device-serial")o.device_serial=v;
         else if(a=="--duration-seconds"){size_t n=0;o.duration=std::stod(v,&n);if(n!=v.size()||!std::isfinite(o.duration)||o.duration<=0||o.duration>3600)throw std::invalid_argument("invalid duration");}
         else if(a=="--subscriber-wait-seconds"){size_t n=0;o.subscriber_wait=std::stod(v,&n);if(n!=v.size()||!std::isfinite(o.subscriber_wait)||o.subscriber_wait<0||o.subscriber_wait>60)throw std::invalid_argument("invalid subscriber discovery timeout");}
         else throw std::invalid_argument("unknown option: "+a);
@@ -150,10 +151,10 @@ void run(const Options& o, OutputFile& file){
     }
     sensor_msgs::msg::Image depth_image,rgb_image;if(depth)initialize_image(depth_image,maps.width,maps.height,"32FC1",o.frame);if(rgb)initialize_image(rgb_image,maps.width,maps.height,"rgba8",o.frame);
     CaptureConfig capture_config;capture_config.eye_width=maps.eye_width;capture_config.height=maps.source_height;capture_config.fps=o.fps;capture_config.device_id=o.device_id;
-    capture_config.queue_capacity=2;capture_config.pool_capacity=6;capture_config.calibration_identity=maps.original_identity;
+    capture_config.queue_capacity=2;capture_config.pool_capacity=6;capture_config.calibration_identity=maps.original_identity;capture_config.device_serial_override=o.device_serial;
     if(o.source=="replay")capture_config.queue_policy=CaptureQueuePolicy::wait_for_consumer;
     auto capture=o.source=="camera"?std::make_unique<NativeCapture>(capture_config):std::make_unique<NativeCapture>(capture_config,packed_replay_source(o.replay));
-    auto check_source=[&](const CaptureLease& f){maps.validate_source(*f);if(experimental)coarse_maps.validate_source(*f);if(f->device_identity!=expected_device||f->camera_clock_domain!=mapping.source_clock||f->host_clock_domain!="host_steady"||f->frame_id>std::uint64_t(INT64_MAX)||!f->camera_timestamp_ns||f->camera_timestamp_ns>std::uint64_t(INT64_MAX)||!f->host_ingress_timestamp_ns||f->host_ingress_timestamp_ns>std::uint64_t(INT64_MAX))throw std::invalid_argument("capture device, geometry, identity or clock mismatch");};
+    auto check_source=[&](const CaptureLease& f){maps.validate_source(*f);if(experimental)coarse_maps.validate_source(*f);const bool override_device=o.device_serial=="26041639"&&f->device_identity==expected_device+":serial_override";if((f->device_identity!=expected_device&&!override_device)||f->camera_clock_domain!=mapping.source_clock||f->host_clock_domain!="host_steady"||f->frame_id>std::uint64_t(INT64_MAX)||!f->camera_timestamp_ns||f->camera_timestamp_ns>std::uint64_t(INT64_MAX)||!f->host_ingress_timestamp_ns||f->host_ingress_timestamp_ns>std::uint64_t(INT64_MAX))throw std::invalid_argument("capture device, geometry, identity or clock mismatch");};
     auto checked_stamp=[&](const CaptureLease& f){auto stamp=map_ros_capture_stamp(mapping,f->camera_clock_domain,f->camera_timestamp_ns);if(!stamp.sec&&!stamp.nanosec)throw std::invalid_argument("zero mapped capture timestamp");return stamp;};
     auto first=capture->read(std::chrono::seconds(2));if(!first)throw std::runtime_error("capture prototype unavailable");check_source(first);checked_stamp(first);
     FreshSourceTracker fresh;fresh.admit(static_cast<std::int64_t>(first->frame_id),first->camera_timestamp_ns,first->camera_clock_domain);
@@ -190,7 +191,7 @@ void run(const Options& o, OutputFile& file){
         {"device",{{"status","available"},{"value",json::parse(context->report())}}},
         {"settings",{{"mode",o.mode},{"pipeline",o.pipeline_mode},{"coarse_manifest_sha256",experimental?daxa_preprocess_file_sha256(o.coarse_manifest):"not_executed"},{"stereo_variant",depth?DaxaStereo::variant_name(depth_config.stereo_variant):"not_executed"},{"effective_estimator",estimator},{"validation_requested",o.validation},{"subscriber_wait_seconds",o.subscriber_wait},
             {"reference_capture_sha256",fixture.capture_sha256},{"reference_record_ordinal",fixture.record_ordinal},
-            {"calibration_manifest_sha256",daxa_preprocess_file_sha256(o.manifest)},
+            {"calibration_manifest_sha256",daxa_preprocess_file_sha256(o.manifest)},{"device_serial_override",o.device_serial.empty()?json(nullptr):json(o.device_serial)},
             {"original_calibration_identity",maps.original_identity},{"rectified_calibration_identity",maps.rectified_identity}}}};
     if(experimental)implementation["settings"]["experimental_refinement"]={
         {"coarse_width",coarse_maps.width},{"coarse_height",coarse_maps.height},{"coarse_disparities",depth_config.stereo.disparities},

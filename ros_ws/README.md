@@ -44,8 +44,10 @@ with a packed native capture using the workflow in
 is not itself the `manifest:=` input. The generated Daxa fixture and measured
 `clock-map.json` stay outside the repository.
 `--device-id` only selects a video node and `--calibration-id` only supplies
-an expected calibration identity; neither overrides an unidentified Open
-Capture serial.
+an expected calibration identity. For this tracked ZED2 only, pass
+`device_serial:=26041639` together with the matching calibration manifest; the
+native publisher records the explicit serial override in its diagnostics and
+rejects other serial/calibration combinations.
 
 Use `source:=replay replay:=/absolute/path/to/replay` for a replay run.
 Override `mode`, `stereo_variant`, `pipeline`, `coarse_manifest`,

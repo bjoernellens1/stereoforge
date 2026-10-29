@@ -45,6 +45,9 @@ struct CaptureConfig {
     CaptureQueuePolicy queue_policy=CaptureQueuePolicy::drop_oldest;
     // Supplied validated calibration identity. Capture permits empty; processing must reject it.
     std::string calibration_identity;
+    // Explicit recovery for ZED firmware that exposes no serial through Open Capture.
+    // The value is accepted only for an allowlisted calibration/device pairing.
+    std::string device_serial_override;
     std::chrono::milliseconds source_timeout{100};
 };
 struct CaptureMetrics {

@@ -27,7 +27,7 @@ void validate(const CaptureFrame& f){
         if(s->size()>max_string)throw std::invalid_argument("capture metadata exceeds bound");
 }
 void validate_config(const CaptureConfig& c){
-    if(!c.eye_width||c.eye_width%2||c.eye_width>4096||!c.height||c.height>8192||!c.fps||c.fps>100||c.device_id < -1||!c.queue_capacity||c.queue_capacity>64||c.pool_capacity<=c.queue_capacity||c.pool_capacity>128||c.calibration_identity.size()>max_string||c.source_timeout.count()<=0||c.source_timeout.count()>1000||size_t(c.eye_width)*4*c.height>max_payload||size_t(c.eye_width)*4*c.height*(c.pool_capacity+1)>512*1024*1024)
+    if(!c.eye_width||c.eye_width%2||c.eye_width>4096||!c.height||c.height>8192||!c.fps||c.fps>100||c.device_id < -1||!c.queue_capacity||c.queue_capacity>64||c.pool_capacity<=c.queue_capacity||c.pool_capacity>128||c.calibration_identity.size()>max_string||c.device_serial_override.size()>32||c.source_timeout.count()<=0||c.source_timeout.count()>1000||size_t(c.eye_width)*4*c.height>max_payload||size_t(c.eye_width)*4*c.height*(c.pool_capacity+1)>512*1024*1024)
         throw std::invalid_argument("invalid capture config: dimensions, bounded pool/queue or source timeout");
 }
 #ifdef SF_NATIVE_CAPTURE_ZED
@@ -57,7 +57,16 @@ public:
         if(!video_->initializeVideo(c.device_id))throw std::runtime_error("cannot initialize ZED video: USB mode, permissions or device ownership");
         int w=0,h=0;video_->getFrameSize(w,h);
         if(w!=int(c.eye_width*2)||h!=int(c.height))throw std::runtime_error("unexpected negotiated camera dimensions");
-        auto serial=video_->getSerialNumber();if(serial<=0)throw std::runtime_error("unidentified camera serial");device_="zed:"+std::to_string(serial);
+        auto serial=video_->getSerialNumber();
+        bool overridden=false;
+        if(serial<=0){
+            constexpr std::string_view supported_serial="26041639";
+            constexpr std::string_view supported_identity="40ed5e0bce10cb535e5c252c6e028d2a34b374d9f8af6a08161fffbb750d9390";
+            if(c.device_serial_override!=supported_serial||c.calibration_identity!=supported_identity)
+                throw std::runtime_error("unidentified camera serial; explicit supported device_serial_override and matching calibration are required");
+            serial=std::stoi(std::string(supported_serial));overridden=true;
+        }
+        device_="zed:"+std::to_string(serial)+(overridden?":serial_override":"");
         // Cache controls once. These are API readbacks, not physically verified;
         // automatic bool getters cannot distinguish I/O failure. LED getter mutates GPIO.
         std::ostringstream controls;controls<<"{\"auto_exposure_gain\":"<<(video_->getAECAGC()?"true":"false")<<",\"auto_white_balance\":"<<(video_->getAutoWhiteBalance()?"true":"false");
@@ -69,7 +78,7 @@ public:
         integer("contrast",video_->getContrast(),0,8);integer("saturation",video_->getSaturation(),0,8);
         integer("hue",video_->getHue(),0,11);integer("sharpness",video_->getSharpness(),0,8);integer("gamma",video_->getGamma(),1,9);
         for(auto [name,eye]:{std::pair{"roi_left",Eye::LEFT},std::pair{"roi_right",Eye::RIGHT}}){uint16_t x=0,y=0,rw=0,rh=0;bool ok=video_->getROIforAECAGC(eye,x,y,rw,rh);controls<<",\""<<name<<"\":";if(!ok||!rw||!rh||uint32_t(x)+rw>c.eye_width||uint32_t(y)+rh>c.height||uint32_t(rw)*rh<=100)controls<<"null";else controls<<'['<<x<<','<<y<<','<<rw<<','<<rh<<']';}
-        controls<<",\"led\":null,\"readback_limitations\":[\"LED getter changes GPIO direction\",\"automatic bool getters cannot distinguish I/O failure\",\"null numeric/ROI values indicate invalid API readback\"]}";controls_=controls.str();control_time_=ingress_now();
+        controls<<",\"device_serial_override\":"<<(overridden?"true":"false")<<",\"led\":null,\"readback_limitations\":[\"LED getter changes GPIO direction\",\"automatic bool getters cannot distinguish I/O failure\",\"null numeric/ROI values indicate invalid API readback\"]}";controls_=controls.str();control_time_=ingress_now();
         sensors_=std::make_unique<sl_oc::sensors::SensorCapture>();
         if(!sensors_->initializeSensors(serial)){sensor_status_="sensor_open_failed_check_hidraw_permissions";return;}
         sensor_status_=video_->enableSensorSync(sensors_.get())?"hardware_sync_enabled_raw_not_pose":"sync_unavailable_raw_only";

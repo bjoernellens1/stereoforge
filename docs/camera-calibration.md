@@ -49,12 +49,14 @@ remain runtime artifacts and are not tracked. A measured `clock-map.json` is
 also required for ROS launch; factory calibration does not provide that
 source-clock-to-ROS mapping.
 
-The native capture options do not provide a safe serial override:
 `--device-id` selects a video device, while `--calibration-id` supplies the
-expected calibration identity hash after capture. Open Capture must first
-report a positive hardware serial; otherwise StereoForge rejects the source
-before calibration can be associated with it. Do not bypass that check by
-assigning the tracked factory calibration to an unidentified video node.
+expected calibration identity hash. The narrowly gated `--device-serial
+26041639` fallback is accepted only with the tracked HD calibration identity
+`40ed5e0bce10cb535e5c252c6e028d2a34b374d9f8af6a08161fffbb750d9390`; frames
+are marked `zed:26041639:serial_override` and publisher diagnostics record the
+override. It still requires Open Capture to initialize the confirmed ZED2
+video node and produce real frames. Do not use it to assign calibration to an
+arbitrary video device.
 
 To grant only the current user access to the identified ZED2 sensor interface:
 

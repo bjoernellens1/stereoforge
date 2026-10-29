@@ -18,6 +18,7 @@ _OPTIONAL_VALUE_ARGUMENTS = (
     ("pipeline", "--pipeline"),
     ("coarse_manifest", "--coarse-manifest"),
     ("device_id", "--device-id"),
+    ("device_serial", "--device-serial"),
     ("depth_topic", "--depth-topic"),
     ("rgb_topic", "--rgb-topic"),
     ("reliability", "--reliability"),
@@ -183,6 +184,7 @@ def generate_launch_description():
             description="Required only for an experimental refinement pipeline.",
         ),
         DeclareLaunchArgument("device_id", default_value="-1"),
+        DeclareLaunchArgument("device_serial", default_value=""),
         DeclareLaunchArgument("depth_topic", default_value="/stereoforge/depth"),
         DeclareLaunchArgument(
             "rgb_topic", default_value="/stereoforge/rectified_rgb"
