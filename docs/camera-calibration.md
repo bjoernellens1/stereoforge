@@ -12,6 +12,50 @@ a right-camera pose. This rotation convention is covered by synthetic epipolar
 regressions and same-byte live-image screening. Global unsuffixed TY/TZ fields are
 not interpreted; their convention and other camera families require validation.
 
+The official ZED2 factory calibration for serial `26041639` is tracked at
+[`configs/cameras/zed2/SN26041639.conf`](../configs/cameras/zed2/SN26041639.conf).
+It is a calibration source, not a ROS publisher manifest. To create the native
+Daxa preprocessing fixture, first record packed YUYV frames and convert the
+factory calibration to canonical JSON:
+
+```bash
+uv run python - <<'PY'
+import json
+import sys
+sys.path.insert(0, "python")
+from stereoforge.calibration import parse_zed_conf
+
+calibration = parse_zed_conf(
+    "configs/cameras/zed2/SN26041639.conf", 1280, 720, "26041639"
+)
+with open("/tmp/stereoforge-zed2-calibration.json", "w") as output:
+    json.dump(calibration.to_dict(), output, sort_keys=True, separators=(",", ":"))
+PY
+
+build/ros-daxa/native_capture_benchmark \
+  --frames 30 \
+  --record-dir /path/to/zed2-capture \
+  --output /path/to/zed2-capture-report.json
+
+PYTHONPATH=python .venv/bin/python benchmarks/compare_daxa_preprocess.py \
+  --export /path/to/zed2-capture/capture.sfp \
+  --record-ordinal 0 \
+  --calibration /tmp/stereoforge-zed2-calibration.json \
+  --output /path/to/zed2-fixture
+```
+
+The resulting fixture `manifest.json`, rectification maps, and `capture.sfp`
+remain runtime artifacts and are not tracked. A measured `clock-map.json` is
+also required for ROS launch; factory calibration does not provide that
+source-clock-to-ROS mapping.
+
+The native capture options do not provide a safe serial override:
+`--device-id` selects a video device, while `--calibration-id` supplies the
+expected calibration identity hash after capture. Open Capture must first
+report a positive hardware serial; otherwise StereoForge rejects the source
+before calibration can be associated with it. Do not bypass that check by
+assigning the tracked factory calibration to an unidentified video node.
+
 To grant only the current user access to the identified ZED2 sensor interface:
 
 ```bash

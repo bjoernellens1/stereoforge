@@ -37,6 +37,16 @@ pixi run -m ros_ws ros2 launch \
   trace:=/tmp/stereoforge-trace.json
 ```
 
+For the connected ZED2, the tracked official factory calibration source is
+`configs/cameras/zed2/SN26041639.conf`. It must first be converted and paired
+with a packed native capture using the workflow in
+[`docs/camera-calibration.md`](../docs/camera-calibration.md); the `.conf` file
+is not itself the `manifest:=` input. The generated Daxa fixture and measured
+`clock-map.json` stay outside the repository.
+`--device-id` only selects a video node and `--calibration-id` only supplies
+an expected calibration identity; neither overrides an unidentified Open
+Capture serial.
+
 Use `source:=replay replay:=/absolute/path/to/replay` for a replay run.
 Override `mode`, `stereo_variant`, `pipeline`, `coarse_manifest`,
 `reliability`, or `rviz_config` as needed. The standard launch expects the
