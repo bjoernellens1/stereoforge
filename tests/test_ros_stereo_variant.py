@@ -12,7 +12,7 @@ def test_ros_variant_parser_executable(tmp_path):
     if not compiler: pytest.skip('C++ compiler unavailable')
     source=(ROOT/'apps/ros2_depth_publisher.cpp').read_text()
     parser=source[source.index('struct Options {'):source.index('std::string clock_id()')]
-    cpp='''#include <stereoforge/depth_rate_controller.hpp>\n#include <algorithm>\n#include <cctype>\n#include <cmath>\n#include <cstdlib>\n#include <iostream>\n#include <stdexcept>\n#include <string>\n''' + parser + '''
+    cpp='''#include <stereoforge/depth_rate_controller.hpp>\n#include <algorithm>\n#include <cctype>\n#include <cmath>\n#include <cstdlib>\n#include <iostream>\n#include <stdexcept>\n#include <string>\nusing namespace stereoforge;\n''' + parser + '''
 int main(int argc,char** argv){try{auto o=parse(argc,argv);std::cout<<o.stereo_variant;return 0;}catch(const std::exception&){return 2;}}
 '''
     path=tmp_path/'parser.cpp';path.write_text(cpp);exe=tmp_path/'parser'
