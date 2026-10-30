@@ -210,7 +210,9 @@ void run(const Options& o, OutputFile& file){
     if(depth&&o.depth_speckle_min_pixels)
         depth_speckle=std::make_unique<DepthSpeckleFilter>(DepthSpeckleConfig{
             maps.width,maps.height,o.depth_speckle_min_pixels,float(o.depth_speckle_delta_m)});
+    std::uint64_t speckle_input_valid_total=0,speckle_output_valid_total=0;
     std::uint64_t speckle_invalidated_total=0,speckle_removed_total=0;
+    std::uint64_t speckle_filter_ns_total=0,speckle_filtered_frames=0;
     DepthRateController rate_controller(depth_rate_config(o));
     YuyvSceneMonitor scene_monitor;
     json outputs=json::object();if(depth)outputs["depth"]=output_descriptor(o.depth_topic,maps.width,maps.height,"32FC1",o.frame);if(rgb)outputs["rgb"]=output_descriptor(o.rgb_topic,maps.width,maps.height,"rgba8",o.frame);
@@ -275,18 +277,18 @@ void run(const Options& o, OutputFile& file){
             r.copy_begin_ns=now_ns<steady>();
             if(o.thread_cpu_timing)cpu_ok &= thread_cpu_now(r.thread_cpu_copy_begin_ns);
             std::memcpy(image.data.data(),bytes.data(),bytes.size());
-            if(which==RosDeliveryOutput::Depth){
-                if(depth_speckle){
-                    const auto stats=depth_speckle->apply(std::as_writable_bytes(std::span(image.data)));
-                    speckle_invalidated_total+=stats.invalidated_pixels;
-                    speckle_removed_total+=stats.removed_components;
-                }
-                float* dst=reinterpret_cast<float*>(image.data.data());
-                const size_t count=bytes.size()/sizeof(float);
-                for(size_t i=0;i<count;++i){
-                    if(std::isnan(dst[i]))dst[i]=0.0f;
-                }
+            if(which==RosDeliveryOutput::Depth&&depth_speckle){
+                const auto filter_begin=now_ns<steady>();
+                const auto stats=depth_speckle->apply(std::as_writable_bytes(std::span(image.data)));
+                speckle_filter_ns_total+=now_ns<steady>()-filter_begin;
+                ++speckle_filtered_frames;
+                speckle_input_valid_total+=stats.input_valid_pixels;
+                speckle_output_valid_total+=stats.output_valid_pixels;
+                speckle_invalidated_total+=stats.invalidated_pixels;
+                speckle_removed_total+=stats.removed_components;
             }
+            // Preserve the GPU's 32FC1 invalid depth encoding, including NaN.
+            // Do not silently replace NaNs with zero during ROS publication.
             if(o.thread_cpu_timing)cpu_ok &= thread_cpu_now(r.thread_cpu_copy_end_ns);
             r.copy_end_ns=now_ns<steady>();
             r.publish_begin_ns=now_ns<steady>();
@@ -349,7 +351,13 @@ void run(const Options& o, OutputFile& file){
         {"pending",window_pending},{"trace_drops",trace.dropped()},{"drain_ns",drain_end-drain_begin}};
     file.reset();file.put("[");file.put(begin.dump());for(auto const& r:trace.records()){file.put(",");file.put(ros_delivery_event_json(r,o.run,"publisher",config).dump());}file.put(",");file.put(end.dump());file.put("]\n");file.complete=true;
     if(depth){
-        std::cerr<<"Depth speckle invalidated_pixels="<<speckle_invalidated_total<<" removed_components="<<speckle_removed_total<<'\n';
+        std::cerr<<"Depth speckle frames="<<speckle_filtered_frames
+                 <<" valid_before="<<speckle_input_valid_total
+                 <<" valid_after="<<speckle_output_valid_total
+                 <<" invalidated_pixels="<<speckle_invalidated_total
+                 <<" removed_components="<<speckle_removed_total
+                 <<" mean_filter_ms="<<(speckle_filtered_frames?double(speckle_filter_ns_total)/double(speckle_filtered_frames)/1e6:0.0)
+                 <<'\n';
         const auto& stats=rate_controller.stats();
         std::cerr<<"Depth rate "<<o.depth_rate<<": observed="<<stats.observed
                  <<" admitted="<<stats.admitted<<" rate_skips="<<stats.intentional_skips
@@ -369,7 +377,11 @@ void run(const Options& o, OutputFile& file){
                 {"published_depth",window_counters.published_depth},
                 {"published_rgb",window_counters.published_rgb},
                 {"speckle_invalidated_pixels",speckle_invalidated_total},
-                {"speckle_removed_components",speckle_removed_total}}).dump()+"\n");
+                {"speckle_removed_components",speckle_removed_total},
+                {"speckle_input_valid_pixels",speckle_input_valid_total},
+                {"speckle_output_valid_pixels",speckle_output_valid_total},
+                {"speckle_filtered_frames",speckle_filtered_frames},
+                {"speckle_cpu_total_ns",speckle_filter_ns_total}}).dump()+"\n");
             report.complete=true;
         }
     }
