@@ -170,3 +170,42 @@ def csr_sgm(volume: CsrVolume,p1: int = 8,p2: int = 32) -> CsrResult:
 
 def normalized_work(result: CsrResult) -> float:
     return result.candidate_state_updates/result.dense_state_slots
+
+
+@dataclass(frozen=True)
+class CsrLRResult:
+    left_valid: np.ndarray
+    right_valid: np.ndarray
+
+
+def csr_left_right_consistency(left: CsrResult, right: CsrResult,
+                               tolerance: int = 1) -> CsrLRResult:
+    """Symmetric integer left/right consistency with strict support.
+
+    No inference, interpolation, or synthetic filling. The two CSR estimates
+    must come from independently computed left and right camera hypotheses.
+    """
+    if (type(tolerance) is not int or tolerance < 0 or tolerance > 10 or
+        left.disparity.ndim != 2 or right.disparity.shape != left.disparity.shape or
+        left.valid.shape != left.disparity.shape or
+        right.valid.shape != right.disparity.shape):
+        raise ValueError("invalid independent CSR LR observations")
+    h,w=left.disparity.shape
+    if not h or not w:
+        raise ValueError("empty CSR LR observations")
+    x = np.broadcast_to(np.arange(w, dtype=np.int64), (h,w))
+    ld,rd=left.disparity.astype(np.int64),right.disparity.astype(np.int64)
+    if (np.any(left.valid & (ld < 0)) or np.any(right.valid & (rd < 0))):
+        raise ValueError("valid disparities must be nonnegative")
+    target_l=x-ld
+    target_r=x+rd
+    in_l=(target_l>=0)&(target_l<w)&left.valid
+    in_r=(target_r>=0)&(target_r<w)&right.valid
+    right_idx=np.clip(target_l,0,w-1)
+    left_idx=np.clip(target_r,0,w-1)
+    other_d_l=np.take_along_axis(rd,right_idx,axis=1)
+    other_v_l=np.take_along_axis(right.valid,right_idx,axis=1)
+    other_d_r=np.take_along_axis(ld,left_idx,axis=1)
+    other_v_r=np.take_along_axis(left.valid,left_idx,axis=1)
+    return CsrLRResult(in_l & other_v_l & (np.abs(ld-other_d_l)<=tolerance),
+                       in_r & other_v_r & (np.abs(rd-other_d_r)<=tolerance))
