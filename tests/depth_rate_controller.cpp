@@ -61,6 +61,7 @@ void config_test() {
     assert(throws([&]{ auto c = fixed(5); c.consumer_min_fps=20; DepthRateController ctl(c); }));
     assert(throws([&]{ auto c = fixed(5); c.max_depth_age_ns=100'000'000; DepthRateController ctl(c); }));
     assert(throws([&]{ auto c = fixed(60); c.capture_fps=30; DepthRateController ctl(c); }));
+    { auto c = fixed(10); c.capture_fps=30; DepthRateController ctl(c); assert(ctl.stats().effective_fps==10); }
     assert(throws([&]{ auto c = DepthRateConfig{}; c.downshift_dwell_ns=0; DepthRateController ctl(c); }));
     DepthRateConfig c; c.consumer_min_fps=20; c.downshift_dwell_ns=10'000'000ull;
     DepthRateController ctl(c);
