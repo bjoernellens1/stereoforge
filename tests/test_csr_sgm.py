@@ -94,3 +94,32 @@ def test_empty_candidate_state_never_fabricates_disparity():
     assert not out.valid.any()
     assert np.all(out.disparity==-1)
     assert out.candidate_state_updates==0
+
+
+
+def test_symmetric_left_right_consistency_rejects_occluded_and_wrong_matches():
+    from benchmarks.csr_sgm import CsrResult, csr_left_right_consistency
+    def result(d,v):
+        d=np.asarray(d,dtype=np.int32)
+        v=np.asarray(v,dtype=bool)
+        return CsrResult(np.zeros((4,0),np.uint32),np.zeros(0,np.uint64),
+                         d,v,0,0)
+    left=result([[0,1,1,1,1,1,1]],[[1,1,1,1,1,1,1]])
+    right=result([[0,1,1,1,1,1,1]],[[1,1,1,1,1,1,1]])
+    masks=csr_left_right_consistency(left,right,0)
+    assert masks.left_valid[0].tolist()==[True,False,False,False,False,False,False]
+    # All left d=1 matches with a right d=1 except the first out-of-image pair.
+    right=result([[0,1,1,1,1,1,1]],[[1,1,1,1,1,1,1]])
+    left=result([[1,1,1,1,1,1,1]],[[1,1,1,1,1,1,1]])
+    masks=csr_left_right_consistency(left,right,0)
+    assert masks.left_valid[0].tolist()==[False,False,True,True,True,True,True]
+    assert masks.right_valid[0].tolist()==[False,True,True,True,True,True,False]
+    # Introduce invalid and wrong correspondence in one right-image location.
+    right.valid[0,3]=False
+    masks=csr_left_right_consistency(left,right,0)
+    assert not masks.left_valid[0,4]
+    assert not masks.right_valid[0,3]
+    with pytest.raises(ValueError):
+        csr_left_right_consistency(left,right,-1)
+    with pytest.raises(ValueError):
+        csr_left_right_consistency(left,result([[0]],[[1]]))
