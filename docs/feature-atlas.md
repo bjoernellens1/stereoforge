@@ -34,18 +34,18 @@ ABBA benchmarking pass**.
 
 CPU oracle and tests:
 
-\`\`\`sh
+```sh
 cmake --preset cpu
 cmake --build --preset cpu --target feature_atlas_cpu_contracts
 ctest --preset cpu -R feature_atlas_cpu_contracts --output-on-failure
-\`\`\`
+```
 
 Optional offline SPIR-V compilation using the project-pinned Slang compiler:
 
-\`\`\`sh
+```sh
 cmake --preset daxa -DSTEREOFORGE_DAXA_FEATURE_ATLAS=ON
 cmake --build --preset daxa --target daxa_feature_atlas_shader
-\`\`\`
+```
 
 No CUDA/ROCm dependency is introduced. This compile gate requires the pinned
 Daxa and Slang toolchain, and does not execute a GPU dispatch.
