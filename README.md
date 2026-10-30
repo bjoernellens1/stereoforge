@@ -14,6 +14,15 @@ and the [implementation ledger](docs/implementation-status.md) for exact boundar
 
 See the [Daxa + Slang production plan](docs/superpowers/plans/2026-10-27-daxa-slang-production.md) for the proposed migration, qualification gates and current implementation boundary.
 
+## Experimental work-proportional CSR stereo
+
+An independent prototype builds per-pixel sorted CSR disparity hypotheses from
+coarse windows and sparse high-resolution anchors, preserving dense fallback
+where no reliable prior exists. A four-path CPU reference is checked against
+the existing masked SGM oracle, with an optional portable Slang GPU kernel.
+It is **not** the qualified default depth estimator or a measured speedup.
+See [CSR compact SGM research lane](docs/csr-compact-sgm.md).
+
 ## Setup
 
 Requires Python 3.11+, uv, CMake 3.24+, Ninja, a C++20 compiler, and a working
