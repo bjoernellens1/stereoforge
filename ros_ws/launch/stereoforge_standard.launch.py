@@ -82,9 +82,13 @@ def _launch_standard(context):
     if values["zenoh_session_config"]:
         publisher_env["ZENOH_SESSION_CONFIG_URI"] = values["zenoh_session_config"]
 
+    # Fedora 44 / Strix Halo: use the host Mesa/DRM stack for BOTH GPU
+    # processes. Pixi's bundled libdrm can shadow the system driver.
+    publisher_env["VK_DRIVER_FILES"] = "/usr/share/vulkan/icd.d/radeon_icd.x86_64.json"
+    publisher_env["LIBGL_DRIVERS_PATH"] = "/usr/lib64/dri"
+    publisher_env["LD_PRELOAD"] = "/usr/lib64/libdrm.so.2:/usr/lib64/libdrm_amdgpu.so.1"
+    publisher_env["ZENOH_ROUTER_CHECK_ATTEMPTS"] = "20"
     rviz_env = dict(publisher_env)
-    rviz_env["LIBGL_DRIVERS_PATH"] = "/usr/lib64/dri"
-    rviz_env["LD_PRELOAD"] = "/usr/lib64/libdrm.so.2:/usr/lib64/libdrm_amdgpu.so.1"
 
     return [
         ExecuteProcess(
