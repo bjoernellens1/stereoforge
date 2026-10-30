@@ -34,6 +34,6 @@ if grep -q 'not found' "$build/ros-publisher-ldd.txt"; then
   grep 'not found' "$build/ros-publisher-ldd.txt" >&2
   exit 1
 fi
-"$pub" --help >/dev/null
+pixi run -m ros_ws env LD_LIBRARY_PATH="$pixi_lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$pub" --help >/dev/null
 echo "Publisher ready: $(realpath "$pub")"
 echo "ROS 2 launch: pixi run -m ros_ws ros2 launch ros_ws/launch/stereoforge_publisher.launch.py ..."
