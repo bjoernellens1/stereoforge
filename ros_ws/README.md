@@ -14,8 +14,8 @@ checks that all runtime shared libraries resolve.
 bash scripts/build-ros2-native.sh
 ```
 
-The default output is `build/ros-daxa/stereoforge_ros2_depth_publisher`.
-For an isolated build set `STEREOFORGE_ROS_BUILD_DIR=build/ros-daxa-native`.
+The default output is `build/ros-daxa-native/stereoforge_ros2_depth_publisher`.
+To override the build directory, set `STEREOFORGE_ROS_BUILD_DIR=...` and\npass the corresponding `publisher_executable` to the publisher-only launch.
 Do not configure this target directly with `pixi run cmake` and its implicit
 Conda compiler: that can link Fedora's Vulkan/HIDAPI/X11 libraries against an
 incompatible Conda sysroot. The helper uses `/usr/bin/gcc`,
@@ -76,7 +76,7 @@ Use `source:=replay replay:=/absolute/path/to/replay` for a replay run.
 Override `mode`, `stereo_variant`, `pipeline`, `coarse_manifest`,
 `reliability`, `rviz_config`, `depth_speckle_min_pixels`, and
 `depth_speckle_delta_m` as needed. Both standard and publisher-only launch
-default to the executable in `build/ros-daxa` **of the checked-out repository**.
+default to the executable in `build/ros-daxa-native` **of the checked-out repository**.
 For an isolated build, supply `publisher_executable:=/absolute/path/to/executable`
 with the publisher-only launch; standard launch requires the default path.
 The speckle filter is disabled by default (`depth_speckle_min_pixels:=0`).
@@ -133,7 +133,7 @@ The launch-file and RViz paths above are real paths in this checkout. Replace
 only the two `/absolute/path/to/...` values with paths to the actual calibration
 manifest and clock-map files from your capture run; those files are not present
 in this repository. The native ROS publisher is built at
-`build/ros-daxa/stereoforge_ros2_depth_publisher` relative to this checkout.
+`build/ros-daxa-native/stereoforge_ros2_depth_publisher` relative to this checkout.
 Live camera launch still requires the actual calibration manifest and clock-map
 from the capture run; this repository does not fabricate those artifacts.
 
