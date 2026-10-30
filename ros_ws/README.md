@@ -110,3 +110,23 @@ from the capture run; this repository does not fabricate those artifacts.
 Set `rmw_implementation=rmw_fastrtps_cpp` explicitly for a DDS fallback; Zenoh
 is intentionally the default. All communicating ROS processes must use
 compatible middleware and config settings.
+
+## Fedora 44 / Strix Halo Vulkan runtime
+
+The standard ROS launch uses the same native Mesa/RADV device and host DRM
+libraries for both RViz **and** the Daxa publisher. It sets
+`VK_DRIVER_FILES=/usr/share/vulkan/icd.d/radeon_icd.x86_64.json`,
+`LIBGL_DRIVERS_PATH=/usr/lib64/dri`, and preloads the host
+`libdrm.so.2` and `libdrm_amdgpu.so.1`. These settings are deliberately
+specific to the verified Fedora workstation; check the paths before using
+this launch on another distribution. Zenoh router startup remains separate;
+clients retry discovery with `ZENOH_ROUTER_CHECK_ATTEMPTS=20`.
+
+To diagnose GPU availability without ROS, compare the native and Pixi
+`vulkaninfo --summary` output and run the built `daxa_probe`. An AMD GPU in
+`vulkaninfo` is necessary but does not establish that the Daxa device was
+successfully created. `DaxaDepthConfig::required_wave_size` already defaults
+to 32; no shader changes are needed for that setting. When benchmarking FPS,
+stop competing GPU compute jobs and check utilization. The Zenoh session and
+router JSON5 configurations in `ros_ws/` explicitly disable shared memory,
+so no system-wide `ulimit -l` changes are needed for that mode.
