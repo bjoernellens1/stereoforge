@@ -9,6 +9,10 @@ from launch.substitutions import LaunchConfiguration
 
 _OPTIONAL_VALUE_ARGUMENTS = (
     ("mode", "--mode"),
+    ("device_serial", "--device-serial"),
+    ("capture_fps", "--capture-fps"),
+    ("depth_rate", "--depth-rate"),
+    ("disparities", "--disparities"),
     ("stereo_variant", "--stereo-variant"),
     ("pipeline", "--pipeline"),
     ("coarse_manifest", "--coarse-manifest"),
@@ -117,6 +121,10 @@ def generate_launch_description():
             default_value="",
             description="Replay directory; required when source=replay.",
         ),
+        DeclareLaunchArgument("device_serial", default_value=""),
+        DeclareLaunchArgument("capture_fps", default_value="30"),
+        DeclareLaunchArgument("depth_rate", default_value="30"),
+        DeclareLaunchArgument("disparities", default_value="128"),
         DeclareLaunchArgument(
             "mode",
             default_value="depth",
