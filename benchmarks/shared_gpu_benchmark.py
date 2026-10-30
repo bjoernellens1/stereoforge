@@ -205,8 +205,9 @@ def evaluate(config: dict, records: list[dict]) -> dict:
         overlap.append(pair["foreground_overlap_fraction"])
     if not records:
         raise ValueError("no benchmark records")
-    identity_verified = config["foreground"].get("identity_path") is not None and (
-        all(item == identities[0] for item in identities))
+    identity_verified = (config["foreground"].get("identity_path") is not None
+                         and identities[0] is not None
+                         and all(item is not None and item == identities[0] for item in identities))
     ratios = [during / alone for alone, during in zip(bg_solo, pair_bg)]
     return {
         "schema": SCHEMA,
