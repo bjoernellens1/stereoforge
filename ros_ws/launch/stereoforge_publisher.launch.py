@@ -105,7 +105,7 @@ def generate_launch_description():
     default_publisher = str(
         Path(__file__).resolve().parents[2]
         / "build"
-        / "ros-daxa"
+        / "ros-daxa-native"
         / "stereoforge_ros2_depth_publisher"
     )
     arguments = [
