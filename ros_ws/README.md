@@ -8,7 +8,9 @@ Build the native publisher on Fedora using the repository entry point. This
 intentionally uses system GCC/G++ while resolving ROS 2 packages from Pixi.
 The command also adds Pixi's LTTng libraries to the linker search path, which
 is required when the native linker is used. It verifies the executable and
-checks that all runtime shared libraries resolve.
+checks that all runtime shared libraries resolve under the Pixi runtime loader
+path. Running `ldd` without Pixi's library path can misleadingly report
+transitive ROS dependencies as `not found` even after linking succeeds.
 
 ```bash
 bash scripts/build-ros2-native.sh
@@ -173,3 +175,29 @@ For an A/B test, stop and restart the publisher with
 `depth_speckle_min_pixels:=0`, a new run ID and a new trace path. Keep RViz's
 image min/max display range fixed across runs. No postfilter performance
 claims are made until live 720p CPU latency is measured.
+
+### Debugging dependency checks and standalone CPU tests
+
+For a native publisher already built in `build/ros-daxa-native`, inspect
+transitive ROS dependencies using the Pixi library directory:
+
+```bash
+PIXI_LIB="$(realpath ros_ws/.pixi/envs/default/lib)"
+LD_LIBRARY_PATH="$PIXI_LIB${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+  ldd build/ros-daxa-native/stereoforge_ros2_depth_publisher | grep 'not found' || true
+```
+
+An empty result is expected. The build helper performs the same check and
+fails on any unresolved dependency. To run the CPU depth-speckle contracts,
+**configure the CPU preset first** rather than calling CTest against an
+old/unconfigured build directory:
+
+```bash
+cmake --preset cpu
+cmake --build --preset cpu -j 8
+ctest --test-dir build/cpu -N -R depth_speckle_contracts
+ctest --test-dir build/cpu -R depth_speckle_contracts --output-on-failure
+```
+
+The `-N` output must list one matching test; zero tests means that the current
+checkout or CMake cache does not register the speckle contract.
