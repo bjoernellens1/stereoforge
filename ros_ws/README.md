@@ -149,7 +149,7 @@ A live publisher is **not** ready just because `find` locates a file named
 regression or deliberately invalid test fixtures. Use a physical-camera
 manifest tied to the connected ZED 2 (serial 26041639) and a bounded,
 measured capture-to-ROS clock mapping valid for that source's timestamps.
-Do not reuse a synthetic replay `clock-map.json` for a live camera.
+Do not reuse a synthetic replay `clock-map.json` for a live camera. The integration branch also includes `configs/cameras/zed2/clock_maps/SN26041639-clock-map.json` whose `source_clock` is `zed_open_capture_video_unvalidated`, `offset_ns` is zero, and validity interval spans essentially all normal timestamps. This is **not a measured clock mapping** and must not be interpreted as timestamp qualification even if the publisher accepts it. The camera fixture and rectification maps are reusable; clock offset and error bounds require per-run measurement/validation.
 Consult [camera calibration](../docs/camera-calibration.md) to convert the
 factory calibration and prepare the paired recording. The publisher rejects
 mismatched capture clock IDs/invalid mapping intervals.
