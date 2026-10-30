@@ -144,60 +144,22 @@ Set `rmw_implementation=rmw_fastrtps_cpp` explicitly for a DDS fallback; Zenoh
 is intentionally the default. All communicating ROS processes must use
 compatible middleware and config settings.
 
-## Live ZED 2 qualification
+## Fedora 44 / Strix Halo Vulkan runtime
 
-A live publisher is **not** ready just because `find` locates a file named
-`manifest.json`. Many files under `artifacts/` are synthetic, replay,
-regression or deliberately invalid test fixtures. Use a physical-camera
-manifest tied to the connected ZED 2 (serial 26041639) and a bounded,
-measured capture-to-ROS clock mapping valid for that source's timestamps.
-Do not reuse a synthetic replay `clock-map.json` for a live camera. The integration branch also includes `configs/cameras/zed2/clock_maps/SN26041639-clock-map.json` whose `source_clock` is `zed_open_capture_video_unvalidated`, `offset_ns` is zero, and validity interval spans essentially all normal timestamps. This is **not a measured clock mapping** and must not be interpreted as timestamp qualification even if the publisher accepts it. The camera fixture and rectification maps are reusable; clock offset and error bounds require per-run measurement/validation.
-Consult [camera calibration](../docs/camera-calibration.md) to convert the
-factory calibration and prepare the paired recording. The publisher rejects
-mismatched capture clock IDs/invalid mapping intervals.
+The standard ROS launch uses the same native Mesa/RADV device and host DRM
+libraries for both RViz **and** the Daxa publisher. It sets
+`VK_DRIVER_FILES=/usr/share/vulkan/icd.d/radeon_icd.x86_64.json`,
+`LIBGL_DRIVERS_PATH=/usr/lib64/dri`, and preloads the host
+`libdrm.so.2` and `libdrm_amdgpu.so.1`. These settings are deliberately
+specific to the verified Fedora workstation; check the paths before using
+this launch on another distribution. Zenoh router startup remains separate;
+clients retry discovery with `ZENOH_ROUTER_CHECK_ATTEMPTS=20`.
 
-The ZED 2 and RViz comparison requires three running processes: Zenoh router,
-RViz, and the publisher. After running the build helper, use
-`ros_ws/launch/stereoforge_standard.launch.py` with the actual manifest and
-clock map (plus unique `run_id` and non-existing `trace`) to start them
-in one command, for example:
-
-```bash
-pixi run -m ros_ws ros2 launch ros_ws/launch/stereoforge_standard.launch.py \
-  manifest:=/actual/physical-camera/manifest.json \
-  clock_map:=/actual/live/clock-map.json \
-  frame_id:=stereoforge_camera run_id:=trial-001 \
-  trace:=/tmp/stereoforge-trial-001.json \
-  mode:=depth-rgb depth_speckle_min_pixels:=50 depth_speckle_delta_m:=0.05
-```
-
-For an A/B test, stop and restart the publisher with
-`depth_speckle_min_pixels:=0`, a new run ID and a new trace path. Keep RViz's
-image min/max display range fixed across runs. No postfilter performance
-claims are made until live 720p CPU latency is measured.
-
-### Debugging dependency checks and standalone CPU tests
-
-For a native publisher already built in `build/ros-daxa-native`, inspect
-transitive ROS dependencies using the Pixi library directory:
-
-```bash
-PIXI_LIB="$(realpath ros_ws/.pixi/envs/default/lib)"
-LD_LIBRARY_PATH="$PIXI_LIB${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-  ldd build/ros-daxa-native/stereoforge_ros2_depth_publisher | grep 'not found' || true
-```
-
-An empty result is expected. The build helper performs the same check and
-fails on any unresolved dependency. To run the CPU depth-speckle contracts,
-**configure the CPU preset first** rather than calling CTest against an
-old/unconfigured build directory:
-
-```bash
-cmake --preset cpu
-cmake --build --preset cpu -j 8
-ctest --test-dir build/cpu -N -R depth_speckle_contracts
-ctest --test-dir build/cpu -R depth_speckle_contracts --output-on-failure
-```
-
-The `-N` output must list one matching test; zero tests means that the current
-checkout or CMake cache does not register the speckle contract.
+To diagnose GPU availability without ROS, compare the native and Pixi
+`vulkaninfo --summary` output and run the built `daxa_probe`. An AMD GPU in
+`vulkaninfo` is necessary but does not establish that the Daxa device was
+successfully created. `DaxaDepthConfig::required_wave_size` already defaults
+to 32; no shader changes are needed for that setting. When benchmarking FPS,
+stop competing GPU compute jobs and check utilization. The Zenoh session and
+router JSON5 configurations in `ros_ws/` explicitly disable shared memory,
+so no system-wide `ulimit -l` changes are needed for that mode.
