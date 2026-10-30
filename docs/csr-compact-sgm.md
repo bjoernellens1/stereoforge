@@ -7,23 +7,24 @@ and the recurrence accesses only admitted hypotheses.
 
 ## Layout and algorithms
 
-\`benchmarks/csr_sgm.py\` provides:
+`benchmarks/csr_sgm.py` provides:
 
-1. **\`candidate_plan\`**: union of coarse disparity windows with *independent*
+1. **`candidate_plan`**: union of coarse disparity windows with *independent*
    full-resolution sparse anchor windows. Where neither exists, it deliberately
    falls back to full disparity search. A contradictory anchor is retained as an
    alternative instead of silently overwritten.
-2. **\`pack_csr\`**: per-pixel strictly increasing disparities, offsets of length
-   \`W*H+1\`, and packed integer costs. Invalid/out-of-range costs cannot become
+2. **`pack_csr`**: per-pixel strictly increasing disparities, offsets of length
+   `W*H+1`, and packed integer costs. Invalid/out-of-range costs cannot become
    valid hypotheses.
-3. **\`csr_sgm\`**: four actual work-proportional directional recurrences using
+3. **`csr_sgm`**: four actual work-proportional directional recurrences using
    only the packed candidates and globally aligned disparity indices. Empty
    predecessor states reset the recurrence. Exact integer reference penalties
    are preserved.
-4. **\`normalized_work\`**: candidate state-update ratio relative to dense
+4. **`csr_left_right_consistency`**: symmetric correspondence checks on independently estimated left and right disparities. Out-of-bounds or disagreeing observations remain invalid.
+5. **`normalized_work`**: candidate state-update ratio relative to dense
    full-D work, **not** a GPU runtime or memory-traffic measurement.
 
-\`python/stereoforge/shaders/daxa/csr_sgm.slang\` implements the matching GPU
+`python/stereoforge/shaders/daxa/csr_sgm.slang` implements the matching GPU
 algorithm experimentally. One 64-thread workgroup follows each directional
 scanline, visiting only active CSR slots. Sorted predecessor hypotheses are
 found by binary search, predecessor minima are reduced within the workgroup,
@@ -37,12 +38,12 @@ claim an FPS improvement from the candidate-update count.
 
 ## Verification
 
-\`\`\`sh
+```sh
 uv run pytest -q tests/test_csr_sgm.py tests/test_csr_sgm_shader.py
-\`\`\`
+```
 
 The 12 randomized tests check exact parity against the existing independent
-\`compact_sgm_reference.dense_masked_sgm\` (including empty candidate sets and
+`compact_sgm_reference.dense_masked_sgm` (including empty candidate sets and
 fully dense local hypotheses). A thin foreground fixture exercises independent
 high-resolution anchor recovery; missing priors fall back to full search.
 This confirms an **algorithmic possibility**, not real-world thin-object
@@ -50,10 +51,10 @@ precision/recall.
 
 The GPU shader can be compiled separately from default production kernels:
 
-\`\`\`sh
+```sh
 cmake --preset daxa -DSTEREOFORGE_DAXA_CSR_SGM=ON
 cmake --build --preset daxa --target daxa_csr_sgm_shaders
-\`\`\`
+```
 
 Shader compilation and actual CPU↔GPU parity have **not** yet been verified on
 the local AMD device. The shader is intentionally not wired into the production
