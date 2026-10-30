@@ -2,6 +2,7 @@
 #include "stereo_estimator_metadata.hpp"
 #include <stereoforge/capture.hpp>
 #include <stereoforge/depth_rate_controller.hpp>
+#include <stereoforge/gpu_duty_budget.hpp>
 #include <stereoforge/daxa_depth.hpp>
 #include <stereoforge/daxa_dual_preprocess.hpp>
 #include <stereoforge/daxa_refinement.hpp>
@@ -54,6 +55,7 @@ struct Options {
     std::string depth_topic="/stereoforge/depth",rgb_topic="/stereoforge/rectified_rgb";
     std::string depth_rate="adaptive",rate_report;
     unsigned min_depth_fps=5,max_depth_fps=60,consumer_min_depth_fps=5,max_depth_age_ms=250,downshift_ms=3000;
+    unsigned gpu_duty_percent=100,gpu_estimate_us=8'000,gpu_burst_ms=33;
     unsigned fps=60,disparities=128,warmup=5,max_frames=100000;int device_id=-1;double duration=600,subscriber_wait=0;bool validation=false,thread_cpu_timing=false;
 };
 unsigned number(const std::string& s,unsigned lo,unsigned hi){size_t n=0;auto v=std::stoull(s,&n);if(n!=s.size()||v<lo||v>hi)throw std::invalid_argument("integer option outside bounds");return static_cast<unsigned>(v);}
@@ -71,10 +73,15 @@ DepthRateConfig depth_rate_config(const Options& o) {
     c.validate();
     return c;
 }
+GpuDutyConfig gpu_duty_config(const Options& o) {
+    GpuDutyConfig config{o.gpu_duty_percent,o.gpu_estimate_us,o.gpu_burst_ms,o.consumer_min_depth_fps};
+    config.validate();
+    return config;
+}
 Options parse(int argc,char** argv){
     Options o;
     for(int i=1;i<argc;++i){std::string a=argv[i];
-        if(a=="--help"){std::cout<<"--source camera|replay --manifest FILE --clock-map FILE --frame-id ID --run-id ID --trace FILE [--replay DIR --mode depth|rgb|depth-rgb --depth-rate 5|10|20|30|60|adaptive --min-depth-fps N --max-depth-fps N --consumer-min-depth-fps N --max-depth-age-ms N --downshift-ms N --rate-report FILE --capture-fps 15|30|60 --duration-seconds N --subscriber-wait-seconds N --max-frames N --warmup N --disparities N --stereo-variant packed-specialized|packed-specialized-overwrite --pipeline full-sgm|experimental-refinement|experimental-dual-refinement --coarse-manifest FILE --device-id N --depth-topic TOPIC --rgb-topic TOPIC --reliability best_effort|reliable --validation --thread-cpu-timing]\n";std::exit(0);}
+        if(a=="--help"){std::cout<<"--source camera|replay --manifest FILE --clock-map FILE --frame-id ID --run-id ID --trace FILE [--replay DIR --mode depth|rgb|depth-rgb --depth-rate 5|10|20|30|60|adaptive --min-depth-fps N --max-depth-fps N --consumer-min-depth-fps N --max-depth-age-ms N --downshift-ms N --rate-report FILE --gpu-duty-percent 1..100 --gpu-estimate-us N --gpu-burst-ms N --capture-fps 15|30|60 --duration-seconds N --subscriber-wait-seconds N --max-frames N --warmup N --disparities N --stereo-variant packed-specialized|packed-specialized-overwrite --pipeline full-sgm|experimental-refinement|experimental-dual-refinement --coarse-manifest FILE --device-id N --depth-topic TOPIC --rgb-topic TOPIC --reliability best_effort|reliable --validation --thread-cpu-timing]\n";std::exit(0);}
         if(a=="--validation"){o.validation=true;continue;}if(a=="--thread-cpu-timing"){o.thread_cpu_timing=true;continue;}if(i+1>=argc)throw std::invalid_argument("missing option value");std::string v=argv[++i];
         if(a=="--source")o.source=v;else if(a=="--manifest")o.manifest=v;else if(a=="--replay")o.replay=v;else if(a=="--mode")o.mode=v;
         else if(a=="--clock-map")o.map=v;else if(a=="--frame-id")o.frame=v;else if(a=="--run-id")o.run=v;else if(a=="--trace")o.trace=v;
@@ -85,6 +92,9 @@ Options parse(int argc,char** argv){
         else if(a=="--consumer-min-depth-fps")o.consumer_min_depth_fps=number(v,5,60);
         else if(a=="--max-depth-age-ms")o.max_depth_age_ms=number(v,1,10'000);
         else if(a=="--downshift-ms")o.downshift_ms=number(v,1,60'000);
+        else if(a=="--gpu-duty-percent")o.gpu_duty_percent=number(v,1,100);
+        else if(a=="--gpu-estimate-us")o.gpu_estimate_us=number(v,100,100'000);
+        else if(a=="--gpu-burst-ms")o.gpu_burst_ms=number(v,1,1'000);
         else if(a=="--stereo-variant")o.stereo_variant=v;else if(a=="--pipeline")o.pipeline_mode=v;else if(a=="--coarse-manifest")o.coarse_manifest=v;
         else if(a=="--fps"||a=="--capture-fps"){o.fps=number(v,15,60);if(o.fps!=15&&o.fps!=30&&o.fps!=60)throw std::invalid_argument("unsupported camera FPS");}else if(a=="--disparities")o.disparities=number(v,32,256);
         else if(a=="--max-frames")o.max_frames=number(v,1,200000);else if(a=="--warmup")o.warmup=number(v,0,30);
@@ -101,7 +111,7 @@ Options parse(int argc,char** argv){
        o.depth_topic.empty()||o.rgb_topic.empty()||o.depth_topic.front()!='/'||o.rgb_topic.front()!='/'||
        (o.mode=="depth-rgb"&&o.depth_topic==o.rgb_topic))throw std::invalid_argument("invalid publisher configuration");
     if(!o.rate_report.empty()&&o.rate_report==o.trace)throw std::invalid_argument("rate report must differ from ROS delivery trace");
-    depth_rate_config(o);
+    depth_rate_config(o);gpu_duty_config(o);
     return o;
 }
 std::string clock_id(){std::ifstream f("/proc/sys/kernel/random/boot_id");std::string s;std::getline(f,s);if(!f||s.size()!=36)throw std::runtime_error("boot identity unavailable");
@@ -203,6 +213,7 @@ void run(const Options& o, OutputFile& file){
     RosDeliveryTrace trace(size_t(o.max_frames)*(unsigned(depth)+unsigned(rgb))+2);std::array<Pending,2> pending{};Counters counters{};
     DepthRateController rate_controller(depth_rate_config(o));
     YuyvSceneMonitor scene_monitor;
+    GpuDutyBudget gpu_budget(gpu_duty_config(o));
     json outputs=json::object();if(depth)outputs["depth"]=output_descriptor(o.depth_topic,maps.width,maps.height,"32FC1",o.frame);if(rgb)outputs["rgb"]=output_descriptor(o.rgb_topic,maps.width,maps.height,"rgba8",o.frame);
     json qos={{"history","keep_last"},{"depth",1},{"reliability",o.reliability},{"durability","volatile"}};
     auto memory=exporter->memory();auto baseline=capture->metrics();
@@ -218,7 +229,8 @@ void run(const Options& o, OutputFile& file){
         {"settings",{{"mode",o.mode},{"depth_rate",o.depth_rate},{"capture_fps",o.fps},
             {"min_depth_fps",o.min_depth_fps},{"max_depth_fps",o.max_depth_fps},
             {"consumer_min_depth_fps",o.consumer_min_depth_fps},{"max_depth_age_ms",o.max_depth_age_ms},
-            {"downshift_ms",o.downshift_ms},{"pipeline",o.pipeline_mode},{"coarse_manifest_sha256",experimental?daxa_preprocess_file_sha256(o.coarse_manifest):"not_executed"},{"stereo_variant",depth?DaxaStereo::variant_name(depth_config.stereo_variant):"not_executed"},{"effective_estimator",estimator},{"validation_requested",o.validation},{"subscriber_wait_seconds",o.subscriber_wait},
+            {"downshift_ms",o.downshift_ms},{"gpu_duty_percent",o.gpu_duty_percent},
+            {"gpu_estimate_us",o.gpu_estimate_us},{"gpu_burst_ms",o.gpu_burst_ms},{"pipeline",o.pipeline_mode},{"coarse_manifest_sha256",experimental?daxa_preprocess_file_sha256(o.coarse_manifest):"not_executed"},{"stereo_variant",depth?DaxaStereo::variant_name(depth_config.stereo_variant):"not_executed"},{"effective_estimator",estimator},{"validation_requested",o.validation},{"subscriber_wait_seconds",o.subscriber_wait},
             {"reference_capture_sha256",fixture.capture_sha256},{"reference_record_ordinal",fixture.record_ordinal},
             {"calibration_manifest_sha256",daxa_preprocess_file_sha256(o.manifest)},
             {"original_calibration_identity",maps.original_identity},{"rectified_calibration_identity",maps.rectified_identity}}}};
@@ -249,6 +261,17 @@ void run(const Options& o, OutputFile& file){
         auto producer_ready=depth?(experimental?p.refined.ready():p.depth.ready()):p.rgb.ready();if(producer_ready&&!p.producer_observed)p.producer_observed=now_ns<steady>();
         if(drain)p.output.wait();else if(!p.output.ready())return;
         auto copy_observed=now_ns<steady>();if(!p.producer_observed)p.producer_observed=copy_observed;
+        if(depth){
+            double measured_gpu_ms=std::numeric_limits<double>::quiet_NaN();
+            // Only full-SGM has a complete native upload-through-metric timestamp.
+            // Experimental coarse/refinement uses separately timed producers: keep
+            // the explicitly configured estimate until whole-queue timing exists.
+            if(!experimental){
+                const auto timings=p.depth.timings();
+                if(timings.combined_gpu_timing_available)measured_gpu_ms=timings.combined_gpu_ms;
+            }
+            gpu_budget.complete(p.capture->frame_id,measured_gpu_ms);
+        }
         auto pending_count=count_pending();auto queued=capture->metrics().queued_frames;
         auto emit=[&](RosDeliveryOutput which,sensor_msgs::msg::Image& image,const rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr& publisher){
             if(trace.records().size()>=trace.event_capacity()-2){RosDeliveryTraceRecord unused{};trace.append(unused);trace_full=true;return;}
@@ -298,6 +321,9 @@ void run(const Options& o, OutputFile& file){
                 if(o.depth_rate=="adaptive")
                     activity=scene_monitor.observe(f->packed_yuyv,f->source_width,f->height,f->stride_bytes);
                 if(!rate_controller.observe(f->camera_timestamp_ns,activity).due)continue;
+                if(!gpu_budget.may_admit(f->camera_timestamp_ns)){
+                    rate_controller.reject_budget();continue;
+                }
             }
             auto index=std::find_if(pending.begin(),pending.end(),[](auto const& p){return !p.output;});
             if(index==pending.end()){if(depth)rate_controller.reject_busy();++counters.ring_drops;continue;}
@@ -308,6 +334,7 @@ void run(const Options& o, OutputFile& file){
             else{index->rgb=preprocess->enqueue(f);index->producer_enqueue_end=now_ns<steady>();index->output=exporter->enqueue(index->rgb);}
             index->export_enqueue_end=now_ns<steady>();++counters.admitted;
             if(depth){
+                gpu_budget.reserve(f->frame_id,f->camera_timestamp_ns);
                 rate_controller.admitted(f->camera_timestamp_ns);
                 if(o.depth_rate=="adaptive")scene_monitor.depth_admitted();
             }
@@ -330,7 +357,8 @@ void run(const Options& o, OutputFile& file){
         const auto& stats=rate_controller.stats();
         std::cerr<<"Depth rate "<<o.depth_rate<<": observed="<<stats.observed
                  <<" admitted="<<stats.admitted<<" rate_skips="<<stats.intentional_skips
-                 <<" slot_rejections="<<stats.slot_rejections<<" final_fps="<<stats.effective_fps<<'\n';
+                 <<" slot_rejections="<<stats.slot_rejections<<" budget_skips="<<stats.budget_rejections
+                 <<" final_fps="<<stats.effective_fps<<'\n';
         if(!o.rate_report.empty()){
             OutputFile report(o.rate_report);
             report.reset();
@@ -341,6 +369,15 @@ void run(const Options& o, OutputFile& file){
                 {"max_depth_age_ms",o.max_depth_age_ms},{"downshift_ms",o.downshift_ms},
                 {"observed",stats.observed},{"admitted",stats.admitted},
                 {"intentional_skips",stats.intentional_skips},{"slot_rejections",stats.slot_rejections},
+                {"budget_rejections",stats.budget_rejections},
+                {"gpu_budget",{{"percent",o.gpu_duty_percent},{"initial_estimate_us",o.gpu_estimate_us},
+                    {"burst_ms",o.gpu_burst_ms},{"reservations",gpu_budget.stats().reservations},
+                    {"denials",gpu_budget.stats().denials},{"completions",gpu_budget.stats().completions},
+                    {"missing_timings",gpu_budget.stats().missing_timings},
+                    {"charged_gpu_ns",gpu_budget.stats().charged_gpu_ns},
+                    {"final_estimate_us",gpu_budget.stats().estimated_cost_us},
+                    {"max_estimated_debt_ns",gpu_budget.stats().max_estimated_debt_ns},
+                    {"timing_scope",experimental?"configured_cost_estimate_only":"upload_through_metric_no_host_export"}}},
                 {"upshifts",stats.upshifts},{"downshifts",stats.downshifts},
                 {"unavailable_motion",stats.unavailable_motion},{"final_target_fps",stats.effective_fps},
                 {"published_depth",window_counters.published_depth},
