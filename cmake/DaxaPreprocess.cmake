@@ -26,6 +26,21 @@ foreach(entry decode_yuyv rectify_gray)
   list(APPEND sf_preprocess_spirv "${output}")
 endforeach()
 add_custom_target(daxa_preprocess_shaders DEPENDS ${sf_preprocess_spirv})
+option(STEREOFORGE_DAXA_CSR_SGM "Compile experimental CSR sparse SGM GPU kernels" OFF)
+if(STEREOFORGE_DAXA_CSR_SGM)
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS shaders/daxa/csr_sgm.slang)
+  set(sf_csr_spirv)
+  foreach(entry scan_path sum_paths)
+    set(output "${CMAKE_CURRENT_BINARY_DIR}/daxa-csr-sgm-${entry}.spv")
+    add_custom_command(OUTPUT "${output}"
+      COMMAND "${SF_DAXA_SLANGC}" "${CMAKE_CURRENT_SOURCE_DIR}/shaders/daxa/csr_sgm.slang"
+        -target spirv -profile spirv_1_5 -restrictive-capability-check -matrix-layout-row-major
+        -fvk-use-scalar-layout -O3 -entry "${entry}" -stage compute -o "${output}"
+      DEPENDS shaders/daxa/csr_sgm.slang VERBATIM)
+    list(APPEND sf_csr_spirv "${output}")
+  endforeach()
+  add_custom_target(daxa_csr_sgm_shaders DEPENDS ${sf_csr_spirv})
+endif()
 add_library(stereoforge_daxa_calibration src/daxa_calibration.cpp)
 target_link_libraries(stereoforge_daxa_calibration PUBLIC stereoforge_contracts)
 add_library(stereoforge_daxa_preprocess src/daxa_preprocess.cpp)
