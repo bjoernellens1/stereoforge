@@ -253,6 +253,8 @@ def evaluate(config: dict, records: list[dict]) -> dict:
 
 def run(config: dict, root: Path, output: Path) -> dict:
     validate_config(config)
+    root = root.resolve()
+    output = output.resolve()  # Report argv must be absolute when child cwd differs.
     output.mkdir(parents=True, exist_ok=False)
     (output / "input-config.json").write_text(json.dumps(config, indent=2) + "\n")
     records = []
