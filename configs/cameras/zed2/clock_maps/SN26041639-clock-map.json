@@ -1,0 +1,7 @@
+{
+  "source_clock": "zed_open_capture_video_unvalidated",
+  "offset_ns": 0,
+  "valid_from_ns": 1,
+  "valid_until_ns": 2000000000000000000,
+  "max_error_ns": 1000000000
+}
