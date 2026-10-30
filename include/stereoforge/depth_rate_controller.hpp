@@ -44,7 +44,7 @@ struct DepthRateConfig {
 };
 
 struct DepthRateStats {
-    std::uint64_t observed = 0, admitted = 0, intentional_skips = 0, slot_rejections = 0;
+    std::uint64_t observed = 0, admitted = 0, intentional_skips = 0, slot_rejections = 0, budget_rejections = 0;
     std::uint64_t upshifts = 0, downshifts = 0, unavailable_motion = 0;
     std::uint32_t effective_fps = 60;
 };
@@ -126,6 +126,11 @@ public:
         if (!pending_due_) throw std::logic_error("cannot reject a non-due depth frame");
         pending_due_ = false;
         ++stats_.slot_rejections;
+    }
+    void reject_budget() {
+        if (!pending_due_) throw std::logic_error("cannot budget-reject a non-due depth frame");
+        pending_due_ = false;
+        ++stats_.budget_rejections;
     }
     const DepthRateStats& stats() const noexcept { return stats_; }
     std::uint64_t last_admitted_ns() const noexcept { return last_admitted_ns_; }
