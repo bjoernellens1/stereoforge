@@ -50,8 +50,14 @@ repository fixtures:
 - Fixture manifest: `configs/cameras/zed2/fixtures/SN26041639-fixture/manifest.json`
 - Clock map: `configs/cameras/zed2/clock_maps/SN26041639-clock-map.json`
 
-For ROS 2 launch, a measured `clock-map.json` is required; factory calibration
-does not provide that source-clock-to-ROS mapping.
+For timestamp-qualified ROS 2 launch, a measured `clock-map.json` is required; factory calibration
+does not provide that source-clock-to-ROS mapping. The tracked `SN26041639-clock-map.json`
+is explicitly **unvalidated** (`source_clock=zed_open_capture_video_unvalidated`,
+`offset_ns=0`, broad validity range and `max_error_ns=1000000000`). It is a
+provisional development configuration and **not evidence of accurate capture
+timestamps or cross-sensor synchronization**. Do not use it for timestamp-sensitive
+recording, multi-camera fusion, or benchmarking until clock provenance, offset,
+validity and error bounds have been measured for the active capture run.
 
 ### Launching with Repository Fixtures
 
