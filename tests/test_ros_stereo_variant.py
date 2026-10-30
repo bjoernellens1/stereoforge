@@ -16,7 +16,8 @@ def test_ros_variant_parser_executable(tmp_path):
 int main(int argc,char** argv){try{auto o=parse(argc,argv);std::cout<<o.stereo_variant;return 0;}catch(const std::exception&){return 2;}}
 '''
     path=tmp_path/'parser.cpp';path.write_text(cpp);exe=tmp_path/'parser'
-    subprocess.run([compiler,'-std=c++20','-I',str(ROOT/'include'),str(path),'-o',str(exe)],check=True,capture_output=True,text=True)
+    compiled=subprocess.run([compiler,'-std=c++20','-I',str(ROOT/'include'),str(path),'-o',str(exe)],capture_output=True,text=True)
+    assert compiled.returncode==0, compiled.stderr
     args=['--source','camera','--manifest','x','--clock-map','x','--frame-id','x','--run-id','x','--trace','x']
     for extra, expected, status in [([], 'packed-specialized',0),(['--stereo-variant','packed-specialized-overwrite'],'packed-specialized-overwrite',0),(['--stereo-variant','bad'],'',2)]:
         result=subprocess.run([str(exe),*args,*extra],capture_output=True,text=True)
