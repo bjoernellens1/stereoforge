@@ -23,9 +23,15 @@ pixi run -m ros_ws env CC=/usr/bin/gcc CXX=/usr/bin/g++ \
 pixi run -m ros_ws cmake --build "$build" --target stereoforge_ros2_depth_publisher -j "${STEREOFORGE_BUILD_JOBS:-8}"
 pub="$build/stereoforge_ros2_depth_publisher"
 test -x "$pub" || { echo "Publisher was not generated: $pub" >&2; exit 1; }
-if ldd "$pub" | grep -q 'not found'; then
+# ROS/Conda dependency graph must be checked in its installed runtime.
+# The ELF RUNPATH alone does not propagate to dependencies of dependencies.
+if ! pixi run -m ros_ws env LD_LIBRARY_PATH="$pixi_lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" ldd "$pub" > "$build/ros-publisher-ldd.txt"; then
+  echo "Runtime dependency inspection failed" >&2
+  exit 1
+fi
+if grep -q 'not found' "$build/ros-publisher-ldd.txt"; then
   echo "Unresolved runtime libraries:" >&2
-  ldd "$pub" | grep 'not found' >&2
+  grep 'not found' "$build/ros-publisher-ldd.txt" >&2
   exit 1
 fi
 "$pub" --help >/dev/null
