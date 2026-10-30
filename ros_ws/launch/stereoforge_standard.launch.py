@@ -10,9 +10,12 @@ from launch.substitutions import LaunchConfiguration
 _OPTIONAL_VALUE_ARGUMENTS = (
     ("mode", "--mode"),
     ("stereo_variant", "--stereo-variant"),
+    ("disparities", "--disparities"),
     ("pipeline", "--pipeline"),
     ("coarse_manifest", "--coarse-manifest"),
     ("reliability", "--reliability"),
+    ("device_serial", "--device-serial"),
+    ("device_id", "--device-id"),
 )
 
 
@@ -69,25 +72,34 @@ def _launch_standard(context):
         if values[name]:
             publisher.extend([option, values[name]])
 
-    environment = {"RMW_IMPLEMENTATION": "rmw_zenoh_cpp"}
+    publisher_env = {
+        "RMW_IMPLEMENTATION": "rmw_zenoh_cpp",
+        "ZENOH_SESSION_CONFIG_URI": str(repo_root / "ros_ws" / "zenoh_shm_session.json5"),
+        "ZENOH_ROUTER_CONFIG_URI": str(repo_root / "ros_ws" / "zenoh_shm_router.json5"),
+    }
     if values["zenoh_router_config"]:
-        environment["ZENOH_ROUTER_CONFIG_URI"] = values["zenoh_router_config"]
+        publisher_env["ZENOH_ROUTER_CONFIG_URI"] = values["zenoh_router_config"]
     if values["zenoh_session_config"]:
-        environment["ZENOH_SESSION_CONFIG_URI"] = values["zenoh_session_config"]
+        publisher_env["ZENOH_SESSION_CONFIG_URI"] = values["zenoh_session_config"]
+
+    rviz_env = dict(publisher_env)
+    rviz_env["LIBGL_DRIVERS_PATH"] = "/usr/lib64/dri"
+    rviz_env["LD_PRELOAD"] = "/usr/lib64/libdrm.so.2:/usr/lib64/libdrm_amdgpu.so.1"
+
     return [
         ExecuteProcess(
             cmd=[str(repo_root / "scripts" / "stereoforge-ros"), "router"],
-            additional_env=environment,
+            additional_env=publisher_env,
             output="screen",
         ),
         ExecuteProcess(
             cmd=publisher,
-            additional_env=environment,
+            additional_env=publisher_env,
             output="screen",
         ),
         ExecuteProcess(
             cmd=["rviz2", "-d", values["rviz_config"]],
-            additional_env=environment,
+            additional_env=rviz_env,
             output="screen",
         ),
     ]
@@ -126,6 +138,11 @@ def generate_launch_description():
             choices=["packed-specialized", "packed-specialized-overwrite"],
         ),
         DeclareLaunchArgument(
+            "disparities",
+            default_value="256",
+            description="Stereo disparity search range (e.g. 128 or 256).",
+        ),
+        DeclareLaunchArgument(
             "pipeline",
             default_value="full-sgm",
             choices=["full-sgm", "experimental-refinement", "experimental-dual-refinement"],
@@ -139,6 +156,16 @@ def generate_launch_description():
             "reliability",
             default_value="best_effort",
             choices=["best_effort", "reliable"],
+        ),
+        DeclareLaunchArgument(
+            "device_serial",
+            default_value="",
+            description="Explicit camera serial override (e.g. 26041639).",
+        ),
+        DeclareLaunchArgument(
+            "device_id",
+            default_value="-1",
+            description="Camera video device ID (-1 to scan).",
         ),
         DeclareLaunchArgument(
             "zenoh_router_config",

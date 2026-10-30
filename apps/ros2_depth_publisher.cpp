@@ -265,7 +265,17 @@ void run(const Options& o, OutputFile& file){
             bool cpu_ok=true;
             r.copy_begin_ns=now_ns<steady>();
             if(o.thread_cpu_timing)cpu_ok &= thread_cpu_now(r.thread_cpu_copy_begin_ns);
-            std::memcpy(image.data.data(),bytes.data(),bytes.size());
+            if(which==RosDeliveryOutput::Depth){
+                const float* src=reinterpret_cast<const float*>(bytes.data());
+                float* dst=reinterpret_cast<float*>(image.data.data());
+                const size_t count=bytes.size()/sizeof(float);
+                for(size_t i=0;i<count;++i){
+                    float val=src[i];
+                    dst[i]=std::isnan(val)?0.0f:val;
+                }
+            }else{
+                std::memcpy(image.data.data(),bytes.data(),bytes.size());
+            }
             if(o.thread_cpu_timing)cpu_ok &= thread_cpu_now(r.thread_cpu_copy_end_ns);
             r.copy_end_ns=now_ns<steady>();
             r.publish_begin_ns=now_ns<steady>();
