@@ -1,6 +1,7 @@
 // Native capture -> Daxa -> selective host export -> ROS. No Python/SDK path.
 #include "stereo_estimator_metadata.hpp"
 #include <stereoforge/capture.hpp>
+#include <stereoforge/depth_rate_controller.hpp>
 #include <stereoforge/daxa_depth.hpp>
 #include <stereoforge/daxa_dual_preprocess.hpp>
 #include <stereoforge/daxa_refinement.hpp>
@@ -51,19 +52,41 @@ struct Options {
     std::string source,manifest,replay,mode="depth",map,frame,run,trace,reliability="best_effort",stereo_variant="packed-specialized";
     std::string pipeline_mode="full-sgm",coarse_manifest;
     std::string depth_topic="/stereoforge/depth",rgb_topic="/stereoforge/rectified_rgb";
+    std::string depth_rate="adaptive",rate_report;
+    unsigned min_depth_fps=5,max_depth_fps=60,consumer_min_depth_fps=5,max_depth_age_ms=250,downshift_ms=3000;
     unsigned fps=60,disparities=128,warmup=5,max_frames=100000;int device_id=-1;double duration=600,subscriber_wait=0;bool validation=false,thread_cpu_timing=false;
 };
 unsigned number(const std::string& s,unsigned lo,unsigned hi){size_t n=0;auto v=std::stoull(s,&n);if(n!=s.size()||v<lo||v>hi)throw std::invalid_argument("integer option outside bounds");return static_cast<unsigned>(v);}
+DepthRateConfig depth_rate_config(const Options& o) {
+    DepthRateConfig c;
+    c.mode=o.depth_rate=="adaptive"?DepthRateMode::Adaptive:DepthRateMode::Fixed;
+    if(c.mode==DepthRateMode::Fixed) {
+        c.fixed_fps=number(o.depth_rate,5,60);
+        if(!supported_depth_rate(c.fixed_fps))throw std::invalid_argument("unsupported fixed depth rate");
+    }
+    c.capture_fps=o.fps;c.min_fps=o.min_depth_fps;c.max_fps=o.max_depth_fps;
+    c.consumer_min_fps=o.consumer_min_depth_fps;
+    c.max_depth_age_ns=std::uint64_t(o.max_depth_age_ms)*1'000'000ull;
+    c.downshift_dwell_ns=std::uint64_t(o.downshift_ms)*1'000'000ull;
+    c.validate();
+    return c;
+}
 Options parse(int argc,char** argv){
     Options o;
     for(int i=1;i<argc;++i){std::string a=argv[i];
-        if(a=="--help"){std::cout<<"--source camera|replay --manifest FILE --clock-map FILE --frame-id ID --run-id ID --trace FILE [--replay DIR --mode depth|rgb|depth-rgb --duration-seconds N --subscriber-wait-seconds N --max-frames N --warmup N --disparities N --stereo-variant packed-specialized|packed-specialized-overwrite --pipeline full-sgm|experimental-refinement|experimental-dual-refinement --coarse-manifest FILE --device-id N --depth-topic TOPIC --rgb-topic TOPIC --reliability best_effort|reliable --validation --thread-cpu-timing]\n";std::exit(0);}
+        if(a=="--help"){std::cout<<"--source camera|replay --manifest FILE --clock-map FILE --frame-id ID --run-id ID --trace FILE [--replay DIR --mode depth|rgb|depth-rgb --depth-rate 5|10|20|30|60|adaptive --min-depth-fps N --max-depth-fps N --consumer-min-depth-fps N --max-depth-age-ms N --downshift-ms N --rate-report FILE --capture-fps 15|30|60 --duration-seconds N --subscriber-wait-seconds N --max-frames N --warmup N --disparities N --stereo-variant packed-specialized|packed-specialized-overwrite --pipeline full-sgm|experimental-refinement|experimental-dual-refinement --coarse-manifest FILE --device-id N --depth-topic TOPIC --rgb-topic TOPIC --reliability best_effort|reliable --validation --thread-cpu-timing]\n";std::exit(0);}
         if(a=="--validation"){o.validation=true;continue;}if(a=="--thread-cpu-timing"){o.thread_cpu_timing=true;continue;}if(i+1>=argc)throw std::invalid_argument("missing option value");std::string v=argv[++i];
         if(a=="--source")o.source=v;else if(a=="--manifest")o.manifest=v;else if(a=="--replay")o.replay=v;else if(a=="--mode")o.mode=v;
         else if(a=="--clock-map")o.map=v;else if(a=="--frame-id")o.frame=v;else if(a=="--run-id")o.run=v;else if(a=="--trace")o.trace=v;
         else if(a=="--depth-topic")o.depth_topic=v;else if(a=="--rgb-topic")o.rgb_topic=v;else if(a=="--reliability")o.reliability=v;
+        else if(a=="--depth-rate")o.depth_rate=v;else if(a=="--rate-report")o.rate_report=v;
+        else if(a=="--min-depth-fps")o.min_depth_fps=number(v,5,60);
+        else if(a=="--max-depth-fps")o.max_depth_fps=number(v,5,60);
+        else if(a=="--consumer-min-depth-fps")o.consumer_min_depth_fps=number(v,5,60);
+        else if(a=="--max-depth-age-ms")o.max_depth_age_ms=number(v,1,10'000);
+        else if(a=="--downshift-ms")o.downshift_ms=number(v,1,60'000);
         else if(a=="--stereo-variant")o.stereo_variant=v;else if(a=="--pipeline")o.pipeline_mode=v;else if(a=="--coarse-manifest")o.coarse_manifest=v;
-        else if(a=="--fps")o.fps=number(v,60,60);else if(a=="--disparities")o.disparities=number(v,32,256);
+        else if(a=="--fps"||a=="--capture-fps"){o.fps=number(v,15,60);if(o.fps!=15&&o.fps!=30&&o.fps!=60)throw std::invalid_argument("unsupported camera FPS");}else if(a=="--disparities")o.disparities=number(v,32,256);
         else if(a=="--max-frames")o.max_frames=number(v,1,200000);else if(a=="--warmup")o.warmup=number(v,0,30);
         else if(a=="--device-id"){if(v=="-1")o.device_id=-1;else o.device_id=static_cast<int>(number(v,0,255));}
         else if(a=="--duration-seconds"){size_t n=0;o.duration=std::stod(v,&n);if(n!=v.size()||!std::isfinite(o.duration)||o.duration<=0||o.duration>3600)throw std::invalid_argument("invalid duration");}
@@ -77,6 +100,8 @@ Options parse(int argc,char** argv){
        ((o.pipeline_mode!="full-sgm")!=!o.coarse_manifest.empty())||(o.pipeline_mode!="full-sgm"&&(o.mode=="rgb"||o.disparities%2!=0))||(o.stereo_variant!="packed-specialized"&&o.stereo_variant!="packed-specialized-overwrite")||(o.reliability!="best_effort"&&o.reliability!="reliable")||
        o.depth_topic.empty()||o.rgb_topic.empty()||o.depth_topic.front()!='/'||o.rgb_topic.front()!='/'||
        (o.mode=="depth-rgb"&&o.depth_topic==o.rgb_topic))throw std::invalid_argument("invalid publisher configuration");
+    if(!o.rate_report.empty()&&o.rate_report==o.trace)throw std::invalid_argument("rate report must differ from ROS delivery trace");
+    depth_rate_config(o);
     return o;
 }
 std::string clock_id(){std::ifstream f("/proc/sys/kernel/random/boot_id");std::string s;std::getline(f,s);if(!f||s.size()!=36)throw std::runtime_error("boot identity unavailable");
@@ -176,6 +201,8 @@ void run(const Options& o, OutputFile& file){
         if(depth){DaxaDualPreprocess::Frame pair;DaxaDepthPipeline::Frame d;DaxaFrame full;DaxaRefinement::Frame refined;if(dual){pair=dual_preprocess->enqueue(f);d=pipeline->enqueue_preprocessed(pair.coarse);full=pair.full;}else{d=pipeline->enqueue(f);if(experimental)full=full_preprocess->enqueue(f);}if(experimental){refined=refinement->process(d,full);}auto h=exporter->enqueue(experimental?refined.observations():d.observations());h.wait();h={};refined={};full={};d={};pair={};exporter->collect();if(experimental){refinement->collect();if(!dual)full_preprocess->collect_completed_sources();}pipeline->collect();if(dual)dual_preprocess->collect();}
         else{auto p=preprocess->enqueue(f);auto h=exporter->enqueue(p);h.wait();h={};p={};exporter->collect();preprocess->collect_completed_sources();}++i;}
     RosDeliveryTrace trace(size_t(o.max_frames)*(unsigned(depth)+unsigned(rgb))+2);std::array<Pending,2> pending{};Counters counters{};
+    DepthRateController rate_controller(depth_rate_config(o));
+    YuyvSceneMonitor scene_monitor;
     json outputs=json::object();if(depth)outputs["depth"]=output_descriptor(o.depth_topic,maps.width,maps.height,"32FC1",o.frame);if(rgb)outputs["rgb"]=output_descriptor(o.rgb_topic,maps.width,maps.height,"rgba8",o.frame);
     json qos={{"history","keep_last"},{"depth",1},{"reliability",o.reliability},{"durability","volatile"}};
     auto memory=exporter->memory();auto baseline=capture->metrics();
@@ -188,7 +215,10 @@ void run(const Options& o, OutputFile& file){
     json implementation={{"name","StereoForge"},{"version","native_ros_yuyv_v1"},
         {"commit",{{"status","unavailable"},{"reason","build commit is not attested"}}},
         {"device",{{"status","available"},{"value",json::parse(context->report())}}},
-        {"settings",{{"mode",o.mode},{"pipeline",o.pipeline_mode},{"coarse_manifest_sha256",experimental?daxa_preprocess_file_sha256(o.coarse_manifest):"not_executed"},{"stereo_variant",depth?DaxaStereo::variant_name(depth_config.stereo_variant):"not_executed"},{"effective_estimator",estimator},{"validation_requested",o.validation},{"subscriber_wait_seconds",o.subscriber_wait},
+        {"settings",{{"mode",o.mode},{"depth_rate",o.depth_rate},{"capture_fps",o.fps},
+            {"min_depth_fps",o.min_depth_fps},{"max_depth_fps",o.max_depth_fps},
+            {"consumer_min_depth_fps",o.consumer_min_depth_fps},{"max_depth_age_ms",o.max_depth_age_ms},
+            {"downshift_ms",o.downshift_ms},{"pipeline",o.pipeline_mode},{"coarse_manifest_sha256",experimental?daxa_preprocess_file_sha256(o.coarse_manifest):"not_executed"},{"stereo_variant",depth?DaxaStereo::variant_name(depth_config.stereo_variant):"not_executed"},{"effective_estimator",estimator},{"validation_requested",o.validation},{"subscriber_wait_seconds",o.subscriber_wait},
             {"reference_capture_sha256",fixture.capture_sha256},{"reference_record_ordinal",fixture.record_ordinal},
             {"calibration_manifest_sha256",daxa_preprocess_file_sha256(o.manifest)},
             {"original_calibration_identity",maps.original_identity},{"rectified_calibration_identity",maps.rectified_identity}}}};
@@ -262,14 +292,25 @@ void run(const Options& o, OutputFile& file){
             // Count read poll timeouts, not camera frame loss; source_timeouts are tracked separately.
             auto capture_wait=count_pending()?std::chrono::milliseconds(1):std::chrono::milliseconds(5);
             auto f=capture->read(capture_wait);if(!f){++counters.timeouts;if(!capture->metrics().running){reason="eof";break;}continue;}++counters.read;
-            auto index=std::find_if(pending.begin(),pending.end(),[](auto const& p){return !p.output;});if(index==pending.end()){++counters.ring_drops;continue;}
             RosCaptureStamp stamp;if(!valid_source(f,stamp)){++counters.identity_rejects;continue;}
+            if(depth){
+                std::optional<float> activity;
+                if(o.depth_rate=="adaptive")
+                    activity=scene_monitor.observe(f->packed_yuyv,f->source_width,f->height,f->stride_bytes);
+                if(!rate_controller.observe(f->camera_timestamp_ns,activity).due)continue;
+            }
+            auto index=std::find_if(pending.begin(),pending.end(),[](auto const& p){return !p.output;});
+            if(index==pending.end()){if(depth)rate_controller.reject_busy();++counters.ring_drops;continue;}
             index->capture=f;index->stamp=stamp;index->producer_observed=0;
             index->producer_enqueue_begin=now_ns<steady>();
             if(depth&&dual){auto pair=dual_preprocess->enqueue(f);index->depth=pipeline->enqueue_preprocessed(pair.coarse);index->full=pair.full;index->refined=refinement->process(index->depth,index->full);index->producer_enqueue_end=now_ns<steady>();index->output=exporter->enqueue(index->refined.observations());}
             else if(depth){index->depth=pipeline->enqueue(f);if(experimental){index->full=full_preprocess->enqueue(f);index->refined=refinement->process(index->depth,index->full);}index->producer_enqueue_end=now_ns<steady>();index->output=exporter->enqueue(experimental?index->refined.observations():index->depth.observations());}
             else{index->rgb=preprocess->enqueue(f);index->producer_enqueue_end=now_ns<steady>();index->output=exporter->enqueue(index->rgb);}
             index->export_enqueue_end=now_ns<steady>();++counters.admitted;
+            if(depth){
+                rate_controller.admitted(f->camera_timestamp_ns);
+                if(o.depth_rate=="adaptive")scene_monitor.depth_admitted();
+            }
         }
         if(trace_full)reason="trace_full";else if(!rclcpp::ok())reason="shutdown";
     }catch(const std::exception& e){reason="error";failure=e.what();}
@@ -285,6 +326,28 @@ void run(const Options& o, OutputFile& file){
         {"reason",reason},{"counters",counters_json(window_counters)},{"capture_counters",capture_json(window_capture)},{"queued",window_capture.queued_frames},
         {"pending",window_pending},{"trace_drops",trace.dropped()},{"drain_ns",drain_end-drain_begin}};
     file.reset();file.put("[");file.put(begin.dump());for(auto const& r:trace.records()){file.put(",");file.put(ros_delivery_event_json(r,o.run,"publisher",config).dump());}file.put(",");file.put(end.dump());file.put("]\n");file.complete=true;
+    if(depth){
+        const auto& stats=rate_controller.stats();
+        std::cerr<<"Depth rate "<<o.depth_rate<<": observed="<<stats.observed
+                 <<" admitted="<<stats.admitted<<" rate_skips="<<stats.intentional_skips
+                 <<" slot_rejections="<<stats.slot_rejections<<" final_fps="<<stats.effective_fps<<'\n';
+        if(!o.rate_report.empty()){
+            OutputFile report(o.rate_report);
+            report.reset();
+            report.put(json({{"schema","stereoforge.depth_rate_report.v1"},
+                {"source",o.source},{"clock_basis","source_camera_timestamp_ns_unvalidated_host_mapping"},
+                {"mode",o.depth_rate},{"capture_fps",o.fps},{"min_fps",o.min_depth_fps},
+                {"max_fps",o.max_depth_fps},{"consumer_min_fps",o.consumer_min_depth_fps},
+                {"max_depth_age_ms",o.max_depth_age_ms},{"downshift_ms",o.downshift_ms},
+                {"observed",stats.observed},{"admitted",stats.admitted},
+                {"intentional_skips",stats.intentional_skips},{"slot_rejections",stats.slot_rejections},
+                {"upshifts",stats.upshifts},{"downshifts",stats.downshifts},
+                {"unavailable_motion",stats.unavailable_motion},{"final_target_fps",stats.effective_fps},
+                {"published_depth",window_counters.published_depth},
+                {"published_rgb",window_counters.published_rgb}}).dump()+"\n");
+            report.complete=true;
+        }
+    }
     if(!failure.empty()||reason=="trace_full")throw std::runtime_error("publisher stopped: "+reason+" "+failure);
 }
 }
