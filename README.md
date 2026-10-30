@@ -14,6 +14,15 @@ and the [implementation ledger](docs/implementation-status.md) for exact boundar
 
 See the [Daxa + Slang production plan](docs/superpowers/plans/2026-10-27-daxa-slang-production.md) for the proposed migration, qualification gates and current implementation boundary.
 
+## Experimental shared feature atlas
+
+A portable Slang compute kernel and matching allocation-free C++ reference
+calculate reusable 24-bit Census, Sobel gradients, texture evidence and 5x5
+support validity from two resident rectified image planes. Offline GPU shader
+compilation is opt-in; its typed GPU producer and SGM/refinement consumers
+still require integration and real parity/performance testing.
+See [feature atlas contract and qualification](docs/feature-atlas.md).
+
 ## Setup
 
 Requires Python 3.11+, uv, CMake 3.24+, Ninja, a C++20 compiler, and a working

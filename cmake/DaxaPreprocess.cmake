@@ -26,6 +26,20 @@ foreach(entry decode_yuyv rectify_gray)
   list(APPEND sf_preprocess_spirv "${output}")
 endforeach()
 add_custom_target(daxa_preprocess_shaders DEPENDS ${sf_preprocess_spirv})
+# Opt-in GPU atlas compiler fixture; this does not silently add new work to the
+# frozen 720p stereo graph. A typed Daxa producer/consumer is a separate gate.
+option(STEREOFORGE_DAXA_FEATURE_ATLAS "Compile experimental GPU feature atlas" OFF)
+if(STEREOFORGE_DAXA_FEATURE_ATLAS)
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    shaders/daxa/feature_atlas.slang shaders/ops/feature_atlas.slang)
+  set(output "${CMAKE_CURRENT_BINARY_DIR}/daxa-feature-atlas.spv")
+  add_custom_command(OUTPUT "${output}"
+    COMMAND "${SF_DAXA_SLANGC}" "${CMAKE_CURRENT_SOURCE_DIR}/shaders/daxa/feature_atlas.slang"
+      -target spirv -profile spirv_1_5 -restrictive-capability-check -matrix-layout-row-major
+      -fvk-use-scalar-layout -O3 -entry feature_atlas -stage compute -o "${output}"
+    DEPENDS shaders/daxa/feature_atlas.slang shaders/ops/feature_atlas.slang VERBATIM)
+  add_custom_target(daxa_feature_atlas_shader DEPENDS "${output}")
+endif()
 add_library(stereoforge_daxa_calibration src/daxa_calibration.cpp)
 target_link_libraries(stereoforge_daxa_calibration PUBLIC stereoforge_contracts)
 add_library(stereoforge_daxa_preprocess src/daxa_preprocess.cpp)
