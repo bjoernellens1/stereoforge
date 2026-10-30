@@ -107,7 +107,7 @@ def _launch(spec: dict, root: Path, directory: Path, name: str) -> dict:
             "stdout": stdout, "stderr": stderr, "argv": argv, "spec": spec}
 
 
-def _finish(job: dict, timeout_seconds: int) -> dict:
+def _finish(job: dict, timeout_seconds: int, *, observed_exit_ns: int | None = None) -> dict:
     process = job["process"]
     try:
         status = process.wait(timeout_seconds)
@@ -118,7 +118,9 @@ def _finish(job: dict, timeout_seconds: int) -> dict:
     finally:
         job["stdout"].close()
         job["stderr"].close()
-    finished = time.monotonic_ns()
+    # For concurrent runs this is captured when the child's exit was observed,
+    # rather than when its sequential wait() was called later.
+    finished = time.monotonic_ns() if observed_exit_ns is None else observed_exit_ns
     if status:
         raise RuntimeError(f"benchmark command exited {status}: {job['stderr'].name}")
     report = _load_report(job["report"])
@@ -161,8 +163,23 @@ def _run_pair(config: dict, root: Path, directory: Path, cycle: int) -> dict:
         bg["stderr"].close()
         raise
     try:
-        foreground = _finish(fg, config["timeout_seconds"])
-        background = _finish(bg, config["timeout_seconds"])
+        # Monitor both processes together. Sequentially waiting for fg and then
+        # recording bg's wait completion would incorrectly count an early-exited
+        # background as overlapping the entire foreground run.
+        pending = {"foreground": fg, "background": bg}
+        observed_exit: dict[str, int] = {}
+        while pending:
+            now = time.monotonic_ns()
+            for name, job in list(pending.items()):
+                if job["process"].poll() is not None:
+                    observed_exit[name] = now
+                    del pending[name]
+                elif now - job["started_ns"] >= config["timeout_seconds"] * 1_000_000_000:
+                    raise TimeoutError(f"{name} benchmark command exceeded timeout")
+            if pending:
+                time.sleep(0.002)
+        foreground = _finish(fg, config["timeout_seconds"], observed_exit_ns=observed_exit["foreground"])
+        background = _finish(bg, config["timeout_seconds"], observed_exit_ns=observed_exit["background"])
     except BaseException:
         for job in (fg, bg):
             if job["process"].poll() is None:
