@@ -34,7 +34,7 @@ struct DepthRateConfig {
         if (!supported_depth_rate(fixed_fps) || !supported_depth_rate(min_fps) ||
             !supported_depth_rate(max_fps) || !supported_depth_rate(consumer_min_fps) ||
             min_fps > max_fps || consumer_min_fps > max_fps ||
-            max_fps > capture_fps ||
+            (mode == DepthRateMode::Adaptive && max_fps > capture_fps) ||
             (mode == DepthRateMode::Fixed && (fixed_fps < consumer_min_fps || fixed_fps > capture_fps)) ||
             (mode == DepthRateMode::Adaptive && min_fps > capture_fps) ||
             !capture_fps || capture_fps > 120 || !downshift_dwell_ns ||
