@@ -22,6 +22,8 @@ _OPTIONAL_VALUE_ARGUMENTS = (
     ("depth_topic", "--depth-topic"),
     ("rgb_topic", "--rgb-topic"),
     ("reliability", "--reliability"),
+    ("depth_speckle_min_pixels", "--depth-speckle-min-pixels"),
+    ("depth_speckle_delta_m", "--depth-speckle-delta-m"),
 )
 
 
@@ -103,7 +105,7 @@ def generate_launch_description():
     default_publisher = str(
         Path(__file__).resolve().parents[2]
         / "build"
-        / "daxa"
+        / "ros-daxa-native"
         / "stereoforge_ros2_depth_publisher"
     )
     arguments = [
@@ -194,6 +196,8 @@ def generate_launch_description():
             default_value="best_effort",
             choices=["best_effort", "reliable"],
         ),
+        DeclareLaunchArgument("depth_speckle_min_pixels", default_value="0"),
+        DeclareLaunchArgument("depth_speckle_delta_m", default_value="0.05"),
         DeclareLaunchArgument("validation", default_value="false"),
         DeclareLaunchArgument("thread_cpu_timing", default_value="false"),
     ]

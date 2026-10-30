@@ -9,10 +9,16 @@ from launch.substitutions import LaunchConfiguration
 
 _OPTIONAL_VALUE_ARGUMENTS = (
     ("mode", "--mode"),
+    ("device_serial", "--device-serial"),
+    ("capture_fps", "--capture-fps"),
+    ("depth_rate", "--depth-rate"),
+    ("disparities", "--disparities"),
     ("stereo_variant", "--stereo-variant"),
     ("pipeline", "--pipeline"),
     ("coarse_manifest", "--coarse-manifest"),
     ("reliability", "--reliability"),
+    ("depth_speckle_min_pixels", "--depth-speckle-min-pixels"),
+    ("depth_speckle_delta_m", "--depth-speckle-delta-m"),
 )
 
 
@@ -45,7 +51,7 @@ def _launch_standard(context):
         )
 
     publisher = [
-        str(repo_root / "build" / "ros-daxa" / "stereoforge_ros2_depth_publisher"),
+        str(repo_root / "build" / "ros-daxa-native" / "stereoforge_ros2_depth_publisher"),
         "--source",
         values["source"],
         "--manifest",
@@ -115,6 +121,10 @@ def generate_launch_description():
             default_value="",
             description="Replay directory; required when source=replay.",
         ),
+        DeclareLaunchArgument("device_serial", default_value=""),
+        DeclareLaunchArgument("capture_fps", default_value="30"),
+        DeclareLaunchArgument("depth_rate", default_value="30"),
+        DeclareLaunchArgument("disparities", default_value="128"),
         DeclareLaunchArgument(
             "mode",
             default_value="depth",
@@ -135,6 +145,8 @@ def generate_launch_description():
             default_value="",
             description="Required only for an experimental refinement pipeline.",
         ),
+        DeclareLaunchArgument("depth_speckle_min_pixels", default_value="0"),
+        DeclareLaunchArgument("depth_speckle_delta_m", default_value="0.05"),
         DeclareLaunchArgument(
             "reliability",
             default_value="best_effort",
