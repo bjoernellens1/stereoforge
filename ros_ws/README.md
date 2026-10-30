@@ -15,7 +15,8 @@ bash scripts/build-ros2-native.sh
 ```
 
 The default output is `build/ros-daxa-native/stereoforge_ros2_depth_publisher`.
-To override the build directory, set `STEREOFORGE_ROS_BUILD_DIR=...` and\npass the corresponding `publisher_executable` to the publisher-only launch.
+To override the build directory, set `STEREOFORGE_ROS_BUILD_DIR=...` and
+pass the corresponding `publisher_executable` to the publisher-only launch.
 Do not configure this target directly with `pixi run cmake` and its implicit
 Conda compiler: that can link Fedora's Vulkan/HIDAPI/X11 libraries against an
 incompatible Conda sysroot. The helper uses `/usr/bin/gcc`,
