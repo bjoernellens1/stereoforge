@@ -119,6 +119,16 @@ frames rather than continuing independently at 60 Hz.
 See [depth-rate modes and adaptive policy](docs/adaptive-depth-rate.md) for
 configuration, caveats and CPU tests.
 
+### Optional GPU duty budget
+
+The native ROS 2 depth publisher can additionally self-throttle with
+`--gpu-duty-percent 25 --gpu-estimate-us 8000 --gpu-burst-ms 33`.
+This uses source-time token accounting and measured full-SGM GPU service to
+bound *StereoForge's own estimated work*, not hardware GPU ownership.
+Coarse-refinement has incomplete whole-queue timing and uses the initial
+estimate until separately qualified. See [GPU budgeting](docs/gpu-duty-budget.md)
+for semantics, safeguards and qualification requirements.
+
 ## Output modes
 
 - `left_rgb`, `right_rgb`: original lens canvases after color conversion.
