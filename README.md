@@ -100,6 +100,25 @@ matches and errors separately. They are cached host observations, not per-frame
 exposure measurements. See [camera controls](docs/camera-calibration.md#camera-controls-and-readback)
 for ranges, semantics and remaining work.
 
+## Depth processing rate (native ROS 2)
+
+The native Daxa/ROS 2 publisher supports independent camera acquisition and depth
+processing rates: `--capture-fps 60 --depth-rate 5|10|20|30|60|adaptive`.
+Adaptive is the default; `--depth-rate 60` restores process-every-frame behavior.
+A small CPU YUYV scene-change monitor can reduce GPU stereo updates during
+quiet periods and immediately request more frequent depth on motion, subject
+to the configured consumer floor and frame freshness limit. Only
+depth-admitted frames are sent through the expensive stereo graph.
+
+`--rate-report FILE` optionally records source frames observed, deliberate rate
+skips, admission and ring rejections after the run. Camera timing,
+high-quality stereo accuracy and shared-GPU improvements still need live
+qualification. In `--mode depth-rgb`, RGB is synchronized to selected depth
+frames rather than continuing independently at 60 Hz.
+
+See [depth-rate modes and adaptive policy](docs/adaptive-depth-rate.md) for
+configuration, caveats and CPU tests.
+
 ## Output modes
 
 - `left_rgb`, `right_rgb`: original lens canvases after color conversion.
