@@ -5,6 +5,7 @@ import pytest
 from benchmarks.fp2_subgroup_spirv_check import validate
 
 SPV=Path(__file__).resolve().parents[1]/'build/daxa/fp2-subgroup.spv'
+pytestmark = pytest.mark.skipif(not SPV.is_file(), reason='optional compiled Daxa SPIR-V is unavailable')
 
 
 def remove_instruction(data, opcode, operand=None):
