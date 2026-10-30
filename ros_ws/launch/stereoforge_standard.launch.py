@@ -51,7 +51,7 @@ def _launch_standard(context):
         )
 
     publisher = [
-        str(repo_root / "build" / "ros-daxa" / "stereoforge_ros2_depth_publisher"),
+        str(repo_root / "build" / "ros-daxa-native" / "stereoforge_ros2_depth_publisher"),
         "--source",
         values["source"],
         "--manifest",
