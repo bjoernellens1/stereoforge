@@ -14,6 +14,15 @@ and the [implementation ledger](docs/implementation-status.md) for exact boundar
 
 See the [Daxa + Slang production plan](docs/superpowers/plans/2026-10-27-daxa-slang-production.md) for the proposed migration, qualification gates and current implementation boundary.
 
+## Shared-GPU benchmark
+
+A portable subprocess benchmark runner compares StereoForge alone with
+StereoForge plus a concurrent renderer/SLAM/inference workload. It records
+per-run GPU service percentiles, background throughput retention, process
+lifetime overlap and report hashes; it never treats idealized duty-cycle
+estimates as measured GPU availability or depth accuracy.
+See [concurrent-GPU ABBA benchmarking](docs/shared-gpu-benchmark.md).
+
 ## Setup
 
 Requires Python 3.11+, uv, CMake 3.24+, Ninja, a C++20 compiler, and a working
