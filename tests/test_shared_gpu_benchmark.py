@@ -102,3 +102,19 @@ def test_no_performance_qualification_without_overlap_or_identity(tmp_path):
     assert result["performance_targets"]["background_retention_ge_80pct"]
     assert result["physical_depth_quality_status"] == "unverified"
     assert not result["end_to_end_or_quality_qualified"]
+
+
+def test_early_background_exit_does_not_fake_concurrency(tmp_path):
+    config = make_config(tmp_path)
+    # Reuse the exact subprocess fixture while reducing background lifetime.
+    script = tmp_path / "benchmark_fixture.py"
+    source = script.read_text()
+    source = source.replace("time.sleep(0.20)",
+                            "time.sleep(0.02 if kind=='background' else 0.35)")
+    script.write_text(source)
+    config["minimum_overlap_fraction"] = .8
+    result = run(config, tmp_path, tmp_path / "short-background")
+    pair = result["cycles"][0]["paired"]
+    assert pair["foreground_overlap_fraction"] < .5
+    assert not pair["overlap_qualified"]
+    assert not result["summary"]["performance_qualified"]
