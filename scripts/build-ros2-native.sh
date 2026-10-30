@@ -9,7 +9,7 @@ pixi install -m ros_ws
 pixi_lib="$(realpath ros_ws/.pixi/envs/default/lib)"
 test -f "$pixi_lib/liblttng-ust.so" || { echo "Missing Pixi LTTng library: $pixi_lib/liblttng-ust.so" >&2; exit 2; }
 test -f "$pixi_lib/liblttng-ust-common.so" || { echo "Missing Pixi LTTng common library" >&2; exit 2; }
-build="${STEREOFORGE_ROS_BUILD_DIR:-build/ros-daxa}"
+build="${STEREOFORGE_ROS_BUILD_DIR:-build/ros-daxa-native}"
 pixi run -m ros_ws env CC=/usr/bin/gcc CXX=/usr/bin/g++ \
  cmake -S . -B "$build" -G Ninja \
  -DCMAKE_BUILD_TYPE=Release \
