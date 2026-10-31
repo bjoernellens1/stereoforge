@@ -10,7 +10,7 @@
 #include <vector>
 namespace stereoforge {
 struct DepthSpeckleConfig { std::uint32_t width=0,height=0,min_component_pixels=50; float max_neighbor_delta_m=0.05f; };
-struct DepthSpeckleStats { std::uint64_t invalidated_pixels=0,removed_components=0,retained_components=0; };
+struct DepthSpeckleStats { std::uint64_t input_valid_pixels=0,output_valid_pixels=0,invalidated_pixels=0,removed_components=0,retained_components=0; };
 class DepthSpeckleFilter {
     DepthSpeckleConfig c_;
     std::vector<std::uint8_t> seen_;
@@ -29,10 +29,12 @@ public:
     DepthSpeckleStats apply(std::span<std::byte> image) {
         const auto count=std::size_t(c_.width)*c_.height;
         if(image.size()!=count*sizeof(float))throw std::invalid_argument("32FC1 depth byte extent mismatch");
-        for(std::size_t i=0;i<count;++i)
-            std::memcpy(&values_[i],image.data()+i*sizeof(float),sizeof(float));
-        std::fill(seen_.begin(),seen_.end(),0);
         DepthSpeckleStats result;
+        for(std::size_t i=0;i<count;++i) {
+            std::memcpy(&values_[i],image.data()+i*sizeof(float),sizeof(float));
+            if(std::isfinite(values_[i])&&values_[i]>0.f)++result.input_valid_pixels;
+        }
+        std::fill(seen_.begin(),seen_.end(),0);
         for(std::uint32_t start=0;start<count;++start) {
             if(seen_[start]||!std::isfinite(values_[start])||values_[start]<=0.f)continue;
             std::size_t head=0,tail=1;queue_[0]=start;seen_[start]=1;
@@ -56,6 +58,7 @@ public:
             for(std::size_t k=0;k<tail;++k)
                 std::memcpy(image.data()+std::size_t(queue_[k])*sizeof(float),&invalid,sizeof(float));
         }
+        result.output_valid_pixels=result.input_valid_pixels-result.invalidated_pixels;
         return result;
     }
 };

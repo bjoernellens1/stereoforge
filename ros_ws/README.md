@@ -163,3 +163,39 @@ to 32; no shader changes are needed for that setting. When benchmarking FPS,
 stop competing GPU compute jobs and check utilization. The Zenoh session and
 router JSON5 configurations in `ros_ws/` explicitly disable shared memory,
 so no system-wide `ulimit -l` changes are needed for that mode.
+
+## Depth coverage and speckle diagnostics
+
+Real ZED 2 experiments showed one 1280×720 frame with 7.5% valid depth
+and another with 24.5% valid depth. This is a **large possible filtering
+regression**, not a reason to alter RViz min/max display settings. The two
+runs must use comparable scenes and configurations before attributing the
+whole difference to the filter. Keep `depth_speckle_min_pixels:=0` as the
+baseline; never enable filtering by default based only on a cleaner-looking
+image.
+
+The connected-component filter currently uses **four-connected** neighbors,
+a fixed metric depth difference (`depth_speckle_delta_m`, default 0.05 m)
+and a minimum area. With the ZED 2 HD fixture (`f_x B ≈ 63.04 px·m`),
+a one-pixel disparity difference corresponds approximately to
+`ΔZ ≈ Z²/(f_x B)`: 0.063 m at 2 m, 0.143 m at 3 m. Thus the 0.05 m edge
+criterion can break a real surface into small components, which the 50-pixel
+threshold then erases. Low initial validity exacerbates the effect.
+This heuristic should be replaced or carefully tuned using *real stereo*
+validity/quality metrics; increasing `depth_speckle_delta_m` blindly can
+merge foreground with background.
+
+When the opt-in filter is active, the publisher reports total valid pixels
+before and after filtering, removed components, filtered frames and mean CPU
+filter time at shutdown. The optional `--rate-report FILE` adds these counters
+to its JSON report. Removed measurements remain NaN in published `32FC1`
+depth, consistent with the depth payload contract; they are **not converted
+to zero**. Only when running the filter are pre/post-filter counters sampled.
+For A/B runs use unique trace filenames and run IDs, and stop the publisher
+normally so its counters are printed. Measure several frames per condition.
+
+With 128 disparity candidates (valid integer disparities 1…127), the
+fixture's nominal nearest representable depth is `63.041385/127 ≈ 0.49639 m`.
+A 1st-percentile depth near this value suggests the search boundary and
+warrants checking whether too many pixels select the maximum disparity.
+It does **not** establish calibration or matching quality.
