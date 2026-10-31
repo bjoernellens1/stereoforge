@@ -45,9 +45,38 @@ PYTHONPATH=python .venv/bin/python benchmarks/compare_daxa_preprocess.py \
 ```
 
 The resulting fixture `manifest.json`, rectification maps, and `capture.sfp`
-remain runtime artifacts and are not tracked. A measured `clock-map.json` is
-also required for ROS launch; factory calibration does not provide that
-source-clock-to-ROS mapping.
+can be created dynamically as shown above, or loaded directly from the tracked
+repository fixtures:
+- Fixture manifest: `configs/cameras/zed2/fixtures/SN26041639-fixture/manifest.json`
+- Clock map: `configs/cameras/zed2/clock_maps/SN26041639-clock-map.json`
+
+For timestamp-qualified ROS 2 launch, a measured `clock-map.json` is required; factory calibration
+does not provide that source-clock-to-ROS mapping. The tracked `SN26041639-clock-map.json`
+is explicitly **unvalidated** (`source_clock=zed_open_capture_video_unvalidated`,
+`offset_ns=0`, broad validity range and `max_error_ns=1000000000`). It is a
+provisional development configuration and **not evidence of accurate capture
+timestamps or cross-sensor synchronization**. Do not use it for timestamp-sensitive
+recording, multi-camera fusion, or benchmarking until clock provenance, offset,
+validity and error bounds have been measured for the active capture run.
+
+### Launching with Repository Fixtures
+
+Launch live capture, depth estimation, and RViz visualization using the committed fixtures:
+
+```bash
+rm -f /tmp/stereoforge-trace.json
+cd ros_ws
+pixi run ros2 launch launch/stereoforge_standard.launch.py \
+  manifest:=../configs/cameras/zed2/fixtures/SN26041639-fixture/manifest.json \
+  clock_map:=../configs/cameras/zed2/clock_maps/SN26041639-clock-map.json \
+  frame_id:=stereoforge_camera \
+  run_id:=local-camera \
+  trace:=/tmp/stereoforge-trace.json \
+  source:=camera \
+  device_serial:=26041639 \
+  mode:=depth-rgb \
+  disparities:=128
+```
 
 `--device-id` selects a video device, while `--calibration-id` supplies the
 expected calibration identity hash. The narrowly gated `--device-serial

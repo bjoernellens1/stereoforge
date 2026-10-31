@@ -1,0 +1,57 @@
+{
+  "schema": "stereoforge.temporal_evidence_audit.v2",
+  "source_report_sha256": "6b4f601d4146ebbec0cf74bc142162ea1953f4d1580d863f1ee96f47a35aaa13",
+  "summary": {
+    "frames": 90,
+    "valid_fraction_mean": 0.210058292341821,
+    "ever_valid_fraction": 0.8523361545138889,
+    "never_valid_fraction": 0.1476638454861111,
+    "persistent_80pct_fraction": 0.08403754340277778,
+    "conditional_dropout_probability": 0.43025804353261465,
+    "conditional_valid_survival": 0.5697419564673853,
+    "pair_common_valid_fraction": 0.11968340355805243,
+    "pair_union_valid_fraction": 0.3004523276568352,
+    "flip_fraction_among_pair_union": 0.6016559282750836,
+    "median_framewise_disparity_p50_px": 0.23526416175650108,
+    "median_framewise_disparity_p90_px": 2.048346387625549,
+    "median_framewise_depth_p50_m": 0.01027226448059082,
+    "mean_high_disparity_boundary_fraction_of_valid": 0.00855398614699638,
+    "receipt_fps_first_to_last": 19.441176356607432,
+    "header_fps_first_to_last_unvalidated": 19.487957208825286,
+    "header_gap_counts_unvalidated": {
+      "near_33ms": 41,
+      "near_67ms": 48
+    },
+    "warning": "Receipt cadence is not GPU time; global RGB changes are not a proof of geometric stationarity.",
+    "rgb_minus_depth_receipt_p50_ms": 1.1573965,
+    "rgb_minus_depth_receipt_p95_ms": 1.5705201
+  },
+  "raw_payload_availability": {
+    "depth_frames_present": 1,
+    "depth_frames_listed": 90
+  },
+  "last_available_raw_frame": {
+    "index": 89,
+    "sha256": "d97945bb6d0fb29f8aa206d8843a8cefe49eca980348ea1610aa4ab57de50f4b",
+    "valid_fraction": 0.20937391493055554,
+    "depth_percentiles_m": {
+      "0": 0.49638882279396057,
+      "1": 0.5004314661026001,
+      "10": 0.6897833943367004,
+      "50": 1.3633772134780884,
+      "90": 5.427506256103522,
+      "99": 67.24413299560547,
+      "100": 126.06387329101562
+    },
+    "corrected_disparity_le1_fraction_of_valid": 0.012075104037645303,
+    "depth_gt8m_fraction_of_valid": 0.07410382516493141,
+    "depth_gt16m_fraction_of_valid": 0.058053783446224326,
+    "note": "Far values are not automatically wrong: window views include outdoor surfaces. No ground truth supplied."
+  },
+  "preview_metadata": {
+    "frames": 90,
+    "encoded_fps": 30.0,
+    "playback_speed_relative_to_receipt": 1.5431164992134832,
+    "note": "MP4 is visualization only, not reconstructible numeric depth."
+  }
+}

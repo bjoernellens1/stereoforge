@@ -9,10 +9,17 @@ from launch.substitutions import LaunchConfiguration
 
 _OPTIONAL_VALUE_ARGUMENTS = (
     ("mode", "--mode"),
+    ("device_serial", "--device-serial"),
+    ("device_id", "--device-id"),
+    ("capture_fps", "--capture-fps"),
+    ("depth_rate", "--depth-rate"),
+    ("disparities", "--disparities"),
     ("stereo_variant", "--stereo-variant"),
     ("pipeline", "--pipeline"),
     ("coarse_manifest", "--coarse-manifest"),
     ("reliability", "--reliability"),
+    ("depth_speckle_min_pixels", "--depth-speckle-min-pixels"),
+    ("depth_speckle_delta_m", "--depth-speckle-delta-m"),
 )
 
 
@@ -45,7 +52,7 @@ def _launch_standard(context):
         )
 
     publisher = [
-        str(repo_root / "build" / "ros-daxa" / "stereoforge_ros2_depth_publisher"),
+        str(repo_root / "build" / "ros-daxa-native" / "stereoforge_ros2_depth_publisher"),
         "--source",
         values["source"],
         "--manifest",
@@ -69,25 +76,38 @@ def _launch_standard(context):
         if values[name]:
             publisher.extend([option, values[name]])
 
-    environment = {"RMW_IMPLEMENTATION": "rmw_zenoh_cpp"}
+    publisher_env = {
+        "RMW_IMPLEMENTATION": "rmw_zenoh_cpp",
+        "ZENOH_SESSION_CONFIG_URI": str(repo_root / "ros_ws" / "zenoh_shm_session.json5"),
+        "ZENOH_ROUTER_CONFIG_URI": str(repo_root / "ros_ws" / "zenoh_shm_router.json5"),
+    }
     if values["zenoh_router_config"]:
-        environment["ZENOH_ROUTER_CONFIG_URI"] = values["zenoh_router_config"]
+        publisher_env["ZENOH_ROUTER_CONFIG_URI"] = values["zenoh_router_config"]
     if values["zenoh_session_config"]:
-        environment["ZENOH_SESSION_CONFIG_URI"] = values["zenoh_session_config"]
+        publisher_env["ZENOH_SESSION_CONFIG_URI"] = values["zenoh_session_config"]
+
+    # Fedora 44 / Strix Halo: use the host Mesa/DRM stack for BOTH GPU
+    # processes. Pixi's bundled libdrm can shadow the system driver.
+    publisher_env["VK_DRIVER_FILES"] = "/usr/share/vulkan/icd.d/radeon_icd.x86_64.json"
+    publisher_env["LIBGL_DRIVERS_PATH"] = "/usr/lib64/dri"
+    publisher_env["LD_PRELOAD"] = "/usr/lib64/libdrm.so.2:/usr/lib64/libdrm_amdgpu.so.1"
+    publisher_env["ZENOH_ROUTER_CHECK_ATTEMPTS"] = "20"
+    rviz_env = dict(publisher_env)
+
     return [
         ExecuteProcess(
             cmd=[str(repo_root / "scripts" / "stereoforge-ros"), "router"],
-            additional_env=environment,
+            additional_env=publisher_env,
             output="screen",
         ),
         ExecuteProcess(
             cmd=publisher,
-            additional_env=environment,
+            additional_env=publisher_env,
             output="screen",
         ),
         ExecuteProcess(
             cmd=["rviz2", "-d", values["rviz_config"]],
-            additional_env=environment,
+            additional_env=rviz_env,
             output="screen",
         ),
     ]
@@ -115,6 +135,8 @@ def generate_launch_description():
             default_value="",
             description="Replay directory; required when source=replay.",
         ),
+        DeclareLaunchArgument("capture_fps", default_value="30"),
+        DeclareLaunchArgument("depth_rate", default_value="30"),
         DeclareLaunchArgument(
             "mode",
             default_value="depth",
@@ -126,6 +148,11 @@ def generate_launch_description():
             choices=["packed-specialized", "packed-specialized-overwrite"],
         ),
         DeclareLaunchArgument(
+            "disparities",
+            default_value="128",
+            description="Stereo disparity search range (e.g. 128 or 256).",
+        ),
+        DeclareLaunchArgument(
             "pipeline",
             default_value="full-sgm",
             choices=["full-sgm", "experimental-refinement", "experimental-dual-refinement"],
@@ -135,10 +162,22 @@ def generate_launch_description():
             default_value="",
             description="Required only for an experimental refinement pipeline.",
         ),
+        DeclareLaunchArgument("depth_speckle_min_pixels", default_value="0"),
+        DeclareLaunchArgument("depth_speckle_delta_m", default_value="0.05"),
         DeclareLaunchArgument(
             "reliability",
             default_value="best_effort",
             choices=["best_effort", "reliable"],
+        ),
+        DeclareLaunchArgument(
+            "device_serial",
+            default_value="",
+            description="Explicit camera serial override (e.g. 26041639).",
+        ),
+        DeclareLaunchArgument(
+            "device_id",
+            default_value="-1",
+            description="Camera video device ID (-1 to scan).",
         ),
         DeclareLaunchArgument(
             "zenoh_router_config",

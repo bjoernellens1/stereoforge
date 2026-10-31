@@ -1,0 +1,8 @@
+{
+  mode: "peer",
+  transport: {
+    shared_memory: {
+      enabled: false
+    }
+  }
+}

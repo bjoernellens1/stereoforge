@@ -4,11 +4,37 @@ The Pixi environment provides ROS 2 Jazzy, RViz, and the Linux OpenGL/Qt/X11
 runtime libraries. Source it with `pixi shell -m ros_ws` or prefix commands
 with `pixi run -m ros_ws`.
 
-Install or refresh the locked environment from the repository root before
-launching:
+Build the native publisher on Fedora using the repository entry point. This
+intentionally uses system GCC/G++ while resolving ROS 2 packages from Pixi.
+The command also adds Pixi's LTTng libraries to the linker search path, which
+is required when the native linker is used. It verifies the executable and
+checks that all runtime shared libraries resolve under the Pixi runtime loader
+path. Running `ldd` without Pixi's library path can misleadingly report
+transitive ROS dependencies as `not found` even after linking succeeds.
 
 ```bash
-pixi install -m ros_ws
+bash scripts/build-ros2-native.sh
+```
+
+The default output is `build/ros-daxa-native/stereoforge_ros2_depth_publisher`.
+To override the build directory, set `STEREOFORGE_ROS_BUILD_DIR=...` and
+pass the corresponding `publisher_executable` to the publisher-only launch.
+Do not configure this target directly with `pixi run cmake` and its implicit
+Conda compiler: that can link Fedora's Vulkan/HIDAPI/X11 libraries against an
+incompatible Conda sysroot. The helper uses `/usr/bin/gcc`,
+`/usr/bin/g++`, and `-fuse-ld=bfd -L<resolved-pixi-lib>`. Changing a
+compiler for an existing CMake cache requires a fresh build directory.
+
+On other Linux distributions, check compatibility before reusing this
+Fedora-specific native-toolchain build entry point. This is a validated
+configuration from the local Fedora 44 linking failure, not a promise that
+all systems supply compatible host/Conda system libraries.
+
+For a quick standalone filter regression without ROS or Vulkan:
+```bash
+cmake --preset cpu
+cmake --build --preset cpu -j 8
+ctest --preset cpu -R depth_speckle_contracts --output-on-failure
 ```
 
 The launch files use the native publisher's supported command-line options and
@@ -51,9 +77,16 @@ rejects other serial/calibration combinations.
 
 Use `source:=replay replay:=/absolute/path/to/replay` for a replay run.
 Override `mode`, `stereo_variant`, `pipeline`, `coarse_manifest`,
-`reliability`, or `rviz_config` as needed. The standard launch expects the
-publisher at `/home/bjoern/git/stereoforge/build/ros-daxa/stereoforge_ros2_depth_publisher`;
-rebuild that target if it is absent.
+`reliability`, `rviz_config`, `depth_speckle_min_pixels`, and
+`depth_speckle_delta_m` as needed. Both standard and publisher-only launch
+default to the executable in `build/ros-daxa-native` **of the checked-out repository**.
+For an isolated build, supply `publisher_executable:=/absolute/path/to/executable`
+with the publisher-only launch; standard launch requires the default path.
+The speckle filter is disabled by default (`depth_speckle_min_pixels:=0`).
+Example: `depth_speckle_min_pixels:=50 depth_speckle_delta_m:=0.05`.
+This filters only the published 32FC1 depth, setting small disconnected
+clusters to NaN; it does not change GPU stereo estimates or recover missing
+geometry.
 
 To use existing tuned Zenoh JSON5 files, add these launch arguments to the
 standard command:
@@ -103,10 +136,66 @@ The launch-file and RViz paths above are real paths in this checkout. Replace
 only the two `/absolute/path/to/...` values with paths to the actual calibration
 manifest and clock-map files from your capture run; those files are not present
 in this repository. The native ROS publisher is built at
-`/home/bjoern/git/stereoforge/build/ros-daxa/stereoforge_ros2_depth_publisher`.
+`build/ros-daxa-native/stereoforge_ros2_depth_publisher` relative to this checkout.
 Live camera launch still requires the actual calibration manifest and clock-map
 from the capture run; this repository does not fabricate those artifacts.
 
 Set `rmw_implementation=rmw_fastrtps_cpp` explicitly for a DDS fallback; Zenoh
 is intentionally the default. All communicating ROS processes must use
 compatible middleware and config settings.
+
+## Fedora 44 / Strix Halo Vulkan runtime
+
+The standard ROS launch uses the same native Mesa/RADV device and host DRM
+libraries for both RViz **and** the Daxa publisher. It sets
+`VK_DRIVER_FILES=/usr/share/vulkan/icd.d/radeon_icd.x86_64.json`,
+`LIBGL_DRIVERS_PATH=/usr/lib64/dri`, and preloads the host
+`libdrm.so.2` and `libdrm_amdgpu.so.1`. These settings are deliberately
+specific to the verified Fedora workstation; check the paths before using
+this launch on another distribution. Zenoh router startup remains separate;
+clients retry discovery with `ZENOH_ROUTER_CHECK_ATTEMPTS=20`.
+
+To diagnose GPU availability without ROS, compare the native and Pixi
+`vulkaninfo --summary` output and run the built `daxa_probe`. An AMD GPU in
+`vulkaninfo` is necessary but does not establish that the Daxa device was
+successfully created. `DaxaDepthConfig::required_wave_size` already defaults
+to 32; no shader changes are needed for that setting. When benchmarking FPS,
+stop competing GPU compute jobs and check utilization. The Zenoh session and
+router JSON5 configurations in `ros_ws/` explicitly disable shared memory,
+so no system-wide `ulimit -l` changes are needed for that mode.
+
+## Depth coverage and speckle diagnostics
+
+Real ZED 2 experiments showed one 1280×720 frame with 7.5% valid depth
+and another with 24.5% valid depth. This is a **large possible filtering
+regression**, not a reason to alter RViz min/max display settings. The two
+runs must use comparable scenes and configurations before attributing the
+whole difference to the filter. Keep `depth_speckle_min_pixels:=0` as the
+baseline; never enable filtering by default based only on a cleaner-looking
+image.
+
+The connected-component filter currently uses **four-connected** neighbors,
+a fixed metric depth difference (`depth_speckle_delta_m`, default 0.05 m)
+and a minimum area. With the ZED 2 HD fixture (`f_x B ≈ 63.04 px·m`),
+a one-pixel disparity difference corresponds approximately to
+`ΔZ ≈ Z²/(f_x B)`: 0.063 m at 2 m, 0.143 m at 3 m. Thus the 0.05 m edge
+criterion can break a real surface into small components, which the 50-pixel
+threshold then erases. Low initial validity exacerbates the effect.
+This heuristic should be replaced or carefully tuned using *real stereo*
+validity/quality metrics; increasing `depth_speckle_delta_m` blindly can
+merge foreground with background.
+
+When the opt-in filter is active, the publisher reports total valid pixels
+before and after filtering, removed components, filtered frames and mean CPU
+filter time at shutdown. The optional `--rate-report FILE` adds these counters
+to its JSON report. Removed measurements remain NaN in published `32FC1`
+depth, consistent with the depth payload contract; they are **not converted
+to zero**. Only when running the filter are pre/post-filter counters sampled.
+For A/B runs use unique trace filenames and run IDs, and stop the publisher
+normally so its counters are printed. Measure several frames per condition.
+
+With 128 disparity candidates (valid integer disparities 1…127), the
+fixture's nominal nearest representable depth is `63.041385/127 ≈ 0.49639 m`.
+A 1st-percentile depth near this value suggests the search boundary and
+warrants checking whether too many pixels select the maximum disparity.
+It does **not** establish calibration or matching quality.
