@@ -1,0 +1,29 @@
+{
+  "new_pytest_tests_passed": 34,
+  "new_pytest_tests_failed": 0,
+  "existing_depth_video_tests_passed": 5,
+  "existing_depth_video_tests_failed": 0,
+  "synthetic_cases": [
+    "static_sparse",
+    "outlier_speckles",
+    "moving_patch",
+    "depth_step_same_rgb",
+    "stable_wrong"
+  ],
+  "uploaded_frame89_checked_against_report": true,
+  "uploaded_full_raw_sequence_available": false,
+  "real_90_frame_new_filter_quality_measured": false,
+  "native_Daxa_stage_audit_executed_on_GPU": false,
+  "native_dump_reader_and_LR_classifier_tested_on_synthetic_binary_dumps": true,
+  "python": "3.13.5 (main, Jul 15 2026, 20:25:40) [GCC 14.2.0]",
+  "numpy": "2.3.5",
+  "opencv": "4.13.0",
+  "platform": "Linux-6.18.57-x86_64-with-glibc2.41",
+  "sha256": {
+    "benchmarks/stereo_stage_audit_v2.py": "763a0aed5d479908dbc6a28d11808d44ab373805ac61951143a37794f36b5e6d",
+    "benchmarks/replay_temporal_v2.py": "c8589dc805ca5bd81d8ce4d8061f3d701d4f6a7e8bd75db77133174a0f27a16e",
+    "benchmarks/temporal_consensus_v2.py": "0c8b9d3406fd40e260e9912ad645888b4a92bfda123c34a40d539777d80b834b",
+    "benchmarks/temporal_synthetic_v2.py": "a468953d6c93621c277e0a3e460e07f459b2cc728555e7c790593e87abdc25a9",
+    "tests/test_temporal_consensus_v2.py": "839edaf90618499bf9190af25cf67e888303e6c1c6ba91e0dc56a7df43c7b13a"
+  }
+}
