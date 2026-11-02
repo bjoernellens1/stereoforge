@@ -377,12 +377,14 @@ def evaluate_known_ground_truth_suite_720p(work_dir: Path) -> dict[str, Any]:
         yuyv_path.write_bytes(yuyv.tobytes())
 
         ref_runs = [
-            ("4x_ind_baseline", "layered-per-path", "independent-sgm", "0"),
-            ("4x_ind_selective_repair", "layered-per-path", "independent-sgm", "1"),
-            ("4x_der_baseline", "shared-census-sequential", "left-aggregated-selection", "0"),
-            ("4x_der_selective_repair", "shared-census-sequential", "left-aggregated-selection", "1"),
+            ("4x_ind_baseline", "layered-per-path", "independent-sgm", "0", "0"),
+            ("4x_ind_selective_repair", "layered-per-path", "independent-sgm", "1", "0"),
+            ("4x_ind_planar_recovery", "layered-per-path", "independent-sgm", "1", "1"),
+            ("4x_der_baseline", "shared-census-sequential", "left-aggregated-selection", "0", "0"),
+            ("4x_der_selective_repair", "shared-census-sequential", "left-aggregated-selection", "1", "0"),
+            ("4x_der_planar_recovery", "shared-census-sequential", "left-aggregated-selection", "1", "1"),
         ]
-        for rkey, sched, rmode, rep_flag in ref_runs:
+        for rkey, sched, rmode, rep_flag, plan_flag in ref_runs:
             pref = s_dir / rkey
             for p_old in s_dir.glob(f"{rkey}*"):
                 p_old.unlink()
@@ -400,6 +402,11 @@ def evaluate_known_ground_truth_suite_720p(work_dir: Path) -> dict[str, Any]:
                     "--descriptor-mode", "ortho-hybrid",
                     "--fast-mode", "1",
                     "--selective-repair", rep_flag,
+                    "--planar-recovery", plan_flag,
+                    "--planar-min-anchors", "10",
+                    "--planar-coarse-affine", "1",
+                    "--planar-ray-crossing-guard", "1",
+                    "--planar-coarse-lr-guard", "1",
                     "--radius", "2", "--subpixel", "1",
                     "--dump-prefix", str(pref),
                     "--output", str(pref) + ".json",
@@ -412,8 +419,14 @@ def evaluate_known_ground_truth_suite_720p(work_dir: Path) -> dict[str, Any]:
         # Load outputs and evaluate against exact ground truth `gt_disp` on `non_occ`
         d_4i_b, v_4i_b, _, _ = load_refinement_planes(s_dir / "4x_ind_baseline")
         d_4i_r, v_4i_r, _, _ = load_refinement_planes(s_dir / "4x_ind_selective_repair")
+        d_4i_p = np.fromfile(str(s_dir / "4x_ind_planar_recovery") + ".completed_disparity.f32", dtype="<f4").reshape(h, w)
+        v_4i_p = np.fromfile(str(s_dir / "4x_ind_planar_recovery") + ".completed_validity.u32", dtype="<u4").reshape(h, w) != 0
+        prov_4i_p = np.fromfile(str(s_dir / "4x_ind_planar_recovery") + ".completed_provenance.u32", dtype="<u4").reshape(h, w)
         d_4d_b, v_4d_b, _, _ = load_refinement_planes(s_dir / "4x_der_baseline")
         d_4d_r, v_4d_r, _, _ = load_refinement_planes(s_dir / "4x_der_selective_repair")
+        d_4d_p = np.fromfile(str(s_dir / "4x_der_planar_recovery") + ".completed_disparity.f32", dtype="<f4").reshape(h, w)
+        v_4d_p = np.fromfile(str(s_dir / "4x_der_planar_recovery") + ".completed_validity.u32", dtype="<u4").reshape(h, w) != 0
+        prov_4d_p = np.fromfile(str(s_dir / "4x_der_planar_recovery") + ".completed_provenance.u32", dtype="<u4").reshape(h, w)
 
         dl_ocv, dr_ocv, _ = cv_sgbm(ll.astype(np.uint32), rr.astype(np.uint32), disparities=128, block=5, uniqueness=10)
         lv_ocv = valid_map(dl_ocv, disparities=128)
@@ -445,6 +458,10 @@ def evaluate_known_ground_truth_suite_720p(work_dir: Path) -> dict[str, Any]:
         err_new_ind = np.abs(d_4i_r[new_ind] - gt_disp[new_ind])
         new_der = non_occ & (~v_4d_b) & v_4d_r & np.isfinite(d_4d_r)
         err_new_der = np.abs(d_4d_r[new_der] - gt_disp[new_der])
+        inf_ind = non_occ & (prov_4i_p == 6) & np.isfinite(d_4i_p)
+        err_inf_ind = np.abs(d_4i_p[inf_ind] - gt_disp[inf_ind])
+        inf_der = non_occ & (prov_4d_p == 6) & np.isfinite(d_4d_p)
+        err_inf_der = np.abs(d_4d_p[inf_der] - gt_disp[inf_der])
 
         s_eval = {
             "non_occluded_gt_pixels": int(non_occ.sum()),
@@ -452,8 +469,10 @@ def evaluate_known_ground_truth_suite_720p(work_dir: Path) -> dict[str, Any]:
             "pipelines": {
                 "4x Refinement (Independent)": gt_metrics(d_4i_b, v_4i_b),
                 "4x Selective Repair (Independent)": gt_metrics(d_4i_r, v_4i_r),
+                "4x Planar Recovery Completed (Independent)": gt_metrics(d_4i_p, v_4i_p),
                 "4x Refinement (Derived Right)": gt_metrics(d_4d_b, v_4d_b),
                 "4x Selective Repair (Derived Right)": gt_metrics(d_4d_r, v_4d_r),
+                "4x Planar Recovery Completed (Derived Right)": gt_metrics(d_4d_p, v_4d_p),
                 "OpenCV StereoSGBM": gt_metrics(d_ocv, v_ocv),
             },
             "newly_admitted_repair_pixels_vs_gt": {
@@ -468,6 +487,18 @@ def evaluate_known_ground_truth_suite_720p(work_dir: Path) -> dict[str, Any]:
                     "mae_px": round(float(np.mean(err_new_der)), 3) if err_new_der.size else 0.0,
                     "bad_1px_pct": round(100.0 * float((err_new_der > 1.0).mean()), 2) if err_new_der.size else 0.0,
                     "bad_2px_pct": round(100.0 * float((err_new_der > 2.0).mean()), 2) if err_new_der.size else 0.0,
+                },
+                "independent_4x_planar_inferred_prov6": {
+                    "inferred_pixels": int(inf_ind.sum()),
+                    "mae_px": round(float(np.mean(err_inf_ind)), 3) if err_inf_ind.size else 0.0,
+                    "bad_1px_pct": round(100.0 * float((err_inf_ind > 1.0).mean()), 2) if err_inf_ind.size else 0.0,
+                    "bad_2px_pct": round(100.0 * float((err_inf_ind > 2.0).mean()), 2) if err_inf_ind.size else 0.0,
+                },
+                "derived_4x_planar_inferred_prov6": {
+                    "inferred_pixels": int(inf_der.sum()),
+                    "mae_px": round(float(np.mean(err_inf_der)), 3) if err_inf_der.size else 0.0,
+                    "bad_1px_pct": round(100.0 * float((err_inf_der > 1.0).mean()), 2) if err_inf_der.size else 0.0,
+                    "bad_2px_pct": round(100.0 * float((err_inf_der > 2.0).mean()), 2) if err_inf_der.size else 0.0,
                 },
             },
         }

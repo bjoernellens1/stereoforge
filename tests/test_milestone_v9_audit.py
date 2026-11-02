@@ -41,6 +41,8 @@ def test_v9_publisher_and_launch_cli_wiring() -> None:
         "--coarse-right-reference-mode",
         "--refinement-subpixel",
         "--selective-repair",
+        "--planar-recovery",
+        "--completed-depth-topic",
         "--qos-depth",
         "--verify-payload-checksum",
     ):
@@ -62,6 +64,8 @@ def test_v9_publisher_and_launch_cli_wiring() -> None:
             "coarse_right_reference_mode",
             "refinement_subpixel",
             "selective_repair",
+            "planar_recovery",
+            "completed_depth_topic",
         ):
             assert arg_name in launch_txt, f"Missing {arg_name} in {launch_rel}"
 

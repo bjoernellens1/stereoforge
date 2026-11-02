@@ -12,11 +12,12 @@ using CanonicalRefinementProcess=DaxaRefinement::Frame(DaxaRefinement::*)(const 
 static_assert(std::is_same_v<decltype(static_cast<CanonicalRefinementProcess>(&DaxaRefinement::process)),CanonicalRefinementProcess>);
 
 static_assert(!std::is_constructible_v<DaxaRefinement::Frame,std::shared_ptr<DaxaFoundation>,daxa::BufferId>);
-void check(bool v){if(!v)throw std::runtime_error("refinement contract failed");}
+void check_at(bool v,int line){if(!v)throw std::runtime_error("refinement contract failed at line "+std::to_string(line));}
+#define check(v) check_at((v),__LINE__)
 template<class F>void reject(F f){try{f();}catch(std::invalid_argument const&){return;}throw std::runtime_error("invalid refinement accepted");}
 static DaxaRectification maps(unsigned scale){DaxaRectification c;c.eye_width=24;c.source_height=20;c.stride_bytes=96;c.width=6*scale;c.height=5*scale;c.original_identity="raw";c.rectified_identity=scale==1?"coarse":"target";DaxaRectifiedGeometry g;g.original_identity=c.original_identity;g.rectified_identity=c.rectified_identity;for(auto& eye:g.original.eyes)eye={24,20,8,8,7,5,{}};for(auto& eye:g.rectified.eyes)eye={c.width,c.height,4.*scale,4.*scale,2.5*scale-0.5,1.5*scale-0.5,{}};g.original.right_to_left=g.rectified.right_to_left={1,0,0,.1,0,1,0,0,0,0,1,0,0,0,0,1};g.R1=g.R2={1,0,0,0,1,0,0,0,1};double f=4.*scale,cx=2.5*scale-0.5,cy=1.5*scale-0.5;g.P1={f,0,cx,0,0,f,cy,0,0,0,1,0};g.P2={f,0,cx,-f*.1,0,f,cy,0,0,0,1,0};c.geometry=g;for(unsigned eye=0;eye<2;++eye)for(unsigned y=0;y<c.height;++y)for(unsigned x=0;x<c.width;++x){c.maps[eye*2].push_back(float((x-cx)/f*8+7));c.maps[eye*2].back()=std::clamp(c.maps[eye*2].back(),0.f,22.f);c.maps[eye*2+1].push_back(float((y-cy)/f*8+5));c.maps[eye*2+1].back()=std::clamp(c.maps[eye*2+1].back(),0.f,18.f);}return c;}
 static CaptureLease source(unsigned id){auto c=std::make_shared<CaptureFrame>();c->source_width=48;c->height=20;c->stride_bytes=96;c->frame_id=id;c->calibration_identity="raw";c->device_identity="refinement-contract";c->host_clock_domain="steady";c->host_ingress_timestamp_ns=id;c->packed_yuyv.resize(1920);for(unsigned i=0;i<1920;++i)c->packed_yuyv[i]=uint8_t(i*17);return c;}
-static DaxaRectification maps_custom(unsigned cw,unsigned ch,unsigned scale){DaxaRectification c;c.eye_width=1280;c.source_height=720;c.stride_bytes=5120;c.width=cw*scale;c.height=ch*scale;c.original_identity="raw720";c.rectified_identity=scale==1?"coarse320":"target1280";DaxaRectifiedGeometry g;g.original_identity=c.original_identity;g.rectified_identity=c.rectified_identity;for(auto& eye:g.original.eyes)eye={1280,720,1040.,1040.,639.5,359.5,{}};for(auto& eye:g.rectified.eyes)eye={c.width,c.height,520.*scale,520.*scale,cw*0.5*scale-0.5,ch*0.5*scale-0.5,{}};g.original.right_to_left=g.rectified.right_to_left={1,0,0,.12,0,1,0,0,0,0,1,0,0,0,0,1};g.R1=g.R2={1,0,0,0,1,0,0,0,1};double f=520.*scale,cx=cw*0.5*scale-0.5,cy=ch*0.5*scale-0.5;g.P1={f,0,cx,0,0,f,cy,0,0,0,1,0};g.P2={f,0,cx,-f*.12,0,f,cy,0,0,0,1,0};c.geometry=g;for(unsigned eye=0;eye<2;++eye){c.maps[eye*2].resize(c.width*c.height);c.maps[eye*2+1].resize(c.width*c.height);for(unsigned y=0;y<c.height;++y)for(unsigned x=0;x<c.width;++x){c.maps[eye*2][y*c.width+x]=float((x-cx)/f*1040.+639.5);c.maps[eye*2+1][y*c.width+x]=float((y-cy)/f*1040.+359.5);}}return c;}
+static DaxaRectification maps_custom(unsigned cw,unsigned ch,unsigned scale){DaxaRectification c;c.eye_width=1280;c.source_height=720;c.stride_bytes=5120;c.width=cw*scale;c.height=ch*scale;c.original_identity="raw720";c.rectified_identity=scale==1?"coarse320":"target1280";DaxaRectifiedGeometry g;g.original_identity=c.original_identity;g.rectified_identity=c.rectified_identity;for(auto& eye:g.original.eyes)eye={1280,720,1040.,1040.,639.5,359.5,{}};for(auto& eye:g.rectified.eyes)eye={c.width,c.height,260.*scale,260.*scale,cw*0.5*scale-0.5,ch*0.5*scale-0.5,{}};g.original.right_to_left=g.rectified.right_to_left={1,0,0,.12,0,1,0,0,0,0,1,0,0,0,0,1};g.R1=g.R2={1,0,0,0,1,0,0,0,1};double f=260.*scale,cx=cw*0.5*scale-0.5,cy=ch*0.5*scale-0.5;g.P1={f,0,cx,0,0,f,cy,0,0,0,1,0};g.P2={f,0,cx,-f*.12,0,f,cy,0,0,0,1,0};c.geometry=g;for(unsigned eye=0;eye<2;++eye){c.maps[eye*2].resize(c.width*c.height);c.maps[eye*2+1].resize(c.width*c.height);for(unsigned y=0;y<c.height;++y)for(unsigned x=0;x<c.width;++x){c.maps[eye*2][y*c.width+x]=float((x-cx)/f*1040.+639.5);c.maps[eye*2+1][y*c.width+x]=float((y-cy)/f*1040.+359.5);}}return c;}
 static void gpu_4x_ortho_hybrid_and_repair(){
     auto context=std::make_shared<DaxaFoundation>(true);
     {
@@ -37,7 +38,7 @@ static void gpu_4x_ortho_hybrid_and_repair(){
         check(rb.disparity.size()==2*24*20&&rb.depth.size()==2*24*20);
         out={};full={};coarse={};stage.collect();full_pre.collect_completed_sources();depth.collect();
 
-        // Full 1280x720 (320x180 coarse 4x) production-scale contract & plateau rejection test
+        // Full 1280x720 (320x180 coarse 4x) production-scale contract, planar gap recovery, plateau rejection & step-edge non-bridging test
         auto low720=maps_custom(320,180,1),high720=maps_custom(320,180,4);
         auto cap720=std::make_shared<CaptureFrame>();
         cap720->source_width=2560;cap720->height=720;cap720->stride_bytes=5120;cap720->frame_id=42;
@@ -45,14 +46,18 @@ static void gpu_4x_ortho_hybrid_and_repair(){
         cap720->packed_yuyv.resize(2560*720*2,128);
         for(unsigned y=0;y<720;++y){
             for(unsigned x=0;x<1280;++x){
-                // Top region (orig y < 400 -> rect y < 440): rich texture with orig shift 8 px (rect disparity 16 px) and a uniform planar gap surrounded by compatible surface texture; bottom region (orig y >= 420 -> rect y >= 480): flat plateau
-                bool gap=(x>=600&&x<607&&y>=260&&y<267);
-                bool ring=(x>=588&&x<620&&y>=248&&y<280);
+                bool gap=(x>=598&&x<611&&y>=258&&y<271);
+                bool ring=(x>=584&&x<624&&y>=244&&y<284);
+                // Foreground step object at x_orig in [480, 520), y_orig in [240, 300) -> rect x in [320, 400), y in [120, 240)
+                bool fg_step=(x>=480&&x<520&&y>=240&&y<300);
+                bool step_gap=(x>=476&&x<480&&y>=250&&y<290);
                 uint32_t pat=((x*13+y*7)^((x/3)*29+(y/5)*19));
-                uint8_t luma=(y>=420||gap)?120:(ring?uint8_t(108+pat%25):uint8_t(40+pat%180));
+                uint8_t luma=(y>=420)?120:(gap?uint8_t(118+(x*7+y*13)%5):(step_gap?30:(fg_step?uint8_t(180+pat%50):(ring?uint8_t(108+pat%25):uint8_t(40+pat%140)))));
                 cap720->packed_yuyv[(y*2560+x)*2]=luma;
-                unsigned rx=(x>=8)?(x-8):0;
-                cap720->packed_yuyv[(y*2560+1280+rx)*2]=luma;
+                unsigned shift=fg_step?16u:8u;
+                unsigned rx=(x>=shift)?(x-shift):0;
+                uint8_t r_luma=gap?uint8_t(118+(x*11+y*5)%5):luma;
+                if(!step_gap)cap720->packed_yuyv[(y*2560+1280+rx)*2]=r_luma;
             }
         }
         CaptureLease in720=cap720;
@@ -62,34 +67,57 @@ static void gpu_4x_ortho_hybrid_and_repair(){
         DaxaPreprocess full720(high720,2,context);
         auto c720=depth720.enqueue(in720);
         auto f720=full720.enqueue(in720);
-        DaxaRefinementConfig base_cfg;base_cfg.disparities=128;base_cfg.borrow_full_frame=true;base_cfg.ortho_hybrid=true;base_cfg.fast_mode=false;base_cfg.selective_repair=false;
-        DaxaRefinementConfig rep_cfg=base_cfg;rep_cfg.selective_repair=true;
-        DaxaRefinementConfig plan_cfg=rep_cfg;plan_cfg.planar_recovery=true;
-        DaxaRefinement ref_base(context,c720,f720,base_cfg),ref_rep(context,c720,f720,rep_cfg),ref_plan(context,c720,f720,plan_cfg);
-        auto out_base=ref_base.process(c720,f720),out_rep=ref_rep.process(c720,f720),out_plan=ref_plan.process(c720,f720);
-        out_base.wait();out_rep.wait();out_plan.wait();
-        check(out_base.timings().total_gpu_ms>0.0&&out_rep.timings().total_gpu_ms>0.0&&out_plan.timings().planar_gpu_ms>0.0);
-        auto rb_base=ref_base.readback(out_base),rb_rep=ref_rep.readback(out_rep),rb_plan=ref_plan.readback(out_plan);
-        check(rb_rep.disparity.size()==2*1280*720);
-        check(std::memcmp(rb_rep.disparity.data(),rb_plan.disparity.data(),rb_rep.disparity.size()*sizeof(float))==0);
-        check(std::memcmp(rb_rep.confidence.data(),rb_plan.confidence.data(),rb_rep.confidence.size()*sizeof(float))==0);
-        check(rb_rep.validity==rb_plan.validity);
-        unsigned valid_textured=0,valid_flat_plateau=0,inferred_gap=0;
-        for(unsigned y=40;y<360;++y)for(unsigned x=40;x<1240;++x)if(rb_rep.validity[y*1280+x])++valid_textured;
-        for(unsigned y=540;y<680;++y)for(unsigned x=100;x<1180;++x)if(rb_rep.metric_validity[y*1280+x]||rb_plan.metric_validity[y*1280+x])++valid_flat_plateau;
-        const float expected_z=float(520.0*4.0*0.12/16.0);
-        for(size_t i=0;i<1280*720;++i){
-            if(rb_rep.provenance[i]==1u){
-                check(rb_plan.provenance[i]==1u&&rb_plan.validity[i]==1u&&rb_plan.metric_validity[i]==1u);
-                check(std::memcmp(&rb_rep.depth[i],&rb_plan.depth[i],sizeof(float))==0);
-                check(std::memcmp(&rb_rep.metric_confidence[i],&rb_plan.metric_confidence[i],sizeof(float))==0);
-            } else if(rb_plan.provenance[i]==2u){
-                check(rb_plan.validity[i]==0u&&rb_plan.metric_validity[i]==1u&&std::abs(rb_plan.depth[i]-expected_z)<0.5f);
-                ++inferred_gap;
+        for(bool fast_flag:{false,true}){
+            DaxaRefinementConfig base_cfg;base_cfg.disparities=128;base_cfg.borrow_full_frame=true;base_cfg.ortho_hybrid=true;base_cfg.fast_mode=fast_flag;base_cfg.selective_repair=false;
+            DaxaRefinementConfig rep_cfg=base_cfg;rep_cfg.selective_repair=true;
+            DaxaRefinementConfig plan_cfg=rep_cfg;plan_cfg.planar_recovery=true;plan_cfg.planar_min_anchors=10;
+            DaxaRefinement ref_base(context,c720,f720,base_cfg),ref_rep(context,c720,f720,rep_cfg),ref_plan(context,c720,f720,plan_cfg);
+            auto out_base=ref_base.process(c720,f720),out_rep=ref_rep.process(c720,f720),out_plan=ref_plan.process(c720,f720);
+            out_base.wait();out_rep.wait();out_plan.wait();
+            check(out_base.timings().total_gpu_ms>0.0&&out_rep.timings().total_gpu_ms>0.0&&out_plan.timings().planar_gpu_ms>0.0);
+            auto obs_meas=out_plan.observations(),obs_comp=out_plan.completed_observations();
+            check(obs_meas.buffer(DaxaObservationPlane::Depth)==out_plan.buffer(DaxaRefinementPlane::Depth));
+            check(obs_comp.buffer(DaxaObservationPlane::Depth)!=obs_meas.buffer(DaxaObservationPlane::Depth));
+            auto rb_base=ref_base.readback(out_base),rb_rep=ref_rep.readback(out_rep),rb_plan=ref_plan.readback(out_plan);
+            check(rb_rep.disparity.size()==2*1280*720);
+            // [P0] Measured planes (0..8) must remain 100% identical between selective_repair and planar_recovery!
+            check(std::memcmp(rb_rep.disparity.data(),rb_plan.disparity.data(),rb_rep.disparity.size()*sizeof(float))==0);
+            check(std::memcmp(rb_rep.confidence.data(),rb_plan.confidence.data(),rb_rep.confidence.size()*sizeof(float))==0);
+            check(rb_rep.validity==rb_plan.validity);
+            check(std::memcmp(rb_rep.depth.data(),rb_plan.depth.data(),rb_rep.depth.size()*sizeof(float))==0);
+            check(std::memcmp(rb_rep.metric_confidence.data(),rb_plan.metric_confidence.data(),rb_rep.metric_confidence.size()*sizeof(float))==0);
+            check(rb_rep.metric_validity==rb_plan.metric_validity);
+            check(rb_rep.provenance==rb_plan.provenance);
+            check(rb_rep.source_ids==rb_plan.source_ids&&rb_rep.age_ns==rb_plan.age_ns);
+            unsigned valid_textured=0,valid_flat_plateau=0,inferred_gap=0,inferred_step_bridge=0;
+            for(unsigned y=40;y<360;++y)for(unsigned x=40;x<1240;++x)if(rb_rep.validity[y*1280+x])++valid_textured;
+            for(unsigned y=440;y<680;++y)for(unsigned x=100;x<1180;++x)if(rb_rep.metric_validity[y*1280+x]||rb_plan.completed_validity[y*1280+x])++valid_flat_plateau;
+            for(unsigned y=250;y<290;++y)for(unsigned x=476;x<480;++x)if(rb_plan.completed_provenance[y*1280+x]==uint32_t(DaxaProvenance::PlanarInferred))++inferred_step_bridge;
+            const float expected_z=float(260.0*4.0*0.12/8.0);
+            for(size_t i=0;i<1280*720;++i){
+                check(rb_plan.provenance[i]==0u||rb_plan.provenance[i]==uint32_t(DaxaProvenance::Stereo));
+                if(rb_rep.provenance[i]==1u){
+                    check(rb_plan.completed_provenance[i]==1u&&rb_plan.completed_validity[i]==1u);
+                    check(std::memcmp(&rb_rep.depth[i],&rb_plan.completed_depth[i],sizeof(float))==0);
+                    check(std::memcmp(&rb_rep.metric_confidence[i],&rb_plan.completed_confidence[i],sizeof(float))==0);
+                    check(std::memcmp(&rb_rep.disparity[i],&rb_plan.completed_disparity[i],sizeof(float))==0);
+                } else if(rb_plan.completed_provenance[i]==uint32_t(DaxaProvenance::PlanarInferred)){
+                    check(rb_plan.validity[i]==0u&&rb_plan.metric_validity[i]==0u&&rb_plan.completed_validity[i]==1u);
+                    check(rb_plan.completed_confidence[i]>=0.05f&&rb_plan.completed_confidence[i]<=0.85f);
+                    unsigned px=unsigned(i%1280),py=unsigned(i/1280);
+                    if(px>=598&&px<611&&py>=258&&py<271){
+                        check(std::abs(rb_plan.completed_disparity[i]-8.0f)<0.25f&&std::abs(rb_plan.completed_depth[i]-expected_z)<0.25f);
+                        ++inferred_gap;
+                    }
+                }
             }
+            check(valid_textured>200000);
+            check(valid_flat_plateau==0);
+            check(inferred_gap>0);
+            check(inferred_step_bridge==0);
+            out_base={};out_rep={};out_plan={};obs_meas={};obs_comp={};ref_base.collect();ref_rep.collect();ref_plan.collect();
         }
-        check(valid_textured>200000&&valid_flat_plateau==0&&inferred_gap>0);
-        out_base={};out_rep={};out_plan={};f720={};c720={};ref_base.collect();ref_rep.collect();ref_plan.collect();full720.collect_completed_sources();depth720.collect();
+        f720={};c720={};full720.collect_completed_sources();depth720.collect();
     }
     context->close();
     check(!context->validation_errors&&!context->validation_warnings);

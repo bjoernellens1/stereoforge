@@ -23,6 +23,8 @@ _OPTIONAL_VALUE_ARGUMENTS = (
     ("coarse_right_reference_mode", "--coarse-right-reference-mode"),
     ("refinement_subpixel", "--refinement-subpixel"),
     ("selective_repair", "--selective-repair"),
+    ("planar_recovery", "--planar-recovery"),
+    ("completed_depth_topic", "--completed-depth-topic"),
     ("reliability", "--reliability"),
     ("depth_speckle_min_pixels", "--depth-speckle-min-pixels"),
     ("depth_speckle_delta_m", "--depth-speckle-delta-m"),
@@ -187,6 +189,10 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument("refinement_subpixel", default_value=""),
         DeclareLaunchArgument("selective_repair", default_value=""),
+        DeclareLaunchArgument("planar_recovery", default_value=""),
+        DeclareLaunchArgument(
+            "completed_depth_topic", default_value="/stereoforge/depth_completed"
+        ),
         DeclareLaunchArgument("depth_speckle_min_pixels", default_value="0"),
         DeclareLaunchArgument("depth_speckle_delta_m", default_value="0.05"),
         DeclareLaunchArgument("depth_speckle_delta_px", default_value="1.25"),

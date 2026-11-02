@@ -23,6 +23,8 @@ _OPTIONAL_VALUE_ARGUMENTS = (
     ("coarse_right_reference_mode", "--coarse-right-reference-mode"),
     ("refinement_subpixel", "--refinement-subpixel"),
     ("selective_repair", "--selective-repair"),
+    ("planar_recovery", "--planar-recovery"),
+    ("completed_depth_topic", "--completed-depth-topic"),
     ("device_id", "--device-id"),
     ("device_serial", "--device-serial"),
     ("depth_topic", "--depth-topic"),
@@ -210,6 +212,10 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument("refinement_subpixel", default_value=""),
         DeclareLaunchArgument("selective_repair", default_value=""),
+        DeclareLaunchArgument("planar_recovery", default_value=""),
+        DeclareLaunchArgument(
+            "completed_depth_topic", default_value="/stereoforge/depth_completed"
+        ),
         DeclareLaunchArgument("device_id", default_value="-1"),
         DeclareLaunchArgument("device_serial", default_value=""),
         DeclareLaunchArgument("depth_topic", default_value="/stereoforge/depth"),

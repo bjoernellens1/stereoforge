@@ -6,7 +6,7 @@ using namespace refinement_app;
 template<class T> static void exact_plane(const std::vector<T>& a,const std::vector<T>& b){check(a.size()==b.size()&&(a.empty()||std::memcmp(a.data(),b.data(),a.size()*sizeof(T))==0),"raw reuse differs from direct refinement");}
 static void exact_readback(const DaxaRefinementReadback& a,const DaxaRefinementReadback& b){
 #define EQ(n) exact_plane(a.n,b.n)
- EQ(disparity);EQ(confidence);EQ(validity);EQ(depth);EQ(metric_confidence);EQ(metric_validity);EQ(provenance);EQ(source_ids);EQ(age_ns);EQ(prediction);EQ(prediction_validity);EQ(lower);EQ(upper);EQ(reason);EQ(method);EQ(winner);EQ(best_cost);EQ(second_cost);EQ(supported_candidates);EQ(evaluated_candidates);EQ(subpixel_applied);EQ(raw_disparity);EQ(raw_confidence);EQ(raw_validity);EQ(census);EQ(census_validity);EQ(luma);EQ(support);for(unsigned eye=0;eye<2;++eye)exact_plane(a.rectified_rgb[eye],b.rectified_rgb[eye]);
+ EQ(disparity);EQ(confidence);EQ(validity);EQ(depth);EQ(metric_confidence);EQ(metric_validity);EQ(provenance);EQ(source_ids);EQ(age_ns);EQ(prediction);EQ(prediction_validity);EQ(lower);EQ(upper);EQ(reason);EQ(method);EQ(winner);EQ(best_cost);EQ(second_cost);EQ(supported_candidates);EQ(evaluated_candidates);EQ(subpixel_applied);EQ(raw_disparity);EQ(raw_confidence);EQ(raw_validity);EQ(census);EQ(census_validity);EQ(luma);EQ(support);EQ(completed_disparity);EQ(completed_depth);EQ(completed_confidence);EQ(completed_validity);EQ(completed_provenance);EQ(completed_source_ids);EQ(completed_age_ns);for(unsigned eye=0;eye<2;++eye)exact_plane(a.rectified_rgb[eye],b.rectified_rgb[eye]);
 #undef EQ
 }
 int main(int argc,char**argv){try{

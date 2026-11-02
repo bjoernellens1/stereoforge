@@ -19,7 +19,7 @@ These buffers do not contain virtual-view depth or original-camera disparity.
 | `Depth` | float32 | Rectified axial Z, metres | NaN (`0x7fc00000`) |
 | `Confidence` | float32 | Score in [0,1], not calibrated uncertainty | 0 |
 | `Validity` | uint32 | 0 or 1 | 0 |
-| `Provenance` | uint32 | Existing observation provenance code | 0 |
+| `Provenance` | uint32 | Observation provenance (`0=INVALID`, `1=STEREO`, `2=REPROJECTED`, `3=FUSED`, `4=NEURAL`, `6=PLANAR_INFERRED`) | 0 |
 | `SourceIds` | signed int64 | Original selected observation identity | -1 |
 | `AgeNs` | signed int64 | Selected observation age, nanoseconds | 0 |
 
@@ -27,6 +27,15 @@ Each scalar plane has `2 * width * height` elements. The first four use four
 bytes per element; IDs and ages use eight. Validity must gate metric reads;
 valid-looking RGB alone never establishes depth. Producer contracts establish
 canonical contents: this adapter does not scan or read back every pixel.
+
+For `DaxaRefinement`, `DaxaRefinement::Frame::observations()` always returns
+strictly measured observations (`Provenance` in `{0, 1}`), while
+`DaxaRefinement::Frame::completed_observations()` returns the left-eye completed
+planes (`CompletedDepth`, `CompletedConfidence`, `CompletedValidity`,
+`CompletedProvenance`, `CompletedSourceIds`, `CompletedAgeNs`, `CompletedDisparity`)
+where pixels recovered by `planar_recovery` carry `DaxaProvenance::PlanarInferred = 6`
+(`SF_PROVENANCE_PLANAR_INFERRED = 6u`). Planar-inferred pixels never overwrite the
+measured observation planes (`0..8`) and never reuse `DaxaProvenance::Reprojected = 2`.
 
 Four image descriptors expose tightly packed decoded RGB: `OriginalLeft`,
 `OriginalRight`, `RectifiedLeft` and `RectifiedRight`. Each uses a uint32 per pixel

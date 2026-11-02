@@ -12,6 +12,7 @@ class Provenance(IntEnum):
     FUSED = 3
     NEURAL = 4
     STEREO_LEFT_AGGREGATED = 5
+    PLANAR_INFERRED = 6
 
 @dataclass(frozen=True)
 class CameraModel:
@@ -108,7 +109,7 @@ class DepthFrame:
             raise ValueError("depth plane shape mismatch")
         if self.valid.dtype!=np.bool_ or np.any(self.valid & (~np.isfinite(self.depth_m) | (self.depth_m<=0))):
             raise ValueError("valid depth must be finite and positive")
-        if not np.issubdtype(self.source_ids.dtype,np.integer) or not np.issubdtype(self.age_ns.dtype,np.integer) or np.any(self.valid & ((self.source_ids<0)|(self.provenance<1)|(self.provenance>4))):
+        if not np.issubdtype(self.source_ids.dtype,np.integer) or not np.issubdtype(self.age_ns.dtype,np.integer) or np.any(self.valid & ((self.source_ids<0)|(self.provenance<1)|(self.provenance>6))):
             raise ValueError("valid depth requires observation identity and known provenance")
         if not np.isfinite(self.confidence).all() or np.any((self.confidence<0)|(self.confidence>1)) or np.any(self.age_ns<0):
             raise ValueError("invalid confidence or age")

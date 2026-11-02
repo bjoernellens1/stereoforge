@@ -13,6 +13,13 @@ struct DaxaRefinementConfig {
     bool allow_derived_coarse=false;
     bool selective_repair=false;
     bool planar_recovery=false;
+    unsigned planar_min_anchors=10;
+    bool planar_coarse_affine_fit=true;
+    bool planar_ray_crossing_guard=true;
+    bool planar_coarse_lr_guard=true;
+    float planar_coarse_lr_tolerance=2.f;
+    float planar_patch_luma_tolerance=12.f;
+    float planar_max_rmse=.65f;
     void validate()const;
 };
 void validate_daxa_refinement_geometry(const DaxaRectification& coarse,const DaxaRectification& target);
@@ -29,6 +36,9 @@ struct DaxaRefinementReadback {
     std::vector<uint32_t> validity,metric_validity,provenance,prediction_validity,lower,upper,reason,method,winner,best_cost,second_cost,supported_candidates,evaluated_candidates,subpixel_applied,raw_validity,census,census_validity,luma,support;
     std::array<std::vector<uint32_t>,2> rectified_rgb;
     std::vector<int64_t> source_ids,age_ns;
+    std::vector<float> completed_disparity,completed_depth,completed_confidence;
+    std::vector<uint32_t> completed_validity,completed_provenance;
+    std::vector<int64_t> completed_source_ids,completed_age_ns;
 };
 struct DaxaRefinementTiming {
     static constexpr unsigned stages=5;
@@ -49,6 +59,7 @@ public:
         void wait()const;bool ready()const;uint64_t generation()const;uint64_t submit_ticket()const;
         uint32_t width()const;uint32_t height()const;
         DaxaObservationFrame observations()const;
+        DaxaObservationFrame completed_observations()const;
         // Borrow mode has separate eye buffers: buffer(Luma/Support) throws.
         // readback() reconstructs those logical [eye][y][x] planes after completion.
         // Rectified RGB buffers and observations reference the retained source frame.
