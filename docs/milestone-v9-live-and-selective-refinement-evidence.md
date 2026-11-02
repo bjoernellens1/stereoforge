@@ -1,8 +1,8 @@
-# StereoForge Milestone v9: Live Qualification, Fixed-Region Accuracy Audit & Selective 4× Refinement (`240+ FPS`)
+# StereoForge Milestone v9.1: Live 60 Hz Physical Camera Qualification, Non-Circular Accuracy Audit & Selective 4× Refinement (`240+ FPS`)
 
 ## Overview
 
-This document records the tracked hardware, quantitative accuracy, and end-to-end performance evidence for **Milestone v9 (Steps 7–10)** on `AMD Radeon 8060S Graphics (RADV STRIX_HALO, Mesa 26.2.5)` and `ZED 2 (SN26041639, 1280×720, D=128)`:
+This document records the tracked hardware, non-circular accuracy, newly-admitted pixel cohort, and end-to-end performance evidence for **Milestone v9.1 (Steps 7–10)** on `AMD Radeon 8060S Graphics (RADV STRIX_HALO, Mesa 26.2.5)` and physical `ZED 2 (SN26041639, 1280×720, D=128)`:
 
 - **Tracked JSON Evidence:**
   - [`docs/evidence/v9-live-and-audit/step7-10-live-and-e2e-qualification-v9.json`](evidence/v9-live-and-audit/step7-10-live-and-e2e-qualification-v9.json)
@@ -13,69 +13,76 @@ This document records the tracked hardware, quantitative accuracy, and end-to-en
 
 ---
 
-## 1. Step 7 — ZED 2 Hardware & 60 Hz ROS 2 Delivery Qualification (`180` Frames)
+## 1. Step 7 (Gate 1) — Real Physical `60 Hz` ZED 2 Camera (`--source camera`) + Concurrent ROS 2 Subscriber Delivery (`180` Frames)
 
-### 1.1 Physical ZED 2 Hardware Probe
-- `/dev/video0` & `/dev/video1`: `ZED 2` (`SN26041639`), connected at `5000 Mbps` USB 3.0 (`/sys/bus/usb/devices/2-1.3`), HID interface `active` (`/sys/bus/usb/devices/3-5.3.2`), UVC interface in kernel USB runtime `suspended` state (OV580 UVC streaming requires a root USB port reset or physical replug to wake from USB suspend).
-- All `60 Hz` ROS 2 publisher qualifications execute against the checksum-verified physical ZED 2 `SN26041639` packed `YUYV` stream (`186` frames: `1` prototype + `5` warmup + `180` published frames at `60.0 Hz`, `--mode depth-rgb --validation --thread-cpu-timing`).
+### 1.1 Physical ZED 2 Hardware & Automatic OV580 Wake/Reset Recovery
+- `/dev/video0` & `/dev/video1`: `ZED 2` (`SN26041639`), connected at `5000 Mbps` USB 3.0 (`/sys/bus/usb/devices/2-1.3`, `idle_runtime_power_status: "active"`).
+- Both `src/capture.cpp` (`NativeCapture`) and `src/zed_capture.cpp` (`stereoforge._zed_capture`) automatically invoke `sl_oc::sensors::SensorCapture::resetSensorModule()` (`HIDIOCSFEATURE(2)` `[0x21, 0xE1]` on `/dev/hidraw2`) if V4L2 video initialization fails or OV580 serial readback returns `<= 0` after USB U3 suspend.
+- All 4 primary `60 Hz` runs execute live physical acquisition (`--source camera`) paired with a concurrent [`stereoforge_ros2_delivery_probe`](../apps/ros2_delivery_probe.cpp) subscriber process verifying payload sizes, non-zero content, timestamps, and end-to-end DDS arrival latency. Unpaced offline replay runs (`--source replay`) are reported separately under `unpaced_offline_replay_ros2_e2e_runs`.
 
-### 1.2 Sustained `60 Hz` ROS 2 Depth + RGB Delivery (`180` Frames)
+### 1.2 Live Physical `60 Hz` Camera (`--source camera`) + Concurrent Subscriber E2E Results (`180` Frames)
 
-| ROS 2 Publisher Configuration (`--mode depth-rgb --validation`) | Published Depth / RGB | Synced Stamp Pairs | Ring / Queue / Slot Drops | Producer Processing Rate | Total Frame-to-Publish (`p50 / p95 / p99`) | Enqueue CPU `p50` | Host Copy `p50` | ROS Publish `p50` |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `4x_independent_180f` (`layered-per-path`, `independent-sgm`, `repair=0`) | `180 / 180` | `180 / 180` | **`0`** | **`289.05 FPS`** | `4.268 / 6.154 / 7.060 ms` | `0.465 ms` | `0.199 ms` | `0.080 ms` |
-| `4x_derived_180f` (`shared-census-sequential`, `left-aggregated-selection`, `repair=0`) | `180 / 180` | `180 / 180` | **`0`** | **`307.99 FPS`** | `6.267 / 6.822 / 7.014 ms` | `0.307 ms` | `0.122 ms` | `0.059 ms` |
-| **`4x_selective_repair_independent_180f` (`repair=1`)** | `180 / 180` | `180 / 180` | **`0`** | **`286.68 FPS`** | `4.872 / 7.109 / 7.439 ms` | `0.548 ms` | `0.159 ms` | `0.092 ms` |
-| **`4x_selective_repair_derived_180f` (`repair=1`)** | `180 / 180` | `180 / 180` | **`0`** | **`295.43 FPS`** | `6.620 / 6.990 / 7.163 ms` | `0.346 ms` | `0.126 ms` | `0.086 ms` |
-| `full_sgm_independent_30f` (`full-sgm`, `independent-sgm`) | `30 / 30` | `30 / 30` | `0` | `24.18 FPS` | `81.936 / 83.305 / 83.423 ms` | `0.539 ms` | `0.631 ms` | `0.319 ms` |
-
-### 1.3 Multi-Sequence Regime Evaluation (`Static`, `Moving-Camera Pan`, `Thin-Object`, `Low-Texture`)
-
-| Sequence Regime (`320×180` Coarse `4×` Scale, `D=32`) | Legacy Census 24-bit (`LR / Coherent / Planar RMSE`) | Ortho-Hybrid Independent (`LR / Coherent / Planar RMSE`) | Ortho-Hybrid Derived (`LR / Coherent / Planar RMSE`) |
-| --- | ---: | ---: | ---: |
-| `static_camera` | `42.47% / 33.36% / 2.298 px` | **`43.88% / 39.25% / 0.815 px`** | **`53.57% / 46.06% / 1.122 px`** |
-| `moving_camera_pan` | `42.50% / 33.27% / 2.534 px` | **`43.83% / 39.11% / 0.751 px`** | **`53.39% / 45.63% / 1.148 px`** |
-| `thin_object_structures` | `42.51% / 33.30% / 2.352 px` | **`45.12% / 40.31% / 0.848 px`** | **`53.62% / 45.85% / 0.969 px`** |
-| `low_texture_attenuated` | `39.91% / 31.01% / 1.947 px` | **`44.05% / 40.09% / 0.533 px`** | **`56.97% / 50.48% / 0.670 px`** |
+| Live Physical Camera Run (`--source camera --mode depth-rgb --validation`) | Capture / Publish / Subscriber Cadence | Published Depth / RGB | Subscriber Received (`KeepLast(1)`) | Measured-Window Queue / Ring / Slot Drops | Camera Inter-Frame Interval `p50` (`std`) | Host Ingress → Enqueue `p50` | Frame Processing → Publish `p50 / p95` | ROS 2 DDS Publish → Subscriber `p50` | Host Ingress → Subscriber E2E `p50` |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `4x_independent_180f` (`layered-per-path`, `independent-sgm`, `repair=0`) | `59.01 / 58.34 / 57.91 FPS` | `180 / 180` | `175 / 175` (`97.2%`) | **`0 / 0 / 0`** | `16.666 ms` (`0.098 ms`) | `0.009 ms` | `5.741 / 6.255 ms` | `0.310 ms` | **`6.125 ms`** |
+| `4x_derived_180f` (`shared-census-sequential`, `left-aggregated-selection`, `repair=0`) | `60.00 / 59.32 / 60.26 FPS` | `180 / 180` | `179 / 179` (`99.4%`) | **`0 / 0 / 0`** | `16.666 ms` (`0.099 ms`) | `0.010 ms` | `5.520 / 5.938 ms` | `0.340 ms` | **`5.876 ms`** |
+| **`4x_selective_repair_independent_180f` (`repair=1`)** | **`60.00 / 59.31 / 58.38 FPS`** | **`180 / 180`** | **`174 / 174` (`96.7%`)** | **`0 / 0 / 0`** | **`16.666 ms` (`0.099 ms`)** | **`0.012 ms`** | **`5.859 / 6.945 ms`** | **`0.336 ms`** | **`6.368 ms`** |
+| **`4x_selective_repair_derived_180f` (`repair=1`)** | **`60.00 / 59.31 / 59.26 FPS`** | **`180 / 180`** | **`170 / 170` (`94.4%`)** | **`0 / 0 / 0`** | **`16.666 ms` (`0.100 ms`)** | **`0.009 ms`** | **`5.643 / 6.322 ms`** | **`0.177 ms`** | **`5.856 ms`** |
 
 ---
 
-## 2. Step 8 — Visual & Quantitative Accuracy Audit on Identical Spatial Support
+## 2. Step 8 (Gate 2) — Non-Circular Quantitative Accuracy Audit
 
-Rather than evaluating planar fit RMSE only on estimator-dependent surviving patches, all 10 pipelines are evaluated on **identical, fixed spatial regions** on the `1280×720` rectified left frame:
-1. **`fixed_planar_20tiles` (`20,480 px`)**: Exact same 20 non-overlapping $32\times 32$ smooth planar tiles evaluated across every pipeline (`20/20` tiles supported by all 10 pipelines).
-2. **`fixed_boundary_bands` (`196,742 px`)**: $\pm 2\text{ px}$ bands around strong Sobel edges ($|\nabla L_L| \ge P_{85}$).
-3. **`fixed_low_texture_tiles` (`69,632 px`)**: Interior $32\times 32$ tiles with $2.0 \le \sigma(L_L) \le 9.5$.
-4. **`fixed_repetitive_texture_tiles` (`2,048 px`)**: High Laplacian-to-gradient oscillation tiles.
-5. **Consensus Reference (`13.81%` of image)**: Pixels where both `Full-Res Independent Ortho-Hybrid SGM` and `OpenCV StereoSGBM` (on exact integer luma) independently pass Left-Right consistency and agree within $\le 1.0\text{ px}$.
+All circular consensus references (`v_full_ind & v_ocv`) have been removed and replaced by two strictly independent references:
 
-| Pipeline (`1280×720`, `D=128`) | Speed (`p50`) | Overall LR-Valid | Coherent Coverage | Fixed 20 Planar Tiles SVD RMSE (`20/20` Tiles) | Fixed 20 Planar Tile Coverage | Disparity RMSE vs Consensus Ref | Bad `>2 px` vs Consensus Ref | Good `≤1 px` Completeness of Ref | Boundary Band Coverage | Low-Texture Tile Coverage |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `Legacy Census 24b Full-Res` | `28.8 FPS` | `20.82%` | `11.31%` | `11.522 px` | `37.13%` | `8.274 px` | `8.14%` | `46.42%` | `39.42%` | `21.49%` |
-| `Full-Res Ortho-Hybrid (Independent)` | `22.6 FPS` | `29.11%` | `20.60%` | **`0.628 px`** | `65.67%` | `0.205 px` | `0.00%` | `100.00%` | `42.37%` | `29.05%` |
-| `Full-Res Ortho-Hybrid (Derived Right)` | `48.9 FPS` | `41.28%` | `25.53%` | `1.289 px` | `65.88%` | `0.200 px` | `0.00%` | `90.44%` | `53.52%` | `44.31%` |
-| `2× Refinement (Derived Right)` | `163.4 FPS` | `29.48%` | `19.08%` | `1.093 px` | `48.36%` | `2.178 px` | `3.97%` | `57.64%` | `39.33%` | `31.27%` |
-| `2× Selective Repair (Derived Right)` | `171.0 FPS` | `41.11%` | `31.69%` | `1.226 px` | `65.66%` | `2.163 px` | `4.84%` | `70.24%` | `51.60%` | `45.58%` |
-| `4× Refinement (Independent)` | `282.1 FPS` | `26.04%` | `17.81%` | `1.025 px` | `49.48%` | `3.164 px` | `7.39%` | `50.26%` | `34.81%` | `26.71%` |
-| **`4× Selective Repair (Independent)`** | **`277.5 FPS`** | **`36.40%`** | **`30.14%`** | **`1.081 px`** | **`67.55%`** | **`3.304 px`** | **`8.10%`** | **`61.68%`** | **`45.34%`** | **`39.58%`** |
-| `4× Refinement (Derived Right)` | `297.3 FPS` | `28.15%` | `18.53%` | `1.016 px` | `48.38%` | `2.700 px` | `8.15%` | `49.12%` | `36.27%` | `31.93%` |
-| **`4× Selective Repair (Derived Right)`** | **`279.9 FPS`** | **`38.84%`** | **`31.56%`** | **`1.095 px`** | **`66.37%`** | **`2.856 px`** | **`8.80%`** | **`60.49%`** | **`47.20%`** | **`46.01%`** |
-| `OpenCV StereoSGBM (Exact Luma Ref)` | `CPU ref` | `29.40%` | `28.04%` | `0.240 px` | `82.25%` | `0.205 px` | `0.00%` | `100.00%` | `46.80%` | `30.17%` |
+### 2.1 Reference A: 5-Scene `1280×720` Known-Ground-Truth Suite on Native Vulkan GPU (`daxa_refinement_benchmark --synthetic-yuyv`)
+
+Evaluated across `slanted_planes`, `occlusion_boundaries`, `thin_structures`, `repetitive_and_subpixel`, and `low_texture_surface` (`1280×720`, `D=128`):
+
+| Pipeline (`1280×720` Native Vulkan GPU Execution) | Mean Valid Coverage | Mean Disparity MAE (`px`) | Mean Disparity RMSE (`px`) | Mean Depth MAE (`mm`) | Mean Bad `>1 px` (`%` of Valid) | Mean Bad `>2 px` (`%` of Valid) | Unconditional Good `≤1 px` Completeness |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `4x Refinement (Independent)` | `93.83%` | `0.187 px` | `0.268 px` | `14.1 mm` | `0.28%` | `0.07%` | `93.55%` |
+| **`4x Selective Repair (Independent)`** | **`97.74%` (`+3.91%`)** | **`0.173 px`** | **`0.246 px`** | **`13.0 mm`** | **`0.17%` (`-0.11%`)** | **`0.05%` (`-0.02%`)** | **`97.57%` (`+4.02%`)** |
+| `4x Refinement (Derived Right)` | `93.77%` | `0.194 px` | `0.278 px` | `14.6 mm` | `0.34%` | `0.08%` | `93.44%` |
+| **`4x Selective Repair (Derived Right)`** | **`97.67%` (`+3.90%`)** | **`0.177 px`** | **`0.252 px`** | **`13.4 mm`** | **`0.20%` (`-0.14%`)** | **`0.06%` (`-0.02%`)** | **`97.47%` (`+4.03%`)** |
+
+### 2.2 Reference B: 5-Frame ZED 2 Independent Epipolar ZNCC Subpixel Reference (`record_ordinal 0..4`)
+
+Evaluated against an estimator-independent 1D $9\times 9$ epipolar ZNCC subpixel template matcher (`peak ZNCC >= 0.90`, second-peak ratio `<= 0.78`, bidirectional LR symmetry `<= 0.65 px`) across all 5 distinct captured ZED 2 frames (`frame_id 5..9`), plus 20 fixed $32\times 32$ planar tiles selected purely from ZNCC planarity:
+
+| Pipeline (`5` Distinct ZED 2 Frames, `1280×720`) | 5-Frame Mean LR-Valid Coverage | 5-Frame Mean ZNCC MAE (`px`) | 5-Frame Mean ZNCC Bad `>1 px` | 5-Frame Mean ZNCC Bad `>2 px` | Frame 0 Coherent Coverage | Fixed 20 Planar Tiles SVD RMSE (`20/20` Tiles) | Fixed 20 Planar Tile Coverage |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `Legacy Census 24b Full-Res` | `20.82%` (F0) | `3.151 px` (F0) | `13.43%` (F0) | `10.67%` (F0) | `11.31%` | `11.675 px` | `46.67%` |
+| `Full-Res Ortho-Hybrid (Independent)` | `29.11%` (F0) | `0.782 px` (F0) | `3.21%` (F0) | `1.39%` (F0) | `20.60%` | `0.415 px` | `78.59%` |
+| `4x Refinement (Independent)` | `26.75%` | `0.898 px` | `6.00%` | `2.67%` | `17.81%` | `0.642 px` | `59.43%` |
+| **`4x Selective Repair (Independent)`** | **`28.28%` (`+1.53%`)** | **`0.835 px` (`-0.063 px`)** | **`5.24%` (`-0.76%`)** | **`1.88%` (`-0.79%`)** | **`19.99%` (`+2.18%`)** | **`0.594 px`** | **`63.77%`** |
+| `4x Refinement (Derived Right)` | `29.33%` | `0.952 px` | `6.70%` | `3.13%` | `18.53%` | `0.583 px` | `60.27%` |
+| **`4x Selective Repair (Derived Right)`** | **`30.78%` (`+1.45%`)** | **`0.843 px` (`-0.109 px`)** | **`5.68%` (`-1.02%`)** | **`2.03%` (`-1.10%`)** | **`20.80%` (`+2.27%`)** | **`0.542 px`** | **`64.86%`** |
 
 ---
 
-## 3. Step 9 & Step 10 — Budgeted Selective 4× Refinement & End-to-End `240 FPS` Qualification
+## 3. Step 9 (Gate 5) — Newly-Admitted Pixel Cohort Decomposition & Hardened 2-Pixel Peak Rule
 
-### 3.1 Selective Repair Mechanism (`--selective-repair 1`, bit `8u` of `params.subpixel`)
-Diagnostics on the `4×` refinement `reason.u32` plane revealed two dominant causes of coverage loss relative to full-resolution SGM:
-1. **`REF_NO_PRIOR` (`33.68%` of pixels)**: Coarse $4\times$ holes left full-resolution pixels without a search center when the $2\times 2$ and $3\times 3$ coarse neighborhoods were empty. Adding a conditional $5\times 5$ coarse hole fallback (`w_valid == 0.f`) recovers `+8.35%` of pixels with zero overhead on already-valid pixels.
-2. **`REF_AMBIGUOUS` (`13.47%` of pixels, of which `95%` had `best_cost <= 20` out of `192` bits)**: Because `second` in local refinement includes adjacent disparities `d = winner ± 1` (`minus` and `plus`), 1-pixel wide match plateaus on smooth surfaces tied (`second == best`) and were rejected prior to Left-Right consistency. Resolving 1-px adjacent ties on low-cost peaks (`best <= 24u && (plus == best || minus == best)`) while keeping independent Left-Right verification (`|d_L - d_R| <= 1 px`), combined with boundary window expansion at discontinuities (`mx - mn > 1.5 * max_span`) and $\pm 3\text{ px}$ search expansion only on poor matches (`best > 36u`), recovers **`+12.33%` to `+13.03%` coherent coverage** for only **`+0.059 ms` to `+0.210 ms`** of GPU time.
+In [`python/stereoforge/shaders/daxa/refinement.slang`](../python/stereoforge/shaders/daxa/refinement.slang), conditional per-pixel `selective_repair` (`bit 8u` of `params.subpixel`) tracks `best`, `second`, and `third` (`third_best`) Hamming costs so 1-px tie resolution only admits **isolated 2-pixel subpixel peaks** (`best <= 14u`, `plus == best || minus == best`, `third >= best + max(p.min_margin + 2u, 3u)`), rejecting $\ge 3$-pixel flat/repetitive plateaus:
 
-### 3.2 End-to-End `240 FPS` (`4.167 ms`) GPU & Host Latency Qualification (`120` Frames, `20` Warmup, `--validation`)
+| Disjoint Pixel Cohort (`1280×720` ZED 2 Frame 0) | `Independent 4×` Pixels (`%` Image) | `Independent 4×` ZNCC MAE / Bad `>1 px` / Bad `>2 px` | `Derived 4×` Pixels (`%` Image) | `Derived 4×` ZNCC MAE / Bad `>1 px` / Bad `>2 px` |
+| --- | ---: | ---: | ---: | ---: |
+| `baseline_valid` ($V_{\text{base}}$) | `239,379` (`25.97%`) | `0.909 px / 5.47% / 2.46%` | `259,465` (`28.15%`) | `1.044 px / 6.08% / 2.98%` |
+| `selective_repair_valid` ($V_{\text{rep}}$) | `252,665` (`27.42%`) | **`0.857 px / 4.77% / 1.77%`** | `272,729` (`29.59%`) | **`0.916 px / 5.19% / 1.98%`** |
+| **`newly_admitted_total` ($\Delta V_+ = V_{\text{rep}} \setminus V_{\text{base}}$)** | **`17,070` (`1.85%`)** | **`0.936 px / 5.74% / 1.80%`** | **`17,770` (`1.93%`)** | **`1.046 px / 6.71% / 1.76%`** |
+| — `cohort_a_recovered_coarse_hole_or_span` | `484` (`0.05%`) | `0.000 px / 0.00% / 0.00%` | `258` (`0.03%`) | `0.000 px / 0.00% / 0.00%` |
+| — `cohort_b_accepted_2px_subpixel_peak` | `16,449` (`1.79%`) | `0.941 px / 5.78% / 1.81%` | `17,361` (`1.88%`) | `1.053 px / 6.75% / 1.77%` |
+| — `cohort_c_expanded_search_window` | `137` (`0.02%`) | `0.233 px / 0.00% / 0.00%` | `151` (`0.02%`) | `0.159 px / 0.00% / 0.00%` |
 
-| Dual-Preprocess + Refinement Pipeline (`1280×720`, `D=128`) | Host Wall `p50` (`FPS`) | Host Wall `p95` (`FPS`) | Host Wall `p99` (`FPS`) | Enqueue CPU `p50` | Wait CPU `p50` | Extra GPU Time (`Δp50`) | Coherent Coverage Gain (`ΔCoh`) | Coherent Gain per ms | 30-Plane Bit-Exact | Vulkan Validation Errors / Warnings |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :---: | ---: |
-| `dual4x_ortho-hybrid_layered_fast1` (`Independent`, `repair=0`) | `3.545 ms` (`282.1 FPS`) | `4.228 ms` (`236.5 FPS`) | `4.604 ms` (`217.2 FPS`) | `0.289 ms` | `3.219 ms` | baseline | `17.81%` | — | `true` | `0 / 0` |
-| **`dual4x_ortho-hybrid_layered_fast1_repair1` (`Independent`, `repair=1`)** | **`3.604 ms` (`277.5 FPS`)** | **`3.696 ms` (`270.5 FPS`)** | **`3.816 ms` (`262.1 FPS`)** | `0.298 ms` | `3.275 ms` | **`+0.059 ms`** | **`30.14%` (`+12.33%`)** | **`+208.98% / ms`** | **`true`** | **`0 / 0`** |
-| `dual4x_ortho-hybrid_derived_fast1` (`Derived`, `repair=0`) | `3.363 ms` (`297.3 FPS`) | `3.458 ms` (`289.2 FPS`) | `3.607 ms` (`277.2 FPS`) | `0.292 ms` | `3.037 ms` | baseline | `18.53%` | — | `true` | `0 / 0` |
-| **`dual4x_ortho-hybrid_derived_fast1_repair1` (`Derived`, `repair=1`)** | **`3.573 ms` (`279.9 FPS`)** | **`3.673 ms` (`272.3 FPS`)** | **`3.723 ms` (`268.6 FPS`)** | `0.288 ms` | `3.257 ms` | **`+0.210 ms`** | **`31.56%` (`+13.03%`)** | **`+62.05% / ms`** | **`true`** | **`0 / 0`** |
+---
+
+## 4. Step 10 (Gate 4) — Hardware GPU Timestamps & Multi-Trial Interleaved `240 FPS` (`4.167 ms`) Qualification
+
+Evaluated across **3 interleaved trials × 5 distinct ZED 2 frames (`360` measured frames per configuration)** plus a canonical `120`-frame run (`20` warmup) with hardware `TimelineQueryPool` GPU timestamps:
+
+| Dual-Preprocess + Refinement Pipeline (`1280×720`, `D=128`) | 3-Trial × 5-Frame Host Wall `p50 / p95` (`std`) | 3-Trial × 5-Frame GPU Queue Span `p50 / p95` (`std`) | Canonical 120f Host Wall `p50` (`FPS`) | Canonical 120f GPU Span `p50` (`FPS`) | GPU Coarse / Guided Match / Total (`ms`) | 30-Plane Bit-Exact | Vulkan Validation Errors / Warnings |
+| --- | ---: | ---: | ---: | ---: | ---: | :---: | ---: |
+| `dual4x_ortho-hybrid_layered_fast1` (`Independent`, `repair=0`) | `3.310 / 3.428 ms` (`0.076 ms`) | `2.703 / 2.734 ms` (`0.030 ms`) | `3.269 ms` (`305.9 FPS`) | `2.690 ms` (`371.7 FPS`) | `1.285 / 0.563 / 2.702 ms` | `true` | `0 / 0` |
+| **`dual4x_ortho-hybrid_layered_fast1_repair1` (`Independent`, `repair=1`)** | **`3.406 / 3.665 ms` (`0.140 ms`)** | **`2.814 / 2.893 ms` (`0.072 ms`)** | **`3.355 ms` (`298.1 FPS`)** | **`2.788 ms` (`358.7 FPS`)** | **`1.272 / 0.678 / 2.792 ms`** | **`true`** | **`0 / 0`** |
+| `dual4x_ortho-hybrid_derived_fast1` (`Derived`, `repair=0`) | `3.203 / 3.311 ms` (`0.081 ms`) | `2.626 / 2.668 ms` (`0.041 ms`) | `3.186 ms` (`313.8 FPS`) | `2.626 ms` (`380.7 FPS`) | `1.166 / 0.590 / 2.626 ms` | `true` | `0 / 0` |
+| **`dual4x_ortho-hybrid_derived_fast1_repair1` (`Derived`, `repair=1`)** | **`3.334 / 3.432 ms` (`0.085 ms`)** | **`2.753 / 2.789 ms` (`0.042 ms`)** | **`3.347 ms` (`298.7 FPS`)** | **`2.747 ms` (`364.0 FPS`)** | **`1.164 / 0.724 / 2.747 ms`** | **`true`** | **`0 / 0`** |

@@ -1,13 +1,19 @@
 #!/usr/bin/env python3
-"""Milestone v9 (Steps 7 & 10): Live ZED 2 Hardware Diagnostics, 180-Frame (60 Hz)
-End-to-End ROS 2 Delivery Qualification, Multi-Sequence Evaluation, and Latency Audit."""
+"""Milestone v9.1 (Steps 7 & 10, Gates 1 & 4):
+1. Real Live Physical ZED 2 Camera (--source camera) 60 Hz End-to-End ROS 2 Publisher + Subscriber Qualification.
+2. Timestamped Offline Replay (--source replay) Qualification (explicitly separated from live camera).
+3. Multi-Trial Interleaved 5-Frame Hardware GPU Timestamp + Host-Wall 240 FPS Qualification.
+4. Multi-Sequence Challenging Regime Evaluation."""
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import shutil
+import signal
 import struct
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +21,6 @@ import cv2
 import numpy as np
 
 from benchmarks.compare_daxa_preprocess import read_capture_record
-from benchmarks.lr_confidence_audit_v6 import read_fixture_luma
 from benchmarks.matching_cost_inspector_v8 import (
     aggregate_sgm_4path_vectorized,
     build_cost_volumes,
@@ -28,7 +33,10 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MANIFEST = ROOT / "configs/cameras/zed2/fixtures/SN26041639-fixture/manifest.json"
 COARSE_4X_MANIFEST = ROOT / "artifacts/depth-video/v8-review-milestone/fixtures/zed2_320x180/manifest.json"
 CLOCK_MAP = ROOT / "configs/cameras/zed2/clock_maps/SN26041639-clock-map.json"
-PUBLISHER_BIN = ROOT / "build/ros-daxa-native/stereoforge_ros2_depth_publisher"
+BUILD_DIR = ROOT / "build/ros-daxa-native"
+PUBLISHER_BIN = BUILD_DIR / "stereoforge_ros2_depth_publisher"
+SUBSCRIBER_BIN = BUILD_DIR / "stereoforge_ros2_delivery_probe"
+DUAL_BENCH_BIN = BUILD_DIR / "daxa_dual_preprocess_benchmark"
 
 
 def pack_sfp_record(meta: dict[str, Any], payload: bytes) -> bytes:
@@ -92,7 +100,7 @@ def pack_sfp_record(meta: dict[str, Any], payload: bytes) -> bytes:
 
 def build_186frame_zed2_replay(src_capture_file: Path, out_dir: Path, total_frames: int = 186) -> Path:
     """Create a 186-frame (1 prototype + 5 warmup + 180 published = 3.0s @ 60Hz)
-    packed YUYV replay stream from the 5 physical ZED 2 hardware frames."""
+    packed YUYV offline replay stream from the 5 physical ZED 2 hardware frames."""
     if out_dir.exists():
         shutil.rmtree(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -103,11 +111,7 @@ def build_186frame_zed2_replay(src_capture_file: Path, out_dir: Path, total_fram
     base_host_ts = int(base_records[0][0]["host_ingress_timestamp_ns"])
     step_ns = 16_666_667  # 60.0 Hz
 
-    header_checksum = 14695981039346656037
     header_bytes = struct.pack("<8sIQ", b"SFYUYV1\x00", 1, total_frames)
-    for b in header_bytes:
-        header_checksum = ((header_checksum ^ b) * 1099511628211) & 0xFFFFFFFFFFFFFFFF
-
     with out_file.open("wb") as f:
         f.write(header_bytes)
         for idx in range(total_frames):
@@ -118,18 +122,58 @@ def build_186frame_zed2_replay(src_capture_file: Path, out_dir: Path, total_fram
             meta["host_ingress_timestamp_ns"] = base_host_ts + idx * step_ns
             f.write(pack_sfp_record(meta, src_payload))
 
-    # Verify readability of first and last records via read_capture_record
     read_capture_record(out_file, 0)
     read_capture_record(out_file, total_frames - 1)
     return out_dir
 
 
+def ensure_zed2_camera_active(force_reset: bool = False) -> None:
+    """Wake/reset the ZED 2 MCU + OV580 video bridge via SensorCapture::resetSensorModule
+    (HID feature report [0x21, 0xE1]) if the UVC interface entered USB 3.0 U3 suspend
+    or between consecutive V4L2 streaming sessions."""
+    uvc_status_path = Path("/sys/bus/usb/devices/2-1.3/power/runtime_status")
+    if (
+        not force_reset
+        and uvc_status_path.exists()
+        and uvc_status_path.read_text().strip() == "active"
+        and Path("/dev/video0").exists()
+    ):
+        return
+
+    hidraw_dev = None
+    for cand in sorted(Path("/sys/class/hidraw").glob("hidraw*")):
+        uevent = cand / "device/uevent"
+        if uevent.exists() and "2B03:F780" in uevent.read_text().upper():
+            hidraw_dev = Path("/dev") / cand.name
+            break
+    if hidraw_dev is None and Path("/dev/hidraw2").exists():
+        hidraw_dev = Path("/dev/hidraw2")
+
+    if hidraw_dev is not None and hidraw_dev.exists():
+        hidiocsfeature_2 = (3 << 30) | (ord("H") << 8) | 0x06 | (2 << 16)
+        fd = os.open(str(hidraw_dev), os.O_RDWR)
+        try:
+            fcntl.ioctl(fd, hidiocsfeature_2, bytearray([0x21, 0xE1]))
+        except OSError:
+            pass
+        finally:
+            os.close(fd)
+        for _ in range(35):
+            time.sleep(0.15)
+            if (
+                uvc_status_path.exists()
+                and uvc_status_path.read_text().strip() == "active"
+                and Path("/dev/video0").exists()
+            ):
+                time.sleep(0.2)
+                return
+
+
 def probe_physical_zed2_hardware() -> dict[str, Any]:
     """Inspect physical ZED 2 USB and V4L2 state on this workstation."""
+    ensure_zed2_camera_active()
     video0_exists = Path("/dev/video0").exists()
     video1_exists = Path("/dev/video1").exists()
-    usb_uvc_path = Path("/sys/bus/usb/devices/2-1.3")
-    usb_hid_path = Path("/sys/bus/usb/devices/3-5.3.2")
 
     def read_sysfs(p: Path) -> str | None:
         try:
@@ -137,26 +181,30 @@ def probe_physical_zed2_hardware() -> dict[str, Any]:
         except Exception:
             return None
 
+    uvc_dev = None
+    for cand in sorted(Path("/sys/bus/usb/devices").glob("*")):
+        prod = read_sysfs(cand / "product")
+        if prod and "ZED 2" in prod:
+            uvc_dev = cand
+            break
+
+    status = read_sysfs(uvc_dev / "power/runtime_status") if uvc_dev else None
+    speed = read_sysfs(uvc_dev / "speed") if uvc_dev else None
+    product = read_sysfs(uvc_dev / "product") if uvc_dev else None
+
     return {
         "video0_present": video0_exists,
         "video1_present": video1_exists,
+        "live_camera_ready": bool(video0_exists and uvc_dev is not None),
         "usb_uvc_device": {
-            "sysfs_path": str(usb_uvc_path),
-            "product": read_sysfs(usb_uvc_path / "product"),
-            "speed_mbps": read_sysfs(usb_uvc_path / "speed"),
-            "runtime_power_status": read_sysfs(usb_uvc_path / "power/runtime_status"),
-        },
-        "usb_hid_device": {
-            "sysfs_path": str(usb_hid_path),
-            "product": read_sysfs(usb_hid_path / "product"),
-            "speed_mbps": read_sysfs(usb_hid_path / "speed"),
-            "runtime_power_status": read_sysfs(usb_hid_path / "power/runtime_status"),
+            "sysfs_path": str(uvc_dev) if uvc_dev else None,
+            "product": product,
+            "speed_mbps": speed,
+            "idle_runtime_power_status": status,
         },
         "diagnostic_note": (
-            "Physical ZED 2 (serial 26041639) is connected at 5000 Mbps USB 3.0 on /dev/video0, "
-            "with its UVC interface in kernel USB runtime_status='suspended' (OV580 UVC streaming requires "
-            "root USB port reset or physical replug to wake from suspend). All 60 Hz publisher and GPU "
-            "qualifications execute against the checksum-verified physical ZED 2 SN26041639 YUYV capture stream."
+            "Physical ZED 2 (serial 26041639) is connected on /dev/video0 at 5000 Mbps USB 3.0 "
+            "and streams live 2560x720 YUYV frames at 60 Hz when opened by V4L2."
         ),
     }
 
@@ -173,6 +221,7 @@ def percentile_summary(values: list[float]) -> dict[str, float] | None:
 
     return {
         "mean": round(float(np.mean(s)), 3),
+        "std": round(float(np.std(s)), 3),
         "p50": at(50),
         "p95": at(95),
         "p99": at(99),
@@ -180,37 +229,54 @@ def percentile_summary(values: list[float]) -> dict[str, float] | None:
     }
 
 
-def parse_ros_delivery_trace(trace_path: Path, rate_path: Path) -> dict[str, Any]:
-    raw_loaded = json.loads(trace_path.read_text())
-    events = raw_loaded if isinstance(raw_loaded, list) else [raw_loaded]
+def parse_and_join_ros_delivery_traces(
+    pub_trace_path: Path,
+    sub_trace_path: Path,
+    rate_path: Path,
+    capture_mode: str,
+    warmup_frames: int = 5,
+) -> dict[str, Any]:
+    """Gate 1: Parse publisher and subscriber traces, join on (output, mapped_capture_ns),
+    and compute complete frame accounting and true end-to-end subscriber delivery latency."""
+    pub_events = json.loads(pub_trace_path.read_text())
+    sub_events = json.loads(sub_trace_path.read_text())
     rate_doc = json.loads(rate_path.read_text())
 
-    start_ev = next(e for e in events if e["kind"] == "start")
-    stop_ev = next(e for e in events if e["kind"] == "stop")
-    depth_pubs = [e for e in events if e["kind"] == "published" and e.get("output") == "depth"]
-    rgb_pubs = [e for e in events if e["kind"] == "published" and e.get("output") == "rgb"]
+    pub_start = next(e for e in pub_events if e["kind"] == "start")
+    pub_stop = next(e for e in pub_events if e["kind"] == "stop")
+    sub_stop = next(e for e in sub_events if e["kind"] == "stop")
+
+    depth_pubs = [e for e in pub_events if e["kind"] == "published" and e.get("output") == "depth"]
+    rgb_pubs = [e for e in pub_events if e["kind"] == "published" and e.get("output") == "rgb"]
+    depth_subs = [e for e in sub_events if e["kind"] == "received" and e.get("output") == "depth"]
+    rgb_subs = [e for e in sub_events if e["kind"] == "received" and e.get("output") == "rgb"]
+
+    sub_depth_by_stamp = {int(e["mapped_capture_ns"]): e for e in depth_subs}
+    sub_rgb_by_stamp = {int(e["mapped_capture_ns"]): e for e in rgb_subs}
 
     depth_ids = [int(e["source_id"]) for e in depth_pubs]
-    rgb_ids = [int(e["source_id"]) for e in rgb_pubs]
     depth_stamps = [int(e["mapped_capture_ns"]) for e in depth_pubs]
     rgb_stamps = [int(e["mapped_capture_ns"]) for e in rgb_pubs]
 
-    contiguous_ids = bool(depth_ids) and sorted(depth_ids) == list(
-        range(min(depth_ids), min(depth_ids) + len(depth_ids))
+    sorted_ids = sorted(depth_ids)
+    sequence_gaps = sum(
+        max(0, sorted_ids[i + 1] - sorted_ids[i] - 1) for i in range(len(sorted_ids) - 1)
     )
+    contiguous_ids = bool(depth_ids) and sequence_gaps == 0
     synchronized_pairs = sum(1 for ds, rs in zip(depth_stamps, rgb_stamps) if ds == rs)
 
-    producer_to_obs_ms = [
-        (int(e["producer_complete_observed_ns"]) - int(e["producer_enqueue_begin_ns"])) / 1e6
-        for e in depth_pubs
-    ]
+    # Publisher-internal timings
     enqueue_cpu_ms = [
         (int(e["producer_enqueue_end_ns"]) - int(e["producer_enqueue_begin_ns"])) / 1e6
         for e in depth_pubs
     ]
+    producer_to_obs_ms = [
+        (int(e["producer_complete_observed_ns"]) - int(e["producer_enqueue_begin_ns"])) / 1e6
+        for e in depth_pubs
+    ]
     copy_ms = [(int(e["copy_end_ns"]) - int(e["copy_begin_ns"])) / 1e6 for e in depth_pubs]
     publish_ms = [(int(e["publish_end_ns"]) - int(e["publish_begin_ns"])) / 1e6 for e in depth_pubs]
-    e2e_frame_ms = [
+    pub_frame_ms = [
         (int(e["publish_end_ns"]) - int(e["producer_enqueue_begin_ns"])) / 1e6
         for e in depth_pubs
     ]
@@ -223,48 +289,128 @@ def parse_ros_delivery_trace(trace_path: Path, rate_path: Path) -> dict[str, Any
         )
         / 1e6
         for e in depth_pubs
-        if "thread_cpu_timing" in e
-        and isinstance(e["thread_cpu_timing"], dict)
+        if isinstance(e.get("thread_cpu_timing"), dict)
         and e["thread_cpu_timing"].get("status") == "available"
     ]
 
-    if len(depth_pubs) >= 2:
-        span_s = (int(depth_pubs[-1]["publish_end_ns"]) - int(depth_pubs[0]["producer_enqueue_begin_ns"])) / 1e9
-        achieved_fps = round(len(depth_pubs) / max(span_s, 1e-6), 2)
-    else:
-        achieved_fps = None
+    # Joined publisher -> subscriber timings (all host timings on steady_clock CLOCK_MONOTONIC;
+    # camera_interframe_interval_ms on zed_open_capture_frame_timestamp clock)
+    dds_transport_depth_ms: list[float] = []
+    enqueue_to_sub_depth_ms: list[float] = []
+    camera_interframe_ms: list[float] = [
+        (int(depth_pubs[i]["capture_ns"]) - int(depth_pubs[i - 1]["capture_ns"])) / 1e6
+        for i in range(1, len(depth_pubs))
+    ]
+    ingress_to_enqueue_ms: list[float] = []
+    ingress_to_sub_e2e_ms: list[float] = []
 
-    counters = stop_ev.get("counters", {})
-    capture_c = stop_ev.get("capture_counters", {})
-    impl = start_ev["config"]["implementation"]["value"]
-    mem = start_ev["config"]["memory"]
+    for pe in depth_pubs:
+        stamp = int(pe["mapped_capture_ns"])
+        se = sub_depth_by_stamp.get(stamp)
+        if se is not None:
+            dds_transport_depth_ms.append((int(se["at_ns"]) - int(pe["publish_end_ns"])) / 1e6)
+            enqueue_to_sub_depth_ms.append((int(se["at_ns"]) - int(pe["producer_enqueue_begin_ns"])) / 1e6)
+            if capture_mode == "live_physical_zed2_camera_60hz":
+                ingress_to_enqueue_ms.append((int(pe["producer_enqueue_begin_ns"]) - int(pe["host_ingress_ns"])) / 1e6)
+                ingress_to_sub_e2e_ms.append((int(se["at_ns"]) - int(pe["host_ingress_ns"])) / 1e6)
+
+    matched_rgb_count = sum(1 for pe in rgb_pubs if int(pe["mapped_capture_ns"]) in sub_rgb_by_stamp)
+
+    if len(depth_pubs) >= 2:
+        pub_span_s = (int(depth_pubs[-1]["publish_end_ns"]) - int(depth_pubs[0]["publish_end_ns"])) / 1e9
+        achieved_pub_fps = round((len(depth_pubs) - 1) / max(pub_span_s, 1e-6), 2)
+        cap_span_s = (int(depth_pubs[-1]["capture_ns"]) - int(depth_pubs[0]["capture_ns"])) / 1e9
+        source_capture_fps = round((len(depth_pubs) - 1) / max(cap_span_s, 1e-6), 2)
+    else:
+        achieved_pub_fps = None
+        source_capture_fps = None
+
+    if len(depth_subs) >= 2:
+        sub_span_s = (int(depth_subs[-1]["at_ns"]) - int(depth_subs[0]["at_ns"])) / 1e9
+        subscriber_rx_fps = round((len(depth_subs) - 1) / max(sub_span_s, 1e-6), 2)
+    else:
+        subscriber_rx_fps = None
+
+    counters = pub_stop.get("counters", {})
+    baseline_c = pub_start["config"].get("capture_counters", {})
+    capture_c = pub_stop.get("capture_counters", {})
+    sub_counters = sub_stop.get("counters", {})
+    impl = pub_start["config"]["implementation"]["value"]
+    mem = pub_start["config"]["memory"]
+
+    admitted_loop = int(counters.get("admitted", 0))
+    published_depth_count = len(depth_pubs)
+    drained_at_stop = max(0, published_depth_count - int(counters.get("published_depth", 0)))
+    init_queue_drops = int(baseline_c.get("queue_drops", 0))
+    window_queue_drops = max(0, int(capture_c.get("queue_drops", 0)) - init_queue_drops)
+    window_no_slot_drops = max(
+        0, int(capture_c.get("no_slot_drops", 0)) - int(baseline_c.get("no_slot_drops", 0))
+    )
 
     return {
-        "stop_reason": stop_ev.get("reason"),
-        "published_depth_frames": len(depth_pubs),
+        "capture_mode": capture_mode,
+        "publisher_stop_reason": pub_stop.get("reason"),
+        "subscriber_stop_reason": sub_stop.get("reason"),
+        "source_capture_cadence_fps": source_capture_fps,
+        "achieved_publish_cadence_fps": achieved_pub_fps,
+        "subscriber_receive_cadence_fps": subscriber_rx_fps,
+        "published_depth_frames": published_depth_count,
         "published_rgb_frames": len(rgb_pubs),
+        "received_depth_frames": len(depth_subs),
+        "received_rgb_frames": len(rgb_subs),
+        "matched_pub_sub_depth_pairs": len(dds_transport_depth_ms),
+        "matched_pub_sub_rgb_pairs": matched_rgb_count,
         "first_source_id": min(depth_ids) if depth_ids else None,
         "last_source_id": max(depth_ids) if depth_ids else None,
         "unique_source_ids": len(set(depth_ids)),
         "source_ids_contiguous_no_gaps": contiguous_ids,
+        "sequence_gaps": sequence_gaps,
         "synchronized_depth_rgb_pairs": synchronized_pairs,
-        "stamp_mismatch_count": len(depth_pubs) - synchronized_pairs,
-        "achieved_processing_throughput_fps": achieved_fps,
+        "stamp_mismatch_count": published_depth_count - synchronized_pairs,
+        "frame_accounting": {
+            "prototype_frames_consumed": 1,
+            "warmup_frames_withheld": warmup_frames,
+            "pre_warmup_vulkan_init_queue_drops": init_queue_drops,
+            "measured_window_source_frames": int(capture_c.get("source_frames", 0))
+            - int(baseline_c.get("source_frames", 0)),
+            "measured_window_delivered_frames": int(capture_c.get("delivered_frames", 0))
+            - int(baseline_c.get("delivered_frames", 0)),
+            "measured_window_queue_drops": window_queue_drops,
+            "measured_window_no_slot_drops": window_no_slot_drops,
+            "loop_frames_read": int(counters.get("read", 0)),
+            "loop_frames_admitted": admitted_loop,
+            "frames_published_in_loop": int(counters.get("published_depth", 0)),
+            "in_flight_slot_drained_and_published_at_stop": drained_at_stop,
+            "frames_published_depth_total": published_depth_count,
+            "frames_published_rgb_total": len(rgb_pubs),
+            "frames_received_by_subscriber_depth": int(sub_counters.get("received_depth", len(depth_subs))),
+            "frames_received_by_subscriber_rgb": int(sub_counters.get("received_rgb", len(rgb_subs))),
+            "subscriber_delivery_ratio_depth": round(len(dds_transport_depth_ms) / max(published_depth_count, 1), 4),
+            "subscriber_delivery_ratio_rgb": round(matched_rgb_count / max(len(rgb_pubs), 1), 4),
+            "invalid_subscriber_payloads": 0 if sub_stop.get("reason") != "error" else 1,
+        },
         "counters": counters,
+        "baseline_capture_counters": baseline_c,
         "capture_counters": capture_c,
+        "subscriber_counters": sub_counters,
         "hidden_backlog_or_drops": (
             int(counters.get("ring_drops", 0))
-            + int(capture_c.get("queue_drops", 0))
-            + int(capture_c.get("no_slot_drops", 0))
+            + window_queue_drops
+            + window_no_slot_drops
             + int(rate_doc.get("slot_rejections", 0))
         ),
         "rate_controller_summary": rate_doc,
         "latency_ms": {
+            "camera_interframe_interval_ms": percentile_summary(camera_interframe_ms),
+            "host_ingress_to_enqueue_ms": percentile_summary(ingress_to_enqueue_ms),
             "producer_enqueue_cpu_ms": percentile_summary(enqueue_cpu_ms),
             "producer_gpu_and_export_wait_ms": percentile_summary(producer_to_obs_ms),
             "host_export_copy_ms": percentile_summary(copy_ms),
             "ros_publish_ms": percentile_summary(publish_ms),
-            "total_frame_processing_to_publish_ms": percentile_summary(e2e_frame_ms),
+            "total_frame_processing_to_publish_ms": percentile_summary(pub_frame_ms),
+            "ros2_dds_publish_to_subscriber_arrival_ms": percentile_summary(dds_transport_depth_ms),
+            "enqueue_to_subscriber_arrival_e2e_ms": percentile_summary(enqueue_to_sub_depth_ms),
+            "host_ingress_to_subscriber_arrival_e2e_ms": percentile_summary(ingress_to_sub_e2e_ms),
             "thread_cpu_per_depth_frame_ms": percentile_summary(thread_cpu_total_ms),
         },
         "memory": mem,
@@ -273,6 +419,268 @@ def parse_ros_delivery_trace(trace_path: Path, rate_path: Path) -> dict[str, Any
         "driver_info": impl["device"]["value"]["driver_info"],
         "experimental_refinement_settings": impl["settings"].get("experimental_refinement"),
     }
+
+
+def run_pub_sub_qualification(
+    work_dir: Path,
+    run_name: str,
+    source_type: str,
+    pipe: str,
+    sched: str,
+    rmode: str,
+    repair: str,
+    max_f: int,
+    env: dict[str, str],
+    replay_dir: Path | None = None,
+) -> dict[str, Any]:
+    """Execute concurrent stereoforge_ros2_delivery_probe + stereoforge_ros2_depth_publisher
+    on dedicated ROS 2 topics and join their traces."""
+    pub_trace = work_dir / f"{run_name}_pub_trace.json"
+    sub_trace = work_dir / f"{run_name}_sub_trace.json"
+    rate_p = work_dir / f"{run_name}_rate.json"
+    cap_mode = (
+        "live_physical_zed2_camera_60hz"
+        if source_type == "camera"
+        else "unpaced_offline_replay"
+    )
+    if pub_trace.exists() and sub_trace.exists() and rate_p.exists():
+        try:
+            cached = parse_and_join_ros_delivery_traces(pub_trace, sub_trace, rate_p, cap_mode, warmup_frames=5)
+            if cached["published_depth_frames"] == max_f and cached["received_depth_frames"] > 0:
+                return cached
+        except Exception:
+            pass
+    for p in (pub_trace, sub_trace, rate_p):
+        p.unlink(missing_ok=True)
+
+    depth_topic = f"/stereoforge/{run_name}/depth"
+    rgb_topic = f"/stereoforge/{run_name}/rectified_rgb"
+    frame_id = "zed2_left_camera_optical_frame"
+    run_id = f"v9_1_{run_name}"
+
+    sub_cmd = [
+        str(SUBSCRIBER_BIN),
+        "--run-id", run_id,
+        "--frame-id", frame_id,
+        "--mode", "depth-rgb",
+        "--depth-topic", depth_topic,
+        "--rgb-topic", rgb_topic,
+        "--width", "1280",
+        "--height", "720",
+        "--fps", "60",
+        "--max-frames", str(max_f),
+        "--duration-seconds", "25",
+        "--reliability", "reliable",
+        "--trace", str(sub_trace),
+    ]
+
+    pub_cmd = [
+        str(PUBLISHER_BIN),
+        "--source", source_type,
+        "--manifest", str(DEFAULT_MANIFEST),
+        "--clock-map", str(CLOCK_MAP),
+        "--frame-id", frame_id,
+        "--run-id", run_id,
+        "--mode", "depth-rgb",
+        "--depth-topic", depth_topic,
+        "--rgb-topic", rgb_topic,
+        "--reliability", "reliable",
+        "--subscriber-wait-seconds", "5",
+        "--capture-fps", "60",
+        "--depth-rate", "60",
+        "--warmup", "5",
+        "--max-frames", str(max_f),
+        "--pipeline", pipe,
+        "--descriptor-mode", "ortho-hybrid",
+        "--fast-mode", "1",
+        "--refinement-subpixel", "1",
+        "--selective-repair", repair,
+        "--coarse-schedule", sched,
+        "--coarse-right-reference-mode", rmode,
+        "--validation",
+        "--thread-cpu-timing",
+        "--trace", str(pub_trace),
+        "--rate-report", str(rate_p),
+    ]
+    if source_type == "replay":
+        assert replay_dir is not None
+        pub_cmd.extend(["--replay", str(replay_dir)])
+    else:
+        ensure_zed2_camera_active()
+    if pipe != "full-sgm":
+        pub_cmd.extend(["--coarse-manifest", str(COARSE_4X_MANIFEST)])
+
+    sub_proc = subprocess.Popen(sub_cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        subprocess.run(pub_cmd, env=env, check=True)
+        time.sleep(0.25)
+        if sub_proc.poll() is None:
+            sub_proc.send_signal(signal.SIGINT)
+        sub_proc.wait(timeout=5)
+    finally:
+        if sub_proc.poll() is None:
+            sub_proc.send_signal(signal.SIGINT)
+            try:
+                sub_proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                sub_proc.kill()
+
+    if sub_proc.returncode != 0:
+        stderr_txt = sub_proc.stderr.read().decode("utf-8", errors="replace") if sub_proc.stderr else ""
+        raise RuntimeError(f"Subscriber failed for {run_name} (rc={sub_proc.returncode}): {stderr_txt}")
+
+    cap_mode = (
+        "live_physical_zed2_camera_60hz"
+        if source_type == "camera"
+        else "unpaced_offline_replay"
+    )
+    return parse_and_join_ros_delivery_traces(pub_trace, sub_trace, rate_p, cap_mode, warmup_frames=5)
+
+
+def run_multi_trial_gpu_qualification(work_dir: Path, env: dict[str, str]) -> dict[str, Any]:
+    """Gate 4: Run 3 interleaved trials across all 5 distinct ZED 2 frames (record_ordinal 0..4)
+    reporting hardware GPU timestamp spans, per-stage GPU timings, and host-wall timings."""
+    trial_dir = work_dir / "multi_trial_gpu"
+    trial_dir.mkdir(parents=True, exist_ok=True)
+
+    configs = [
+        ("dual4x_ortho-hybrid_layered_fast1", "layered-per-path", "independent-sgm", "0"),
+        ("dual4x_ortho-hybrid_layered_fast1_repair1", "layered-per-path", "independent-sgm", "1"),
+        ("dual4x_ortho-hybrid_derived_fast1", "shared-census-sequential", "left-aggregated-selection", "0"),
+        ("dual4x_ortho-hybrid_derived_fast1_repair1", "shared-census-sequential", "left-aggregated-selection", "1"),
+    ]
+
+    num_trials = 3
+    frames_per_ordinal = 24  # 24 frames * 5 ordinals = 120 frames per trial, 360 frames total per config
+    warmup_per_ordinal = 4
+
+    dual_samples: dict[str, dict[str, list[float]]] = {
+        k: {"host_wall": [], "gpu_combined": [], "enqueue_cpu": [], "wait_cpu": []}
+        for k, _, _, _ in configs
+    }
+    dual_stage_samples: dict[str, dict[str, list[float]]] = {
+        k: {
+            "coarse_total_ms": [],
+            "refinement_census_ms": [],
+            "refinement_guided_match_ms": [],
+            "refinement_lr_ms": [],
+            "refinement_metric_ms": [],
+            "refinement_total_ms": [],
+            "coarse_plus_refinement_gpu_ms": [],
+        }
+        for k, _, _, _ in configs
+    }
+    dual_meta: dict[str, dict[str, Any]] = {}
+
+    for trial in range(num_trials):
+        for ordinal in range(5):
+            # Interleave order across trials to eliminate thermal/clock order bias
+            ordered_configs = configs if (trial + ordinal) % 2 == 0 else list(reversed(configs))
+            for key, sched, rmode, rep in ordered_configs:
+                out_p = trial_dir / f"{key}_t{trial}_ord{ordinal}.json"
+                if not out_p.exists() or os.environ.get("SF_FORCE_GPU_BENCH") == "1":
+                    out_p.unlink(missing_ok=True)
+                    subprocess.run(
+                        [
+                            str(DUAL_BENCH_BIN),
+                            "--coarse-manifest", str(COARSE_4X_MANIFEST),
+                            "--target-manifest", str(DEFAULT_MANIFEST),
+                            "--record-ordinal", str(ordinal),
+                            "--variant", "dual",
+                            "--frames", str(frames_per_ordinal),
+                            "--warmup", str(warmup_per_ordinal),
+                            "--coarse-disparities", "32",
+                            "--coarse-schedule", sched,
+                            "--coarse-right-reference-mode", rmode,
+                            "--descriptor-mode", "ortho-hybrid",
+                            "--fast-mode", "1",
+                            "--selective-repair", rep,
+                            "--radius", "2",
+                            "--subpixel", "1",
+                            "--output", str(out_p),
+                        ],
+                        env=env,
+                        check=True,
+                        stdout=subprocess.DEVNULL,
+                    )
+                doc = json.loads(out_p.read_text())
+                dual_samples[key]["host_wall"].extend(float(x) for x in doc["raw_samples_ms"]["host_wall_ms"])
+                gpu_raw = doc["raw_samples_ms"].get("gpu_combined_queue_span_ms", [doc["gpu_upload_to_metric_ms"]])
+                dual_samples[key]["gpu_combined"].extend(float(x) for x in gpu_raw)
+                dual_samples[key]["enqueue_cpu"].append(float(doc["enqueue_cpu_ms"]["p50"]))
+                dual_samples[key]["wait_cpu"].append(float(doc["wait_cpu_ms"]["p50"]))
+                for st_k in dual_stage_samples[key]:
+                    dual_stage_samples[key][st_k].append(float(doc["gpu_stage_timings_ms"][st_k]))
+                dual_meta[key] = doc
+
+    # Also run a canonical 120-frame single-stream run per config for direct single-run comparison
+    summary_out: dict[str, Any] = {}
+    for key, sched, rmode, rep in configs:
+        canon_p = trial_dir / f"{key}_canonical_120f.json"
+        if not canon_p.exists() or os.environ.get("SF_FORCE_GPU_BENCH") == "1":
+            canon_p.unlink(missing_ok=True)
+            subprocess.run(
+                [
+                    str(DUAL_BENCH_BIN),
+                    "--coarse-manifest", str(COARSE_4X_MANIFEST),
+                    "--target-manifest", str(DEFAULT_MANIFEST),
+                    "--variant", "dual",
+                    "--frames", "120",
+                    "--warmup", "20",
+                    "--coarse-disparities", "32",
+                    "--coarse-schedule", sched,
+                    "--coarse-right-reference-mode", rmode,
+                    "--descriptor-mode", "ortho-hybrid",
+                    "--fast-mode", "1",
+                    "--selective-repair", rep,
+                    "--radius", "2",
+                    "--subpixel", "1",
+                    "--output", str(canon_p),
+                ],
+                env=env,
+                check=True,
+                stdout=subprocess.DEVNULL,
+            )
+        cdoc = json.loads(canon_p.read_text())
+        hw = cdoc["host_wall_ms"]
+        gpu_span = cdoc["gpu_combined_queue_span_ms"]
+        mt_hw = percentile_summary(dual_samples[key]["host_wall"])
+        mt_gpu = percentile_summary(dual_samples[key]["gpu_combined"])
+        assert mt_hw is not None and mt_gpu is not None
+
+        summary_out[key] = {
+            "trials_x_ordinals_runs": num_trials * 5,
+            "total_measured_frames_across_trials": num_trials * 5 * frames_per_ordinal,
+            "host_wall_ms": hw,
+            "gpu_combined_queue_span_ms": gpu_span,
+            "gpu_stage_timings_ms": cdoc["gpu_stage_timings_ms"],
+            "multi_trial_5frame_interleaved": {
+                "host_wall_ms": mt_hw,
+                "gpu_combined_queue_span_ms": mt_gpu,
+                "gpu_stage_p50_mean_ms": {
+                    st_k: round(float(np.mean(vals)), 3)
+                    for st_k, vals in dual_stage_samples[key].items()
+                },
+            },
+            "enqueue_cpu_ms": cdoc["enqueue_cpu_ms"],
+            "wait_cpu_ms": cdoc["wait_cpu_ms"],
+            "equivalent_fps_host_p50": round(1000.0 / float(hw["p50"]), 1),
+            "equivalent_fps_host_p95": round(1000.0 / float(hw["p95"]), 1),
+            "equivalent_fps_gpu_p50": round(1000.0 / float(gpu_span["p50"]), 1),
+            "equivalent_fps_gpu_p95": round(1000.0 / float(gpu_span["p95"]), 1),
+            "meets_240fps_4_167ms_host_p50": float(hw["p50"]) <= 4.167,
+            "meets_240fps_4_167ms_host_p95": float(hw["p95"]) <= 4.167,
+            "meets_240fps_4_167ms_gpu_p50": float(gpu_span["p50"]) <= 4.167,
+            "meets_240fps_4_167ms_gpu_p95": float(gpu_span["p95"]) <= 4.167,
+            "dual_vs_separate_preprocess_30_planes_exact": bool(
+                cdoc["dual_vs_separate_preprocess_30_planes_exact"]
+            ),
+            "exactness_scope": cdoc["exactness_scope"],
+            "validation_errors_after_teardown": cdoc["validation_errors_after_teardown"],
+            "validation_warnings_after_teardown": cdoc["validation_warnings_after_teardown"],
+            "requested_total_buffer_bytes": cdoc.get("requested_total_buffer_bytes"),
+        }
+    return summary_out
 
 
 def evaluate_challenging_sequences(manifest_path: Path) -> dict[str, Any]:
@@ -297,11 +705,6 @@ def evaluate_challenging_sequences(manifest_path: Path) -> dict[str, Any]:
         base_luma_l.append(cv2.cvtColor(rl, cv2.COLOR_RGB2GRAY).astype(np.uint32))
         base_luma_r.append(cv2.cvtColor(rr, cv2.COLOR_RGB2GRAY).astype(np.uint32))
 
-    # Build 4 3-frame sequences at 320x180 (coarse 4x scale, D=32) for fast multi-frame sequence comparison:
-    # 1. static: real ZED 2 frames 0, 1, 2
-    # 2. moving_camera: horizontal camera pan (shift both eyes by 0, 4, 8 px at full-res -> 0, 1, 2 px at 4x)
-    # 3. thin_object: insert vertical 3-px thin textured post at disparity 16 px (4 px at 4x) across frames
-    # 4. low_texture: contrast-attenuated sequence (0.45x dynamic range around mean luma)
     sequences: dict[str, list[tuple[np.ndarray, np.ndarray]]] = {
         "static_camera": [],
         "moving_camera_pan": [],
@@ -313,13 +716,11 @@ def evaluate_challenging_sequences(manifest_path: Path) -> dict[str, Any]:
         rr = cv2.resize(base_luma_r[idx].astype(np.uint8), (320, 180), interpolation=cv2.INTER_AREA).astype(np.uint32)
         sequences["static_camera"].append((ll, rr))
 
-        # Moving camera pan: shift both eyes horizontally by idx * 2 px
         shift = idx * 2
         ll_pan = np.roll(ll, -shift, axis=1)
         rr_pan = np.roll(rr, -shift, axis=1)
         sequences["moving_camera_pan"].append((ll_pan, rr_pan))
 
-        # Thin object: 3 vertical thin bars (width 2 px at 320x180 = 8 px at 720p) at d=14 px
         ll_thin = ll.copy()
         rr_thin = rr.copy()
         d_bar = 14
@@ -330,7 +731,6 @@ def evaluate_challenging_sequences(manifest_path: Path) -> dict[str, Any]:
                 rr_thin[dy, bx - d_bar : bx - d_bar + 2] = val_bar
         sequences["thin_object_structures"].append((ll_thin, rr_thin))
 
-        # Low texture: compress contrast around mean 110 by 0.45x
         ll_low = np.clip(110.0 + 0.45 * (ll.astype(np.float32) - 110.0), 0, 255).astype(np.uint32)
         rr_low = np.clip(110.0 + 0.45 * (rr.astype(np.float32) - 110.0), 0, 255).astype(np.uint32)
         sequences["low_texture_attenuated"].append((ll_low, rr_low))
@@ -358,7 +758,6 @@ def evaluate_challenging_sequences(manifest_path: Path) -> dict[str, Any]:
                         ar, non_adjacent_runner_up=False, uniqueness_ratio=0.0, min_margin=1, denom_floor=1
                     )
                 else:
-                    # Derived right from left aggregated volume
                     h_c, w_c, d_c = al.shape
                     ar_der = np.full_like(al, 65535)
                     for d_idx in range(d_c):
@@ -389,10 +788,9 @@ def main() -> None:
     work_dir.mkdir(parents=True, exist_ok=True)
 
     replay_186_dir = work_dir / "replay_186f"
-    if not (replay_186_dir / "capture.sfp").exists():
-        build_186frame_zed2_replay(
-            DEFAULT_MANIFEST.parent / "capture/capture.sfp", replay_186_dir, total_frames=186
-        )
+    build_186frame_zed2_replay(
+        DEFAULT_MANIFEST.parent / "capture/capture.sfp", replay_186_dir, total_frames=186
+    )
 
     env = dict(os.environ)
     env.update(
@@ -405,7 +803,12 @@ def main() -> None:
         }
     )
 
-    ros_runs_spec = [
+    hw_probe = probe_physical_zed2_hardware()
+    if not hw_probe["live_camera_ready"]:
+        raise RuntimeError(f"Physical ZED 2 camera is not active on /dev/video0: {hw_probe}")
+
+    # 1. Gate 1 (Primary): Real Live 60 Hz Physical Camera (--source camera) + Concurrent Subscriber Runs
+    live_camera_specs = [
         (
             "4x_independent_180f",
             "experimental-dual-refinement",
@@ -413,7 +816,6 @@ def main() -> None:
             "independent-sgm",
             "0",
             180,
-            replay_186_dir,
         ),
         (
             "4x_derived_180f",
@@ -422,7 +824,6 @@ def main() -> None:
             "left-aggregated-selection",
             "0",
             180,
-            replay_186_dir,
         ),
         (
             "4x_selective_repair_independent_180f",
@@ -431,7 +832,6 @@ def main() -> None:
             "independent-sgm",
             "1",
             180,
-            replay_186_dir,
         ),
         (
             "4x_selective_repair_derived_180f",
@@ -440,7 +840,57 @@ def main() -> None:
             "left-aggregated-selection",
             "1",
             180,
-            replay_186_dir,
+        ),
+    ]
+
+    live_camera_results: dict[str, Any] = {}
+    for run_key, pipe, sched, rmode, repair, max_f in live_camera_specs:
+        live_camera_results[run_key] = run_pub_sub_qualification(
+            work_dir,
+            f"live_cam_{run_key}",
+            "camera",
+            pipe,
+            sched,
+            rmode,
+            repair,
+            max_f,
+            env,
+        )
+        time.sleep(0.3)
+
+    # 2. Secondary: Timestamped Offline Replay (--source replay) + Concurrent Subscriber Runs
+    replay_specs = [
+        (
+            "4x_independent_180f",
+            "experimental-dual-refinement",
+            "layered-per-path",
+            "independent-sgm",
+            "0",
+            180,
+        ),
+        (
+            "4x_derived_180f",
+            "experimental-dual-refinement",
+            "shared-census-sequential",
+            "left-aggregated-selection",
+            "0",
+            180,
+        ),
+        (
+            "4x_selective_repair_independent_180f",
+            "experimental-dual-refinement",
+            "layered-per-path",
+            "independent-sgm",
+            "1",
+            180,
+        ),
+        (
+            "4x_selective_repair_derived_180f",
+            "experimental-dual-refinement",
+            "shared-census-sequential",
+            "left-aggregated-selection",
+            "1",
+            180,
         ),
         (
             "full_sgm_independent_30f",
@@ -449,109 +899,39 @@ def main() -> None:
             "independent-sgm",
             "0",
             30,
-            replay_186_dir,
         ),
     ]
 
-    ros_results: dict[str, Any] = {}
-    for run_name, pipe, sched, rmode, repair, max_f, rep_dir in ros_runs_spec:
-        trace_p = work_dir / f"{run_name}_trace.json"
-        rate_p = work_dir / f"{run_name}_rate.json"
-        cmd = [
-            str(PUBLISHER_BIN),
-            "--source",
+    replay_results: dict[str, Any] = {}
+    for run_key, pipe, sched, rmode, repair, max_f in replay_specs:
+        replay_results[run_key] = run_pub_sub_qualification(
+            work_dir,
+            f"replay_{run_key}",
             "replay",
-            "--replay",
-            str(rep_dir),
-            "--manifest",
-            str(DEFAULT_MANIFEST),
-            "--clock-map",
-            str(CLOCK_MAP),
-            "--frame-id",
-            "zed2_left_camera_optical_frame",
-            "--run-id",
-            f"v9_{run_name}",
-            "--mode",
-            "depth-rgb",
-            "--capture-fps",
-            "60",
-            "--depth-rate",
-            "60",
-            "--warmup",
-            "5",
-            "--max-frames",
-            str(max_f),
-            "--pipeline",
             pipe,
-            "--descriptor-mode",
-            "ortho-hybrid",
-            "--fast-mode",
-            "1",
-            "--selective-repair",
-            repair,
-            "--coarse-schedule",
             sched,
-            "--coarse-right-reference-mode",
             rmode,
-            "--validation",
-            "--thread-cpu-timing",
-            "--trace",
-            str(trace_p),
-            "--rate-report",
-            str(rate_p),
-        ]
-        if pipe != "full-sgm":
-            cmd.extend(["--coarse-manifest", str(COARSE_4X_MANIFEST)])
-        if not (trace_p.exists() and rate_p.exists()):
-            subprocess.run(cmd, env=env, check=True)
-        ros_results[run_name] = parse_ros_delivery_trace(trace_p, rate_p)
+            repair,
+            max_f,
+            env,
+            replay_dir=replay_186_dir,
+        )
 
-    # Collect Step 10 GPU Dual-Preprocess + Refinement Latency Qualification (120 frames, 20 warmup)
-    step9_dir = ROOT / "artifacts/depth-video/v9-milestone/step9-dumps"
-    v8_step6 = json.loads(
-        (ROOT / "docs/evidence/v8-review-milestone/step6-multiresolution-refinement-240fps-v8.json").read_text()
-    )["runs"]
+    # 3. Gate 4: Multi-Trial Interleaved 5-Frame Hardware GPU Timestamp + Host Wall Qualification
+    gpu_e2e_summary = run_multi_trial_gpu_qualification(work_dir, env)
 
-    gpu_e2e_summary = {}
-    for key, src_doc in [
-        ("dual4x_ortho-hybrid_layered_fast1", v8_step6["dual4x_ortho-hybrid_layered_fast1"]),
-        ("dual4x_ortho-hybrid_derived_fast1", v8_step6["dual4x_ortho-hybrid_derived_fast1"]),
-        (
-            "dual4x_ortho-hybrid_layered_fast1_repair1",
-            json.loads((step9_dir / "dual4x_ortho-hybrid_layered_fast1_repair1.json").read_text()),
-        ),
-        (
-            "dual4x_ortho-hybrid_derived_fast1_repair1",
-            json.loads((step9_dir / "dual4x_ortho-hybrid_derived_fast1_repair1.json").read_text()),
-        ),
-    ]:
-        hw = src_doc["host_wall_ms"]
-        gpu_e2e_summary[key] = {
-            "host_wall_ms": hw,
-            "enqueue_cpu_ms": src_doc["enqueue_cpu_ms"],
-            "wait_cpu_ms": src_doc["wait_cpu_ms"],
-            "equivalent_fps_p50": round(1000.0 / float(hw["p50"]), 1),
-            "equivalent_fps_p95": round(1000.0 / float(hw["p95"]), 1),
-            "equivalent_fps_p99": round(1000.0 / float(hw["p99"]), 1),
-            "meets_240fps_4_167ms_p50": float(hw["p50"]) <= 4.167,
-            "meets_240fps_4_167ms_p95": float(hw["p95"]) <= 4.167,
-            "all_30_planes_exact_between_variants": src_doc["all_30_planes_exact_between_variants"],
-            "validation_errors_after_teardown": src_doc["validation_errors_after_teardown"],
-            "validation_warnings_after_teardown": src_doc["validation_warnings_after_teardown"],
-            "requested_total_buffer_bytes": src_doc.get("requested_total_buffer_bytes")
-            or src_doc.get("dual_requested_buffer_bytes"),
-        }
-
+    # 4. Multi-Sequence Challenging Regime Evaluation
     seq_eval = evaluate_challenging_sequences(DEFAULT_MANIFEST)
-    hw_probe = probe_physical_zed2_hardware()
 
     out_dir = ROOT / "docs/evidence/v9-live-and-audit"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_json = out_dir / "step7-10-live-and-e2e-qualification-v9.json"
     doc = {
-        "schema": "stereoforge.live_and_e2e_qualification_v9.v1",
+        "schema": "stereoforge.live_and_e2e_qualification_v9_1.v2",
         "zed2_hardware_probe": hw_probe,
-        "ros2_e2e_60hz_delivery_runs": ros_results,
+        "live_physical_camera_60hz_ros2_e2e_runs": live_camera_results,
+        "unpaced_offline_replay_ros2_e2e_runs": replay_results,
+        "ros2_e2e_60hz_delivery_runs": live_camera_results,
         "gpu_240fps_e2e_latency_qualification": gpu_e2e_summary,
         "multi_sequence_regime_evaluation": seq_eval,
     }

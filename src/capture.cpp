@@ -54,7 +54,12 @@ public:
         if((c.fps!=15&&c.fps!=30&&c.fps!=60&&c.fps!=100)||(c.eye_width==2208&&c.fps!=15)||(c.eye_width==1920&&c.fps>30)||(c.eye_width==1280&&c.fps>60))throw std::invalid_argument("unsupported ZED resolution/fps");
         p.fps=static_cast<sl_oc::video::FPS>(c.fps);
         video_=std::make_unique<sl_oc::video::VideoCapture>(p);
-        if(!video_->initializeVideo(c.device_id))throw std::runtime_error("cannot initialize ZED video: USB mode, permissions or device ownership");
+        if(!video_->initializeVideo(c.device_id)||video_->getSerialNumber()<=0){
+            video_.reset();
+            sl_oc::sensors::SensorCapture::resetSensorModule();
+            video_=std::make_unique<sl_oc::video::VideoCapture>(p);
+            if(!video_->initializeVideo(c.device_id))throw std::runtime_error("cannot initialize ZED video: USB mode, permissions or device ownership");
+        }
         int w=0,h=0;video_->getFrameSize(w,h);
         if(w!=int(c.eye_width*2)||h!=int(c.height))throw std::runtime_error("unexpected negotiated camera dimensions");
         auto serial=video_->getSerialNumber();

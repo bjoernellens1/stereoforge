@@ -38,6 +38,13 @@ def test_generated_upstream_snapshot_is_shared_and_producer_locked():
     assert 'std::lock_guard<std::mutex> lock(mIMUMutex)' in common
 
 
+def test_zed_driver_auto_resets_sensor_and_video_module_on_suspend_or_unidentified_serial():
+    for rel in ('src/capture.cpp', 'src/zed_capture.cpp'):
+        source = (ROOT / rel).read_text()
+        assert 'sl_oc::sensors::SensorCapture::resetSensorModule()' in source, rel
+        assert 'video_->getSerialNumber()<=0' in source, rel
+
+
 def check_capture_hotpath(source):
     run = source.split('void run(){', 1)[1].split('void stop(){', 1)[0]
     delivery = source.split('CaptureLease NativeCapture::read(', 1)[1].split('\nnamespace {', 1)[0]

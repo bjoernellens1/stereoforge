@@ -163,7 +163,12 @@ public:
         if (device_id < -1) throw std::invalid_argument("invalid video device id");
         params.fps=static_cast<sl_oc::video::FPS>(fps);
         video_=std::make_unique<sl_oc::video::VideoCapture>(params);
-        if (!video_->initializeVideo(device_id)) throw std::runtime_error("cannot initialize ZED Open Capture video; check USB mode, permissions and device ownership");
+        if (!video_->initializeVideo(device_id) || video_->getSerialNumber()<=0) {
+            video_.reset();
+            sl_oc::sensors::SensorCapture::resetSensorModule();
+            video_=std::make_unique<sl_oc::video::VideoCapture>(params);
+            if (!video_->initializeVideo(device_id)) throw std::runtime_error("cannot initialize ZED Open Capture video; check USB mode, permissions and device ownership");
+        }
         int actual_width=0,actual_height=0;
         video_->getFrameSize(actual_width,actual_height);
         if (actual_width!=2*width || actual_height!=height)

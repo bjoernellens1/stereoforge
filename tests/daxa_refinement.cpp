@@ -16,6 +16,7 @@ void check(bool v){if(!v)throw std::runtime_error("refinement contract failed");
 template<class F>void reject(F f){try{f();}catch(std::invalid_argument const&){return;}throw std::runtime_error("invalid refinement accepted");}
 static DaxaRectification maps(unsigned scale){DaxaRectification c;c.eye_width=24;c.source_height=20;c.stride_bytes=96;c.width=6*scale;c.height=5*scale;c.original_identity="raw";c.rectified_identity=scale==1?"coarse":"target";DaxaRectifiedGeometry g;g.original_identity=c.original_identity;g.rectified_identity=c.rectified_identity;for(auto& eye:g.original.eyes)eye={24,20,8,8,7,5,{}};for(auto& eye:g.rectified.eyes)eye={c.width,c.height,4.*scale,4.*scale,2.5*scale-0.5,1.5*scale-0.5,{}};g.original.right_to_left=g.rectified.right_to_left={1,0,0,.1,0,1,0,0,0,0,1,0,0,0,0,1};g.R1=g.R2={1,0,0,0,1,0,0,0,1};double f=4.*scale,cx=2.5*scale-0.5,cy=1.5*scale-0.5;g.P1={f,0,cx,0,0,f,cy,0,0,0,1,0};g.P2={f,0,cx,-f*.1,0,f,cy,0,0,0,1,0};c.geometry=g;for(unsigned eye=0;eye<2;++eye)for(unsigned y=0;y<c.height;++y)for(unsigned x=0;x<c.width;++x){c.maps[eye*2].push_back(float((x-cx)/f*8+7));c.maps[eye*2].back()=std::clamp(c.maps[eye*2].back(),0.f,22.f);c.maps[eye*2+1].push_back(float((y-cy)/f*8+5));c.maps[eye*2+1].back()=std::clamp(c.maps[eye*2+1].back(),0.f,18.f);}return c;}
 static CaptureLease source(unsigned id){auto c=std::make_shared<CaptureFrame>();c->source_width=48;c->height=20;c->stride_bytes=96;c->frame_id=id;c->calibration_identity="raw";c->device_identity="refinement-contract";c->host_clock_domain="steady";c->host_ingress_timestamp_ns=id;c->packed_yuyv.resize(1920);for(unsigned i=0;i<1920;++i)c->packed_yuyv[i]=uint8_t(i*17);return c;}
+static DaxaRectification maps_custom(unsigned cw,unsigned ch,unsigned scale){DaxaRectification c;c.eye_width=1280;c.source_height=720;c.stride_bytes=5120;c.width=cw*scale;c.height=ch*scale;c.original_identity="raw720";c.rectified_identity=scale==1?"coarse320":"target1280";DaxaRectifiedGeometry g;g.original_identity=c.original_identity;g.rectified_identity=c.rectified_identity;for(auto& eye:g.original.eyes)eye={1280,720,1040.,1040.,639.5,359.5,{}};for(auto& eye:g.rectified.eyes)eye={c.width,c.height,520.*scale,520.*scale,cw*0.5*scale-0.5,ch*0.5*scale-0.5,{}};g.original.right_to_left=g.rectified.right_to_left={1,0,0,.12,0,1,0,0,0,0,1,0,0,0,0,1};g.R1=g.R2={1,0,0,0,1,0,0,0,1};double f=520.*scale,cx=cw*0.5*scale-0.5,cy=ch*0.5*scale-0.5;g.P1={f,0,cx,0,0,f,cy,0,0,0,1,0};g.P2={f,0,cx,-f*.12,0,f,cy,0,0,0,1,0};c.geometry=g;for(unsigned eye=0;eye<2;++eye){c.maps[eye*2].resize(c.width*c.height);c.maps[eye*2+1].resize(c.width*c.height);for(unsigned y=0;y<c.height;++y)for(unsigned x=0;x<c.width;++x){c.maps[eye*2][y*c.width+x]=float((x-cx)/f*1040.+639.5);c.maps[eye*2+1][y*c.width+x]=float((y-cy)/f*1040.+359.5);}}return c;}
 static void gpu_4x_ortho_hybrid_and_repair(){
     auto context=std::make_shared<DaxaFoundation>(true);
     {
@@ -35,6 +36,42 @@ static void gpu_4x_ortho_hybrid_and_repair(){
         auto rb=stage.readback(out);
         check(rb.disparity.size()==2*24*20&&rb.depth.size()==2*24*20);
         out={};full={};coarse={};stage.collect();full_pre.collect_completed_sources();depth.collect();
+
+        // Full 1280x720 (320x180 coarse 4x) production-scale contract & plateau rejection test
+        auto low720=maps_custom(320,180,1),high720=maps_custom(320,180,4);
+        auto cap720=std::make_shared<CaptureFrame>();
+        cap720->source_width=2560;cap720->height=720;cap720->stride_bytes=5120;cap720->frame_id=42;
+        cap720->calibration_identity="raw720";cap720->device_identity="refinement-720p";cap720->host_clock_domain="steady";cap720->host_ingress_timestamp_ns=42;
+        cap720->packed_yuyv.resize(2560*720*2,128);
+        for(unsigned y=0;y<720;++y){
+            for(unsigned x=0;x<1280;++x){
+                // Top region (orig y < 400 -> rect y < 440): rich texture with orig shift 8 px (rect disparity 16 px); bottom region (orig y >= 420 -> rect y >= 480): flat plateau
+                uint8_t luma=(y>=420)?120:uint8_t(40+((x*13+y*7)^((x/3)*29+(y/5)*19))%180);
+                cap720->packed_yuyv[(y*2560+x)*2]=luma;
+                unsigned rx=(x>=8)?(x-8):0;
+                cap720->packed_yuyv[(y*2560+1280+rx)*2]=luma;
+            }
+        }
+        CaptureLease in720=cap720;
+        DaxaDepthConfig cfg720{{320,180,32,4,8,32,true,true},1,2,32};
+        cfg720.stereo_schedule=DaxaDepthStereoSchedule::LayeredPerPath;
+        DaxaDepthPipeline depth720(low720,cfg720,context,in720);
+        DaxaPreprocess full720(high720,2,context);
+        auto c720=depth720.enqueue(in720);
+        auto f720=full720.enqueue(in720);
+        DaxaRefinementConfig base_cfg;base_cfg.disparities=128;base_cfg.borrow_full_frame=true;base_cfg.ortho_hybrid=true;base_cfg.fast_mode=false;base_cfg.selective_repair=false;
+        DaxaRefinementConfig rep_cfg=base_cfg;rep_cfg.selective_repair=true;
+        DaxaRefinement ref_base(context,c720,f720,base_cfg),ref_rep(context,c720,f720,rep_cfg);
+        auto out_base=ref_base.process(c720,f720),out_rep=ref_rep.process(c720,f720);
+        out_base.wait();out_rep.wait();
+        check(out_base.timings().total_gpu_ms>0.0&&out_rep.timings().total_gpu_ms>0.0);
+        auto rb_base=ref_base.readback(out_base),rb_rep=ref_rep.readback(out_rep);
+        check(rb_rep.disparity.size()==2*1280*720);
+        unsigned valid_textured=0,valid_flat_plateau=0;
+        for(unsigned y=40;y<360;++y)for(unsigned x=40;x<1240;++x)if(rb_rep.validity[y*1280+x])++valid_textured;
+        for(unsigned y=540;y<680;++y)for(unsigned x=100;x<1180;++x)if(rb_rep.validity[y*1280+x])++valid_flat_plateau;
+        check(valid_textured>200000&&valid_flat_plateau==0);
+        out_base={};out_rep={};f720={};c720={};ref_base.collect();ref_rep.collect();full720.collect_completed_sources();depth720.collect();
     }
     context->close();
     check(!context->validation_errors&&!context->validation_warnings);

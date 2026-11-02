@@ -10,9 +10,8 @@ execution path.
 
 This is an initial research implementation, not a qualified real-time release.
 See [hardware evidence](docs/hardware-evidence.md), [architecture](docs/architecture.md),
+[milestone v9.1 live & accuracy evidence](docs/milestone-v9-live-and-selective-refinement-evidence.md),
 and the [implementation ledger](docs/implementation-status.md) for exact boundaries.
-
-See the [Daxa + Slang production plan](docs/superpowers/plans/2026-10-27-daxa-slang-production.md) for the proposed migration, qualification gates and current implementation boundary.
 
 ## Setup
 
@@ -73,6 +72,10 @@ Calibration failures stop processing; no nominal baseline/intrinsics substitute.
 If sensor access is denied, inspect the identified camera's hidraw node. For
 this ZED2 (`2b03:f781`), immediate access can be granted with
 `sudo setfacl -m "u:$(id -un):rw" /dev/hidraw2` after verifying its current identity.
+With `hidraw` access enabled, both the native C++ driver (`src/capture.cpp`) and Python
+binding (`src/zed_capture.cpp`) automatically wake and reset the ZED 2 MCU and OV580
+video bridge via `SensorCapture::resetSensorModule()` whenever the UVC interface enters
+USB 3.0 U3 suspend or fails EEPROM serial readback between sessions.
 An example persistent rule is in [camera notes](docs/camera-calibration.md).
 
 ## Camera controls
@@ -364,9 +367,7 @@ or live throughput. The matched static GPU means are **31.42–31.79 ms** at
 360p p99 is **6.21–6.29 ms**. These include preprocessing, both independent stereo
 references, LR and depth metadata. Refinement and View are additional work.
 See the [measurement scopes and raw-sample policy](docs/fast60-multiresolution-evidence.md)
-and [Fast60 plan](docs/superpowers/plans/2026-10-28-fast60.md).
-
-The next priority is a [common-input ZED SDK quality benchmark](docs/superpowers/plans/2026-10-28-zed-quality-benchmark.md), with independent ground truth and a full-SGM baseline before further Fast60 optimization or promotion.
+and [milestone v9.1 live and accuracy evidence](docs/milestone-v9-live-and-selective-refinement-evidence.md).
 
 The offline [controlled temporal and calibration evaluators](docs/controlled-temporal-evaluation.md)
 separate fresh observations, historical output, motion-aligned error, recovery and

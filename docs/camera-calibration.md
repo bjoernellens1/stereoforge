@@ -103,6 +103,10 @@ sudo udevadm trigger --action=add /sys/class/hidraw/hidraw2
 Device node numbering can change. Reidentify the node before applying a temporary
 ACL. Reopening capture after permission changes reruns sensor initialization.
 
+### Automatic ZED 2 MCU + OV580 USB Suspend & Post-Stream Recovery
+
+On Linux hosts, the ZED 2 OV580 UVC bridge (`2b03:f780`) can enter USB 3.0 U3 link suspend (`power/runtime_status = suspended`) or fail to respond to EEPROM serial readback (`getSerialNumber() <= 0`) and `VIDIOC_DQBUF` after a previous V4L2 streaming session closes. Both the native C++ capture driver (`CameraSource` in [`src/capture.cpp`](../src/capture.cpp)) and the Python binding (`ZedCapture` in [`src/zed_capture.cpp`](../src/zed_capture.cpp)) automatically detect when `video_->initializeVideo(...)` fails or `video_->getSerialNumber() <= 0`, release the stale handle, invoke `sl_oc::sensors::SensorCapture::resetSensorModule()` (which issues the hardware `RQ_CMD_RST` `[0x21, 0xE1]` HID feature report to the ZED 2 MCU over `/dev/hidraw*` to reboot both the MCU and OV580 bridge), and re-initialize `VideoCapture` with verified hardware serial readback.
+
 ## Camera and host processing boundary
 
 The camera supplies ISP-processed, synchronized images, image controls, sensor
