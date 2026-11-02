@@ -75,6 +75,7 @@ struct StereoConfig {
     std::uint32_t width = 0, height = 0, disparities = 128, paths = 4;
     std::uint32_t p1 = 8, p2 = 32;
     bool subpixel = true;
+    bool ortho_hybrid = false;
     void validate() const {
         if (width < 5 || height < 5 || disparities == 0 || disparities > 256 ||
             (paths != 4 && paths != 8) || p1 > p2 || p2 > 10000 ||

@@ -27,7 +27,26 @@ bool sgm_inside(int2 xy,uint width,uint height){return xy.x>=0&&xy.y>=0&&xy.x<in
 uint sgm_census(uint* image,uint width,uint height,uint i){
     int x=int(i%width),y=int(i/width);uint value=0,bit=0;
     for(int oy=-2;oy<=2;++oy)for(int ox=-2;ox<=2;++ox){if(ox==0&&oy==0)continue;if(image[(y+oy)*int(width)+x+ox]<image[i])value|=1u<<bit;++bit;}
+    const int2 sym[8]={int2(0,1),int2(0,-1),int2(1,0),int2(-1,0),int2(0,2),int2(0,-2),int2(2,0),int2(-2,0)};
+    for(uint k=0;k<8;++k){int2 d=sym[k];if(image[(y+d.x)*int(width)+x+d.y]<image[(y-d.x)*int(width)+x-d.y])value|=1u<<(24u+k);}
     return value;
+}
+uint sgm_thermo8(uint v){uint c=min(v,8u);return (1u<<c)-1u;}
+uint sgm_ortho_thermo_census(uint* image,uint width,uint height,uint i){
+    int x=int(i%width),y=int(i/width),w=int(width);
+    int gxl=0,gxr=0;uint lt=0,lb=0;
+    [unroll]for(int dy=-2;dy<=2;++dy){
+        int row=(y+dy)*w+x;
+        uint p_m2=image[row-2],p_m1=image[row-1],p_0=image[row],p_p1=image[row+1],p_p2=image[row+2];
+        gxl+=int(p_0)-int(p_m2);gxr+=int(p_p2)-int(p_0);
+        if(dy<=0)lt+=p_m2+p_m1+p_0+p_p1+p_p2;
+        if(dy>=0)lb+=p_m2+p_m1+p_0+p_p1+p_p2;
+    }
+    uint q_gxl=uint(clamp((gxl+60)/15,0,8));
+    uint q_gxr=uint(clamp((gxr+60)/15,0,8));
+    uint q_lt=min(lt/(15u*28u),8u);
+    uint q_lb=min(lb/(15u*28u),8u);
+    return sgm_thermo8(q_gxl)|(sgm_thermo8(q_gxr)<<8)|(sgm_thermo8(q_lt)<<16)|(sgm_thermo8(q_lb)<<24);
 }
 bool sgm_census_supported(uint width,uint height,uint i){uint x=i%width,y=i/width;return x>=2&&y>=2&&x<width-2&&y<height-2;}
 bool sgm_selection_valid(uint best,uint best_cost,uint second){return best>0&&best_cost<SGM_INVALID_COST&&second>best_cost;}

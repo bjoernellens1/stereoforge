@@ -8,6 +8,9 @@ struct DaxaRefinementConfig {
     bool subpixel=false;
     // Experimental: retain and read the two full-frame eyes without GPU packing.
     bool borrow_full_frame=false;
+    bool ortho_hybrid=false;
+    bool fast_mode=false;
+    bool allow_derived_coarse=false;
     void validate()const;
 };
 void validate_daxa_refinement_geometry(const DaxaRectification& coarse,const DaxaRectification& target);

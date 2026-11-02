@@ -24,6 +24,7 @@ _OPTIONAL_VALUE_ARGUMENTS = (
     ("reliability", "--reliability"),
     ("depth_speckle_min_pixels", "--depth-speckle-min-pixels"),
     ("depth_speckle_delta_m", "--depth-speckle-delta-m"),
+    ("depth_speckle_delta_px", "--depth-speckle-delta-px"),
 )
 
 
@@ -173,7 +174,7 @@ def generate_launch_description():
         DeclareLaunchArgument(
             "stereo_variant",
             default_value="packed-specialized",
-            choices=["packed-specialized", "packed-specialized-overwrite"],
+            choices=["packed-specialized", "packed-specialized-overwrite", "packed-specialized-overwrite-quad"],
         ),
         DeclareLaunchArgument(
             "pipeline",
@@ -198,6 +199,7 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument("depth_speckle_min_pixels", default_value="0"),
         DeclareLaunchArgument("depth_speckle_delta_m", default_value="0.05"),
+        DeclareLaunchArgument("depth_speckle_delta_px", default_value="1.25"),
         DeclareLaunchArgument("validation", default_value="false"),
         DeclareLaunchArgument("thread_cpu_timing", default_value="false"),
     ]

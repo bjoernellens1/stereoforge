@@ -1,0 +1,227 @@
+{
+  "schema": "stereoforge.native_ortho_hybrid_depth_v8.v1",
+  "runs": {
+    "depth_census_sequential": {
+      "descriptor_mode": "census",
+      "stereo_schedule": "sequential",
+      "right_reference_mode": "independent-sgm",
+      "left_valid_pct": 86.53,
+      "right_valid_pct": 85.66,
+      "lr_valid_left_pct": 20.82,
+      "metric_valid_left_pct": 20.82,
+      "lr_agreement_among_both_selected_pct": 26.92,
+      "median_lr_error_both_selected_px": 14.481,
+      "reference_checks": {
+        "lr_mask_metadata_reference_checked": true,
+        "both_stereo_integer_reference_checked": true,
+        "left_stereo_integer_reference_checked": null,
+        "derived_right_mask_reference_checked": null,
+        "validation_errors_after_teardown": 0,
+        "validation_warnings_after_teardown": 0
+      },
+      "requested_combined_buffer_bytes": 840500528,
+      "gpu_combined_queue_span_ms": {
+        "mean": 33.1753024855565,
+        "p50": 33.09375855107117,
+        "p95": 34.474692342375754
+      },
+      "host_wall_ms": {
+        "mean": 34.51238866666666,
+        "p50": 34.687981,
+        "p95": 36.016031
+      },
+      "geometry": {
+        "coherent_surface_fraction_all_pixels": 0.11307508680555556,
+        "speckle_survival_rate_of_lr_accepted": 0.5431847797758665,
+        "planar_patches_evaluated": 284,
+        "planar_disparity_rmse_median_px": 13.29789447512237,
+        "edge_structure_lr_valid_fraction": 0.39830293544343237
+      }
+    },
+    "depth_ortho-hybrid_sequential": {
+      "descriptor_mode": "ortho-hybrid",
+      "stereo_schedule": "sequential",
+      "right_reference_mode": "independent-sgm",
+      "left_valid_pct": 85.0,
+      "right_valid_pct": 81.78,
+      "lr_valid_left_pct": 29.11,
+      "metric_valid_left_pct": 29.11,
+      "lr_agreement_among_both_selected_pct": 39.39,
+      "median_lr_error_both_selected_px": 4.928,
+      "reference_checks": {
+        "lr_mask_metadata_reference_checked": true,
+        "both_stereo_integer_reference_checked": true,
+        "left_stereo_integer_reference_checked": null,
+        "derived_right_mask_reference_checked": null,
+        "validation_errors_after_teardown": 0,
+        "validation_warnings_after_teardown": 0
+      },
+      "requested_combined_buffer_bytes": 840500528,
+      "gpu_combined_queue_span_ms": {
+        "mean": 32.27367638479957,
+        "p50": 32.39963971669006,
+        "p95": 33.28933013951111
+      },
+      "host_wall_ms": {
+        "mean": 33.4553592,
+        "p50": 33.666268,
+        "p95": 34.664607
+      },
+      "geometry": {
+        "coherent_surface_fraction_all_pixels": 0.2059592013888889,
+        "speckle_survival_rate_of_lr_accepted": 0.7074090638044126,
+        "planar_patches_evaluated": 344,
+        "planar_disparity_rmse_median_px": 2.898592503160204,
+        "edge_structure_lr_valid_fraction": 0.421324174112157
+      }
+    },
+    "depth_census_layered": {
+      "descriptor_mode": "census",
+      "stereo_schedule": "layered-per-path",
+      "right_reference_mode": "independent-sgm",
+      "left_valid_pct": 86.53,
+      "right_valid_pct": 85.66,
+      "lr_valid_left_pct": 20.82,
+      "metric_valid_left_pct": 20.82,
+      "lr_agreement_among_both_selected_pct": 26.92,
+      "median_lr_error_both_selected_px": 14.481,
+      "reference_checks": {
+        "lr_mask_metadata_reference_checked": true,
+        "both_stereo_integer_reference_checked": true,
+        "left_stereo_integer_reference_checked": null,
+        "derived_right_mask_reference_checked": null,
+        "validation_errors_after_teardown": 0,
+        "validation_warnings_after_teardown": 0
+      },
+      "requested_combined_buffer_bytes": 840500528,
+      "gpu_combined_queue_span_ms": {
+        "mean": 42.3796702315917,
+        "p50": 42.321311015024186,
+        "p95": 43.60282590919304
+      },
+      "host_wall_ms": {
+        "mean": 43.64475223333333,
+        "p50": 43.742604,
+        "p95": 45.571716
+      },
+      "geometry": {
+        "coherent_surface_fraction_all_pixels": 0.11307508680555556,
+        "speckle_survival_rate_of_lr_accepted": 0.5431847797758665,
+        "planar_patches_evaluated": 284,
+        "planar_disparity_rmse_median_px": 13.29789447512237,
+        "edge_structure_lr_valid_fraction": 0.39830293544343237
+      }
+    },
+    "depth_ortho-hybrid_layered": {
+      "descriptor_mode": "ortho-hybrid",
+      "stereo_schedule": "layered-per-path",
+      "right_reference_mode": "independent-sgm",
+      "left_valid_pct": 85.0,
+      "right_valid_pct": 81.78,
+      "lr_valid_left_pct": 29.11,
+      "metric_valid_left_pct": 29.11,
+      "lr_agreement_among_both_selected_pct": 39.39,
+      "median_lr_error_both_selected_px": 4.928,
+      "reference_checks": {
+        "lr_mask_metadata_reference_checked": true,
+        "both_stereo_integer_reference_checked": true,
+        "left_stereo_integer_reference_checked": null,
+        "derived_right_mask_reference_checked": null,
+        "validation_errors_after_teardown": 0,
+        "validation_warnings_after_teardown": 0
+      },
+      "requested_combined_buffer_bytes": 840500528,
+      "gpu_combined_queue_span_ms": {
+        "mean": 42.89992639140472,
+        "p50": 42.7243367689476,
+        "p95": 44.88554308771705
+      },
+      "host_wall_ms": {
+        "mean": 44.43120619999999,
+        "p50": 44.16008,
+        "p95": 46.283186
+      },
+      "geometry": {
+        "coherent_surface_fraction_all_pixels": 0.2059592013888889,
+        "speckle_survival_rate_of_lr_accepted": 0.7074090638044126,
+        "planar_patches_evaluated": 344,
+        "planar_disparity_rmse_median_px": 2.898592503160204,
+        "edge_structure_lr_valid_fraction": 0.421324174112157
+      }
+    },
+    "depth_census_derived": {
+      "descriptor_mode": "census",
+      "stereo_schedule": "shared-census-sequential",
+      "right_reference_mode": "left-aggregated-selection",
+      "left_valid_pct": 86.53,
+      "right_valid_pct": 90.3,
+      "lr_valid_left_pct": 32.36,
+      "metric_valid_left_pct": 32.36,
+      "lr_agreement_among_both_selected_pct": 40.73,
+      "median_lr_error_both_selected_px": 3.009,
+      "reference_checks": {
+        "lr_mask_metadata_reference_checked": true,
+        "both_stereo_integer_reference_checked": false,
+        "left_stereo_integer_reference_checked": true,
+        "derived_right_mask_reference_checked": true,
+        "validation_errors_after_teardown": 0,
+        "validation_warnings_after_teardown": 0
+      },
+      "requested_combined_buffer_bytes": 575079728,
+      "gpu_combined_queue_span_ms": {
+        "mean": 19.272769834688,
+        "p50": 19.275433562470436,
+        "p95": 19.896613812638282
+      },
+      "host_wall_ms": {
+        "mean": 20.267768333333336,
+        "p50": 20.306572,
+        "p95": 21.064728
+      },
+      "geometry": {
+        "coherent_surface_fraction_all_pixels": 0.13471571180555555,
+        "speckle_survival_rate_of_lr_accepted": 0.4163461312747528,
+        "planar_patches_evaluated": 561,
+        "planar_disparity_rmse_median_px": 21.017666852592868,
+        "edge_structure_lr_valid_fraction": 0.46067114483018484
+      }
+    },
+    "depth_ortho-hybrid_derived": {
+      "descriptor_mode": "ortho-hybrid",
+      "stereo_schedule": "shared-census-sequential",
+      "right_reference_mode": "left-aggregated-selection",
+      "left_valid_pct": 85.0,
+      "right_valid_pct": 87.06,
+      "lr_valid_left_pct": 41.28,
+      "metric_valid_left_pct": 41.28,
+      "lr_agreement_among_both_selected_pct": 55.21,
+      "median_lr_error_both_selected_px": 0.688,
+      "reference_checks": {
+        "lr_mask_metadata_reference_checked": true,
+        "both_stereo_integer_reference_checked": false,
+        "left_stereo_integer_reference_checked": true,
+        "derived_right_mask_reference_checked": true,
+        "validation_errors_after_teardown": 0,
+        "validation_warnings_after_teardown": 0
+      },
+      "requested_combined_buffer_bytes": 575079728,
+      "gpu_combined_queue_span_ms": {
+        "mean": 19.493582715228843,
+        "p50": 19.406342290675163,
+        "p95": 19.8469995449152
+      },
+      "host_wall_ms": {
+        "mean": 20.499857799999994,
+        "p50": 20.448899,
+        "p95": 21.336611
+      },
+      "geometry": {
+        "coherent_surface_fraction_all_pixels": 0.25530598958333334,
+        "speckle_survival_rate_of_lr_accepted": 0.6184697152500138,
+        "planar_patches_evaluated": 515,
+        "planar_disparity_rmse_median_px": 5.380250802454909,
+        "edge_structure_lr_valid_fraction": 0.5275247639544068
+      }
+    }
+  }
+}

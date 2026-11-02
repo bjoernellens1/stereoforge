@@ -5,7 +5,7 @@ from stereoforge.reference import census, matching_cost, aggregate_sgm, select_d
 def test_census_has_known_24_bit_center_descriptor_and_invalid_border():
     image=np.arange(49,dtype=np.uint32).reshape(7,7)
     desc,valid=census(image)
-    assert desc[3,3]==4095  # twelve preceding neighbours are darker
+    assert desc[3,3]==0xAA000FFF  # twelve preceding neighbours are darker + 4 positive TCS axis bits
     assert valid[3,3] and not valid[0,0]
 
 def test_cost_invalidates_out_of_bounds_and_recovers_shift():

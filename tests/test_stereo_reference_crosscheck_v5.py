@@ -7,7 +7,7 @@ import pytest
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'benchmarks'))
 from stereo_reference_crosscheck_v5 import (
     valid_map,lr_pair,cv_sgbm,compare_view,native_maps,rgb_from_fixture,
-    classify_texture)
+    luma_from_fixture,classify_texture)
 
 
 def stereo(d=16,shift_y=0):
@@ -85,3 +85,21 @@ def test_crossview_and_texture():
     assert q['agree_within_1px_fraction']==1
     bins=classify_texture(l,n,n,mask,mask,n,n,mask,mask)
     assert bins and max(x['native_lr_accepted'] for x in bins.values())>0
+
+
+def test_exact_luma_fixture_and_2d_sgbm(tmp_path):
+    l_rgb,r_rgb=stereo(d=16)
+    l_2d=l_rgb[:,:,0]
+    r_2d=r_rgb[:,:,0]
+    dl,dr,_=cv_sgbm(l_2d,r_2d,disparities=64,block=5,uniqueness=5)
+    vl=valid_map(dl,disparities=64);vr=valid_map(dr,disparities=64)
+    assert np.median(dl[vl])==pytest.approx(16,abs=1)
+    assert np.median(dr[vr])==pytest.approx(16,abs=1)
+    fixture=tmp_path/'fixture_luma';(fixture/'expected').mkdir(parents=True)
+    raw=np.full((16,40),42,dtype='<u4').tobytes()
+    (fixture/'expected/l.u32').write_bytes(raw)
+    j={'rectified':{'height':16,'width':40},'expected':{'left_luma':{'file':'expected/l.u32','bytes':len(raw),'sha256':hashlib.sha256(raw).hexdigest()}}}
+    out=luma_from_fixture(fixture,'left_luma',j)
+    assert out.shape==(16,40) and out.dtype==np.uint8 and np.all(out==42)
+    j['expected']['left_luma']['sha256']='bad'
+    with pytest.raises(ValueError):luma_from_fixture(fixture,'left_luma',j)

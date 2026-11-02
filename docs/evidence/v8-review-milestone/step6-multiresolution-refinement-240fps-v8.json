@@ -1,0 +1,535 @@
+{
+  "schema": "stereoforge.multiresolution_refinement_v8.v1",
+  "runs": {
+    "ref2x_census_layered_fast1": {
+      "schema": "stereoforge.daxa_refinement.v1",
+      "descriptor_mode": "census",
+      "fast_mode": true,
+      "coarse_width": 640,
+      "coarse_height": 360,
+      "coarse_disparities": 64,
+      "validation_errors_after_teardown": 0,
+      "validation_warnings_after_teardown": 0,
+      "requested_refinement_buffer_bytes": 471860032,
+      "requested_total_buffer_bytes": null,
+      "timings_ms": null,
+      "host_wall_ms": {
+        "max": 6.728755,
+        "mean": 6.453858700000001,
+        "p50": 6.43946,
+        "p95": 6.62535,
+        "p99": 6.728755
+      },
+      "enqueue_cpu_ms": {
+        "max": 0.676845,
+        "mean": 0.41034751666666663,
+        "p50": 0.402728,
+        "p95": 0.541671,
+        "p99": 0.676845
+      },
+      "wait_cpu_ms": {
+        "max": 6.304115,
+        "mean": 6.019422733333332,
+        "p50": 6.013728,
+        "p95": 6.124797,
+        "p99": 6.304115
+      },
+      "all_30_planes_exact_between_variants": null,
+      "left_raw_valid_pct": 5.08,
+      "right_raw_valid_pct": 5.11,
+      "lr_valid_left_pct": 2.04,
+      "metric_valid_left_pct": 2.04,
+      "lr_agreement_among_both_selected_pct": 81.75,
+      "geometry": {
+        "coherent_surface_fraction_all_pixels": 0.006123046875,
+        "speckle_survival_rate_of_lr_accepted": 0.2997450334643578,
+        "planar_patches_evaluated": 22,
+        "planar_disparity_rmse_median_px": 0.9033609293221205,
+        "edge_structure_lr_valid_fraction": 0.05664369615153294
+      }
+    },
+    "ref2x_ortho-hybrid_layered_fast1": {
+      "schema": "stereoforge.daxa_refinement.v1",
+      "descriptor_mode": "ortho-hybrid",
+      "fast_mode": true,
+      "coarse_width": 640,
+      "coarse_height": 360,
+      "coarse_disparities": 64,
+      "validation_errors_after_teardown": 0,
+      "validation_warnings_after_teardown": 0,
+      "requested_refinement_buffer_bytes": 471860032,
+      "requested_total_buffer_bytes": null,
+      "timings_ms": null,
+      "host_wall_ms": {
+        "max": 7.159345,
+        "mean": 7.035691233333333,
+        "p50": 7.026736,
+        "p95": 7.122767,
+        "p99": 7.159345
+      },
+      "enqueue_cpu_ms": {
+        "max": 0.29197,
+        "mean": 0.27488263333333335,
+        "p50": 0.274026,
+        "p95": 0.284907,
+        "p99": 0.29197
+      },
+      "wait_cpu_ms": {
+        "max": 6.859912,
+        "mean": 6.7402239999999995,
+        "p50": 6.729546,
+        "p95": 6.831578,
+        "p99": 6.859912
+      },
+      "all_30_planes_exact_between_variants": null,
+      "left_raw_valid_pct": 45.23,
+      "right_raw_valid_pct": 46.11,
+      "lr_valid_left_pct": 25.28,
+      "metric_valid_left_pct": 25.26,
+      "lr_agreement_among_both_selected_pct": 73.21,
+      "geometry": {
+        "coherent_surface_fraction_all_pixels": 0.1677495659722222,
+        "speckle_survival_rate_of_lr_accepted": 0.6640522314333577,
+        "planar_patches_evaluated": 372,
+        "planar_disparity_rmse_median_px": 1.4882459846282792,
+        "edge_structure_lr_valid_fraction": 0.3692455961102295
+      }
+    },
+    "ref2x_census_derived_fast1": {
+      "schema": "stereoforge.daxa_refinement.v1",
+      "descriptor_mode": "census",
+      "fast_mode": true,
+      "coarse_width": 640,
+      "coarse_height": 360,
+      "coarse_disparities": 64,
+      "validation_errors_after_teardown": 0,
+      "validation_warnings_after_teardown": 0,
+      "requested_refinement_buffer_bytes": 471860032,
+      "requested_total_buffer_bytes": null,
+      "timings_ms": null,
+      "host_wall_ms": {
+        "max": 6.387412,
+        "mean": 5.479517433333331,
+        "p50": 5.464373,
+        "p95": 6.22711,
+        "p99": 6.387412
+      },
+      "enqueue_cpu_ms": {
+        "max": 0.624166,
+        "mean": 0.29917726666666666,
+        "p50": 0.272563,
+        "p95": 0.393802,
+        "p99": 0.624166
+      },
+      "wait_cpu_ms": {
+        "max": 6.034847,
+        "mean": 5.158742433333335,
+        "p50": 5.161543,
+        "p95": 5.905824,
+        "p99": 6.034847
+      },
+      "all_30_planes_exact_between_variants": null,
+      "left_raw_valid_pct": 5.57,
+      "right_raw_valid_pct": 5.8,
+      "lr_valid_left_pct": 2.17,
+      "metric_valid_left_pct": 2.17,
+      "lr_agreement_among_both_selected_pct": 80.84,
+      "geometry": {
+        "coherent_surface_fraction_all_pixels": 0.00619140625,
+        "speckle_survival_rate_of_lr_accepted": 0.2854141656662665,
+        "planar_patches_evaluated": 22,
+        "planar_disparity_rmse_median_px": 0.9327945045240762,
+        "edge_structure_lr_valid_fraction": 0.05815815598211633
+      }
+    },
+    "ref2x_ortho-hybrid_derived_fast1": {
+      "schema": "stereoforge.daxa_refinement.v1",
+      "descriptor_mode": "ortho-hybrid",
+      "fast_mode": true,
+      "coarse_width": 640,
+      "coarse_height": 360,
+      "coarse_disparities": 64,
+      "validation_errors_after_teardown": 0,
+      "validation_warnings_after_teardown": 0,
+      "requested_refinement_buffer_bytes": 471860032,
+      "requested_total_buffer_bytes": null,
+      "timings_ms": null,
+      "host_wall_ms": {
+        "max": 6.743903,
+        "mean": 6.145387299999999,
+        "p50": 6.191523,
+        "p95": 6.58853,
+        "p99": 6.743903
+      },
+      "enqueue_cpu_ms": {
+        "max": 0.671465,
+        "mean": 0.2975832333333333,
+        "p50": 0.267614,
+        "p95": 0.475866,
+        "p99": 0.671465
+      },
+      "wait_cpu_ms": {
+        "max": 6.45586,
+        "mean": 5.826336749999999,
+        "p50": 5.859056,
+        "p95": 6.264751,
+        "p99": 6.45586
+      },
+      "all_30_planes_exact_between_variants": null,
+      "left_raw_valid_pct": 58.18,
+      "right_raw_valid_pct": 54.97,
+      "lr_valid_left_pct": 28.16,
+      "metric_valid_left_pct": 28.12,
+      "lr_agreement_among_both_selected_pct": 69.31,
+      "geometry": {
+        "coherent_surface_fraction_all_pixels": 0.17828667534722223,
+        "speckle_survival_rate_of_lr_accepted": 0.6340647382069646,
+        "planar_patches_evaluated": 445,
+        "planar_disparity_rmse_median_px": 1.7202758050651104,
+        "edge_structure_lr_valid_fraction": 0.3850278617131512
+      }
+    },
+    "ref4x_census_layered_fast1": {
+      "schema": "stereoforge.daxa_refinement.v1",
+      "descriptor_mode": "census",
+      "fast_mode": true,
+      "coarse_width": 320,
+      "coarse_height": 180,
+      "coarse_disparities": 32,
+      "validation_errors_after_teardown": 0,
+      "validation_warnings_after_teardown": 0,
+      "requested_refinement_buffer_bytes": 471860032,
+      "requested_total_buffer_bytes": null,
+      "timings_ms": null,
+      "host_wall_ms": {
+        "max": 3.691132,
+        "mean": 3.0828819333333337,
+        "p50": 3.05235,
+        "p95": 3.194288,
+        "p99": 3.691132
+      },
+      "enqueue_cpu_ms": {
+        "max": 0.862185,
+        "mean": 0.28598175,
+        "p50": 0.264258,
+        "p95": 0.422826,
+        "p99": 0.862185
+      },
+      "wait_cpu_ms": {
+        "max": 2.920482,
+        "mean": 2.76456725,
+        "p50": 2.765018,
+        "p95": 2.818229,
+        "p99": 2.920482
+      },
+      "all_30_planes_exact_between_variants": null,
+      "left_raw_valid_pct": 7.83,
+      "right_raw_valid_pct": 8.08,
+      "lr_valid_left_pct": 2.86,
+      "metric_valid_left_pct": 2.86,
+      "lr_agreement_among_both_selected_pct": 74.04,
+      "geometry": {
+        "coherent_surface_fraction_all_pixels": 0.006851128472222222,
+        "speckle_survival_rate_of_lr_accepted": 0.2396841665717648,
+        "planar_patches_evaluated": 42,
+        "planar_disparity_rmse_median_px": 1.1871677173925534,
+        "edge_structure_lr_valid_fraction": 0.05977406288269096
+      }
+    },
+    "ref4x_ortho-hybrid_layered_fast1": {
+      "schema": "stereoforge.daxa_refinement.v1",
+      "descriptor_mode": "ortho-hybrid",
+      "fast_mode": true,
+      "coarse_width": 320,
+      "coarse_height": 180,
+      "coarse_disparities": 32,
+      "validation_errors_after_teardown": 0,
+      "validation_warnings_after_teardown": 0,
+      "requested_refinement_buffer_bytes": 471860032,
+      "requested_total_buffer_bytes": null,
+      "timings_ms": null,
+      "host_wall_ms": {
+        "max": 3.836686,
+        "mean": 3.4360413500000004,
+        "p50": 3.437405,
+        "p95": 3.527635,
+        "p99": 3.836686
+      },
+      "enqueue_cpu_ms": {
+        "max": 0.908571,
+        "mean": 0.30222511666666674,
+        "p50": 0.271943,
+        "p95": 0.463673,
+        "p99": 0.908571
+      },
+      "wait_cpu_ms": {
+        "max": 3.301509,
+        "mean": 3.1121214333333342,
+        "p50": 3.144282,
+        "p95": 3.207432,
+        "p99": 3.301509
+      },
+      "all_30_planes_exact_between_variants": null,
+      "left_raw_valid_pct": 51.73,
+      "right_raw_valid_pct": 51.37,
+      "lr_valid_left_pct": 24.77,
+      "metric_valid_left_pct": 24.76,
+      "lr_agreement_among_both_selected_pct": 62.79,
+      "geometry": {
+        "coherent_surface_fraction_all_pixels": 0.16437608506944446,
+        "speckle_survival_rate_of_lr_accepted": 0.6638780303959892,
+        "planar_patches_evaluated": 372,
+        "planar_disparity_rmse_median_px": 1.208440688051232,
+        "edge_structure_lr_valid_fraction": 0.33894190705999144
+      }
+    },
+    "ref4x_census_derived_fast1": {
+      "schema": "stereoforge.daxa_refinement.v1",
+      "descriptor_mode": "census",
+      "fast_mode": true,
+      "coarse_width": 320,
+      "coarse_height": 180,
+      "coarse_disparities": 32,
+      "validation_errors_after_teardown": 0,
+      "validation_warnings_after_teardown": 0,
+      "requested_refinement_buffer_bytes": 471860032,
+      "requested_total_buffer_bytes": null,
+      "timings_ms": null,
+      "host_wall_ms": {
+        "max": 3.129085,
+        "mean": 2.9786012833333335,
+        "p50": 2.964825,
+        "p95": 3.076875,
+        "p99": 3.129085
+      },
+      "enqueue_cpu_ms": {
+        "max": 0.618115,
+        "mean": 0.28915050000000003,
+        "p50": 0.263467,
+        "p95": 0.475817,
+        "p99": 0.618115
+      },
+      "wait_cpu_ms": {
+        "max": 2.839078,
+        "mean": 2.6694951000000002,
+        "p50": 2.675139,
+        "p95": 2.763355,
+        "p99": 2.839078
+      },
+      "all_30_planes_exact_between_variants": null,
+      "left_raw_valid_pct": 8.12,
+      "right_raw_valid_pct": 8.48,
+      "lr_valid_left_pct": 2.88,
+      "metric_valid_left_pct": 2.88,
+      "lr_agreement_among_both_selected_pct": 73.53,
+      "geometry": {
+        "coherent_surface_fraction_all_pixels": 0.006031901041666667,
+        "speckle_survival_rate_of_lr_accepted": 0.20980525362318841,
+        "planar_patches_evaluated": 37,
+        "planar_disparity_rmse_median_px": 1.1748208037005683,
+        "edge_structure_lr_valid_fraction": 0.058491482069230376
+      }
+    },
+    "ref4x_ortho-hybrid_derived_fast1": {
+      "schema": "stereoforge.daxa_refinement.v1",
+      "descriptor_mode": "ortho-hybrid",
+      "fast_mode": true,
+      "coarse_width": 320,
+      "coarse_height": 180,
+      "coarse_disparities": 32,
+      "validation_errors_after_teardown": 0,
+      "validation_warnings_after_teardown": 0,
+      "requested_refinement_buffer_bytes": 471860032,
+      "requested_total_buffer_bytes": null,
+      "timings_ms": null,
+      "host_wall_ms": {
+        "max": 3.54617,
+        "mean": 3.460422649999999,
+        "p50": 3.453506,
+        "p95": 3.522044,
+        "p99": 3.54617
+      },
+      "enqueue_cpu_ms": {
+        "max": 0.341093,
+        "mean": 0.2802350833333334,
+        "p50": 0.275799,
+        "p95": 0.320394,
+        "p99": 0.341093
+      },
+      "wait_cpu_ms": {
+        "max": 3.257096,
+        "mean": 3.161194233333333,
+        "p50": 3.155203,
+        "p95": 3.194097,
+        "p99": 3.257096
+      },
+      "all_30_planes_exact_between_variants": null,
+      "left_raw_valid_pct": 61.76,
+      "right_raw_valid_pct": 58.13,
+      "lr_valid_left_pct": 26.75,
+      "metric_valid_left_pct": 26.74,
+      "lr_agreement_among_both_selected_pct": 60.78,
+      "geometry": {
+        "coherent_surface_fraction_all_pixels": 0.17010416666666667,
+        "speckle_survival_rate_of_lr_accepted": 0.6360995244510087,
+        "planar_patches_evaluated": 428,
+        "planar_disparity_rmse_median_px": 1.2669335931533534,
+        "edge_structure_lr_valid_fraction": 0.34564465989869786
+      }
+    },
+    "dual2x_ortho-hybrid_layered_fast1": {
+      "schema": "stereoforge.daxa_dual_preprocess_benchmark.v1",
+      "descriptor_mode": "ortho-hybrid",
+      "fast_mode": true,
+      "coarse_width": 640,
+      "coarse_height": 360,
+      "coarse_disparities": 64,
+      "validation_errors_after_teardown": 0,
+      "validation_warnings_after_teardown": 0,
+      "requested_refinement_buffer_bytes": null,
+      "requested_total_buffer_bytes": null,
+      "timings_ms": null,
+      "host_wall_ms": {
+        "max": 8.697673,
+        "mean": 7.461923033333335,
+        "p50": 7.174535,
+        "p95": 8.325894,
+        "p99": 8.697673
+      },
+      "enqueue_cpu_ms": {
+        "max": 1.245717,
+        "mean": 0.5262488500000001,
+        "p50": 0.393121,
+        "p95": 1.097718,
+        "p99": 1.245717
+      },
+      "wait_cpu_ms": {
+        "max": 7.741212,
+        "mean": 6.935674183333335,
+        "p50": 6.818794,
+        "p95": 7.443922,
+        "p99": 7.741212
+      },
+      "all_30_planes_exact_between_variants": true
+    },
+    "dual2x_ortho-hybrid_derived_fast1": {
+      "schema": "stereoforge.daxa_dual_preprocess_benchmark.v1",
+      "descriptor_mode": "ortho-hybrid",
+      "fast_mode": true,
+      "coarse_width": 640,
+      "coarse_height": 360,
+      "coarse_disparities": 64,
+      "validation_errors_after_teardown": 0,
+      "validation_warnings_after_teardown": 0,
+      "requested_refinement_buffer_bytes": null,
+      "requested_total_buffer_bytes": null,
+      "timings_ms": null,
+      "host_wall_ms": {
+        "max": 6.72662,
+        "mean": 6.010435349999999,
+        "p50": 6.119046,
+        "p95": 6.540109,
+        "p99": 6.72662
+      },
+      "enqueue_cpu_ms": {
+        "max": 0.294515,
+        "mean": 0.27092000000000005,
+        "p50": 0.272844,
+        "p95": 0.286399,
+        "p99": 0.294515
+      },
+      "wait_cpu_ms": {
+        "max": 6.446603,
+        "mean": 5.73951535,
+        "p50": 5.853847,
+        "p95": 6.273998,
+        "p99": 6.446603
+      },
+      "all_30_planes_exact_between_variants": true
+    },
+    "dual4x_ortho-hybrid_layered_fast1": {
+      "schema": "stereoforge.daxa_dual_preprocess_benchmark.v1",
+      "descriptor_mode": "ortho-hybrid",
+      "fast_mode": true,
+      "coarse_width": 320,
+      "coarse_height": 180,
+      "coarse_disparities": 32,
+      "validation_errors_after_teardown": 0,
+      "validation_warnings_after_teardown": 0,
+      "requested_refinement_buffer_bytes": null,
+      "requested_total_buffer_bytes": null,
+      "timings_ms": null,
+      "host_wall_ms": {
+        "max": 4.603561,
+        "mean": 3.7242567333333336,
+        "p50": 3.544867,
+        "p95": 4.227834,
+        "p99": 4.603561
+      },
+      "enqueue_cpu_ms": {
+        "max": 0.388752,
+        "mean": 0.27759254999999994,
+        "p50": 0.273856,
+        "p95": 0.321545,
+        "p99": 0.388752
+      },
+      "wait_cpu_ms": {
+        "max": 4.321169,
+        "mean": 3.446664183333334,
+        "p50": 3.269248,
+        "p95": 3.944741,
+        "p99": 4.321169
+      },
+      "all_30_planes_exact_between_variants": true
+    },
+    "dual4x_ortho-hybrid_derived_fast1": {
+      "schema": "stereoforge.daxa_dual_preprocess_benchmark.v1",
+      "descriptor_mode": "ortho-hybrid",
+      "fast_mode": true,
+      "coarse_width": 320,
+      "coarse_height": 180,
+      "coarse_disparities": 32,
+      "validation_errors_after_teardown": 0,
+      "validation_warnings_after_teardown": 0,
+      "requested_refinement_buffer_bytes": null,
+      "requested_total_buffer_bytes": null,
+      "timings_ms": null,
+      "host_wall_ms": {
+        "max": 3.607124,
+        "mean": 3.38097295,
+        "p50": 3.363315,
+        "p95": 3.457934,
+        "p99": 3.607124
+      },
+      "enqueue_cpu_ms": {
+        "max": 0.497147,
+        "mean": 0.3087799833333333,
+        "p50": 0.274076,
+        "p95": 0.420692,
+        "p99": 0.497147
+      },
+      "wait_cpu_ms": {
+        "max": 3.238821,
+        "mean": 3.072192966666667,
+        "p50": 3.081375,
+        "p95": 3.122021,
+        "p99": 3.238821
+      },
+      "all_30_planes_exact_between_variants": true
+    }
+  },
+  "temporal_5frame_capture_stability": {
+    "census_24bit": {
+      "mean_raw_lr_valid_pct": 19.78,
+      "mean_frame_to_frame_raw_dropout_pct": 48.47,
+      "mean_confirmed_current_pct": 9.39,
+      "mean_confirmed_plus_100ms_hold_pct": 11.72
+    },
+    "ortho_hybrid_u32": {
+      "mean_raw_lr_valid_pct": 29.79,
+      "mean_frame_to_frame_raw_dropout_pct": 31.08,
+      "mean_confirmed_current_pct": 19.32,
+      "mean_confirmed_plus_100ms_hold_pct": 22.71
+    }
+  }
+}

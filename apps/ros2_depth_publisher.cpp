@@ -51,12 +51,12 @@ bool thread_cpu_now(std::uint64_t& value) noexcept {
 }
 struct Options {
     std::string source,manifest,replay,mode="depth",map,frame,run,trace,reliability="best_effort",stereo_variant="packed-specialized",device_serial;
-    std::string pipeline_mode="full-sgm",coarse_manifest;
+    std::string pipeline_mode="full-sgm",coarse_manifest,descriptor_mode="census";
     std::string depth_topic="/stereoforge/depth",rgb_topic="/stereoforge/rectified_rgb";
     std::string depth_rate="adaptive",rate_report;
-    unsigned depth_speckle_min_pixels=0; double depth_speckle_delta_m=0.05;
+    unsigned depth_speckle_min_pixels=0; double depth_speckle_delta_m=0.05; double depth_speckle_delta_px=1.25;
     unsigned min_depth_fps=5,max_depth_fps=60,consumer_min_depth_fps=5,max_depth_age_ms=250,downshift_ms=3000;
-    unsigned fps=60,disparities=128,warmup=5,max_frames=100000;int device_id=-1;double duration=600,subscriber_wait=0;bool validation=false,thread_cpu_timing=false;
+    unsigned fps=60,disparities=128,warmup=5,max_frames=100000;int device_id=-1;double duration=600,subscriber_wait=0;bool validation=false,thread_cpu_timing=false,fast_mode=false;
 };
 unsigned number(const std::string& s,unsigned lo,unsigned hi){size_t n=0;auto v=std::stoull(s,&n);if(n!=s.size()||v<lo||v>hi)throw std::invalid_argument("integer option outside bounds");return static_cast<unsigned>(v);}
 DepthRateConfig depth_rate_config(const Options& o) {
@@ -76,7 +76,7 @@ DepthRateConfig depth_rate_config(const Options& o) {
 Options parse(int argc,char** argv){
     Options o;
     for(int i=1;i<argc;++i){std::string a=argv[i];
-        if(a=="--help"){std::cout<<"--source camera|replay --manifest FILE --clock-map FILE --frame-id ID --run-id ID --trace FILE [--replay DIR --mode depth|rgb|depth-rgb --depth-rate 5|10|20|30|60|adaptive --min-depth-fps N --max-depth-fps N --consumer-min-depth-fps N --max-depth-age-ms N --downshift-ms N --rate-report FILE --capture-fps 15|30|60 --duration-seconds N --subscriber-wait-seconds N --max-frames N --warmup N --disparities N --stereo-variant packed-specialized|packed-specialized-overwrite --pipeline full-sgm|experimental-refinement|experimental-dual-refinement --coarse-manifest FILE --device-id N --depth-topic TOPIC --rgb-topic TOPIC --reliability best_effort|reliable --depth-speckle-min-pixels N --depth-speckle-delta-m METRES --validation --thread-cpu-timing]\n";std::exit(0);}
+        if(a=="--help"){std::cout<<"--source camera|replay --manifest FILE --clock-map FILE --frame-id ID --run-id ID --trace FILE [--replay DIR --mode depth|rgb|depth-rgb --depth-rate 5|10|20|30|60|adaptive --min-depth-fps N --max-depth-fps N --consumer-min-depth-fps N --max-depth-age-ms N --downshift-ms N --rate-report FILE --capture-fps 15|30|60 --duration-seconds N --subscriber-wait-seconds N --max-frames N --warmup N --disparities N --stereo-variant packed-specialized|packed-specialized-overwrite|packed-specialized-overwrite-quad --pipeline full-sgm|experimental-refinement|experimental-dual-refinement --coarse-manifest FILE --device-id N --depth-topic TOPIC --rgb-topic TOPIC --reliability best_effort|reliable --depth-speckle-min-pixels N --depth-speckle-delta-m METRES --depth-speckle-delta-px PIXELS --validation --thread-cpu-timing]\n";std::exit(0);}
         if(a=="--validation"){o.validation=true;continue;}if(a=="--thread-cpu-timing"){o.thread_cpu_timing=true;continue;}if(i+1>=argc)throw std::invalid_argument("missing option value");std::string v=argv[++i];
         if(a=="--source")o.source=v;else if(a=="--manifest")o.manifest=v;else if(a=="--replay")o.replay=v;else if(a=="--mode")o.mode=v;
         else if(a=="--clock-map")o.map=v;else if(a=="--frame-id")o.frame=v;else if(a=="--run-id")o.run=v;else if(a=="--trace")o.trace=v;
@@ -84,12 +84,15 @@ Options parse(int argc,char** argv){
         else if(a=="--depth-rate")o.depth_rate=v;else if(a=="--rate-report")o.rate_report=v;
         else if(a=="--depth-speckle-min-pixels")o.depth_speckle_min_pixels=number(v,0,10000);
         else if(a=="--depth-speckle-delta-m"){size_t n=0;o.depth_speckle_delta_m=std::stod(v,&n);if(n!=v.size()||!std::isfinite(o.depth_speckle_delta_m)||o.depth_speckle_delta_m<0||o.depth_speckle_delta_m>10)throw std::invalid_argument("invalid depth speckle delta");}
+        else if(a=="--depth-speckle-delta-px"){size_t n=0;o.depth_speckle_delta_px=std::stod(v,&n);if(n!=v.size()||!std::isfinite(o.depth_speckle_delta_px)||o.depth_speckle_delta_px<0||o.depth_speckle_delta_px>32)throw std::invalid_argument("invalid depth speckle disparity delta");}
         else if(a=="--min-depth-fps")o.min_depth_fps=number(v,5,60);
         else if(a=="--max-depth-fps")o.max_depth_fps=number(v,5,60);
         else if(a=="--consumer-min-depth-fps")o.consumer_min_depth_fps=number(v,5,60);
         else if(a=="--max-depth-age-ms")o.max_depth_age_ms=number(v,1,10'000);
         else if(a=="--downshift-ms")o.downshift_ms=number(v,1,60'000);
         else if(a=="--stereo-variant")o.stereo_variant=v;else if(a=="--pipeline")o.pipeline_mode=v;else if(a=="--coarse-manifest")o.coarse_manifest=v;
+        else if(a=="--descriptor-mode"){if(v!="census"&&v!="ortho-hybrid")throw std::invalid_argument("invalid descriptor mode");o.descriptor_mode=v;}
+        else if(a=="--fast-mode")o.fast_mode=(number(v,0,1)==1);
         else if(a=="--fps"||a=="--capture-fps"){o.fps=number(v,15,60);if(o.fps!=15&&o.fps!=30&&o.fps!=60)throw std::invalid_argument("unsupported camera FPS");}else if(a=="--disparities")o.disparities=number(v,32,256);
         else if(a=="--max-frames")o.max_frames=number(v,1,200000);else if(a=="--warmup")o.warmup=number(v,0,30);
         else if(a=="--device-id"){if(v=="-1")o.device_id=-1;else o.device_id=static_cast<int>(number(v,0,255));}
@@ -102,7 +105,7 @@ Options parse(int argc,char** argv){
     if((o.source!="camera"&&o.source!="replay")||(o.source=="replay")!=!o.replay.empty()||o.manifest.empty()||o.map.empty()||o.trace.empty()||
        blank(o.frame)||blank(o.run)||o.frame.size()>4096||o.run.size()>4096||
        (o.mode!="depth"&&o.mode!="rgb"&&o.mode!="depth-rgb")||(o.pipeline_mode!="full-sgm"&&o.pipeline_mode!="experimental-refinement"&&o.pipeline_mode!="experimental-dual-refinement")||
-       ((o.pipeline_mode!="full-sgm")!=!o.coarse_manifest.empty())||(o.pipeline_mode!="full-sgm"&&(o.mode=="rgb"||o.disparities%2!=0))||(o.stereo_variant!="packed-specialized"&&o.stereo_variant!="packed-specialized-overwrite")||(o.reliability!="best_effort"&&o.reliability!="reliable")||
+       ((o.pipeline_mode!="full-sgm")!=!o.coarse_manifest.empty())||(o.pipeline_mode!="full-sgm"&&(o.mode=="rgb"||o.disparities%2!=0))||(o.stereo_variant!="packed-specialized"&&o.stereo_variant!="packed-specialized-overwrite"&&o.stereo_variant!="packed-specialized-overwrite-quad")||(o.reliability!="best_effort"&&o.reliability!="reliable")||
        o.depth_topic.empty()||o.rgb_topic.empty()||o.depth_topic.front()!='/'||o.rgb_topic.front()!='/'||
        (o.mode=="depth-rgb"&&o.depth_topic==o.rgb_topic))throw std::invalid_argument("invalid publisher configuration");
     if(!o.rate_report.empty()&&o.rate_report==o.trace)throw std::invalid_argument("rate report must differ from ROS delivery trace");
@@ -190,9 +193,10 @@ void run(const Options& o, OutputFile& file){
     std::uint64_t last_id=first->frame_id,last_capture=first->camera_timestamp_ns;
     auto context=std::make_shared<DaxaFoundation>(o.validation);
     std::unique_ptr<DaxaDepthPipeline> pipeline;std::unique_ptr<DaxaPreprocess> preprocess,full_preprocess;std::unique_ptr<DaxaRefinement> refinement;std::unique_ptr<DaxaHostExport> exporter;std::unique_ptr<DaxaDualPreprocess> dual_preprocess;
-    DaxaRefinementConfig refinement_config;refinement_config.disparities=o.disparities;refinement_config.borrow_full_frame=true;
-    DaxaDepthConfig depth_config{StereoConfig{experimental?coarse_maps.width:maps.width,experimental?coarse_maps.height:maps.height,experimental?o.disparities/2:o.disparities,4,8,32,true},1.f,2,32};
-    depth_config.stereo_variant=o.stereo_variant=="packed-specialized-overwrite"?DaxaSgmVariant::PackedSpecializedOverwrite:DaxaSgmVariant::PackedSpecialized;
+    DaxaRefinementConfig refinement_config;refinement_config.disparities=o.disparities;refinement_config.borrow_full_frame=true;refinement_config.ortho_hybrid=(o.descriptor_mode=="ortho-hybrid");refinement_config.fast_mode=o.fast_mode;
+    uint32_t coarse_scale=(experimental&&maps.width==coarse_maps.width*4)?4u:2u;
+    DaxaDepthConfig depth_config{StereoConfig{experimental?coarse_maps.width:maps.width,experimental?coarse_maps.height:maps.height,experimental?o.disparities/coarse_scale:o.disparities,4,8,32,true,o.descriptor_mode=="ortho-hybrid"},1.f,2,32};
+    depth_config.stereo_variant=o.stereo_variant=="packed-specialized-overwrite-quad"?DaxaSgmVariant::PackedSpecializedOverwriteQuad:(o.stereo_variant=="packed-specialized-overwrite"?DaxaSgmVariant::PackedSpecializedOverwrite:DaxaSgmVariant::PackedSpecialized);
     if(depth){depth_config.validate();DaxaDualPreprocess::Frame pair;DaxaDepthPipeline::Frame prototype;
         if(dual){dual_preprocess=std::make_unique<DaxaDualPreprocess>(maps,coarse_maps,2,context);pair=dual_preprocess->enqueue(first);pipeline=std::make_unique<DaxaDepthPipeline>(depth_config,context,pair.coarse);prototype=pipeline->enqueue_preprocessed(pair.coarse);}
         else{pipeline=std::make_unique<DaxaDepthPipeline>(experimental?coarse_maps:maps,depth_config,context,first);prototype=pipeline->enqueue(first);}
@@ -207,9 +211,14 @@ void run(const Options& o, OutputFile& file){
         else{auto p=preprocess->enqueue(f);auto h=exporter->enqueue(p);h.wait();h={};p={};exporter->collect();preprocess->collect_completed_sources();}++i;}
     RosDeliveryTrace trace(size_t(o.max_frames)*(unsigned(depth)+unsigned(rgb))+2);std::array<Pending,2> pending{};Counters counters{};
     std::unique_ptr<DepthSpeckleFilter> depth_speckle;
-    if(depth&&o.depth_speckle_min_pixels)
+    if(depth&&o.depth_speckle_min_pixels){
+        const auto mc=maps.metric_calibration();
+        const bool disp_mode=o.depth_speckle_delta_px>0.0;
         depth_speckle=std::make_unique<DepthSpeckleFilter>(DepthSpeckleConfig{
-            maps.width,maps.height,o.depth_speckle_min_pixels,float(o.depth_speckle_delta_m)});
+            maps.width,maps.height,o.depth_speckle_min_pixels,float(o.depth_speckle_delta_m),
+            mc.fx*mc.baseline_m,float(o.depth_speckle_delta_px),true,
+            disp_mode?3u:0u,disp_mode?0.8f:0.0f,disp_mode?8.0f:0.0f,disp_mode?6u:0u});
+    }
     std::uint64_t speckle_input_valid_total=0,speckle_output_valid_total=0;
     std::uint64_t speckle_invalidated_total=0,speckle_removed_total=0;
     std::uint64_t speckle_filter_ns_total=0,speckle_filtered_frames=0;
@@ -230,7 +239,7 @@ void run(const Options& o, OutputFile& file){
         {"settings",{{"mode",o.mode},{"depth_rate",o.depth_rate},{"capture_fps",o.fps},
             {"min_depth_fps",o.min_depth_fps},{"max_depth_fps",o.max_depth_fps},
             {"consumer_min_depth_fps",o.consumer_min_depth_fps},{"max_depth_age_ms",o.max_depth_age_ms},
-            {"downshift_ms",o.downshift_ms},{"depth_speckle_min_pixels",o.depth_speckle_min_pixels},{"depth_speckle_delta_m",o.depth_speckle_delta_m},{"pipeline",o.pipeline_mode},{"coarse_manifest_sha256",experimental?daxa_preprocess_file_sha256(o.coarse_manifest):"not_executed"},{"stereo_variant",depth?DaxaStereo::variant_name(depth_config.stereo_variant):"not_executed"},{"effective_estimator",estimator},{"validation_requested",o.validation},{"subscriber_wait_seconds",o.subscriber_wait},
+            {"downshift_ms",o.downshift_ms},{"depth_speckle_min_pixels",o.depth_speckle_min_pixels},{"depth_speckle_delta_m",o.depth_speckle_delta_m},{"depth_speckle_delta_px",o.depth_speckle_delta_px},{"pipeline",o.pipeline_mode},{"coarse_manifest_sha256",experimental?daxa_preprocess_file_sha256(o.coarse_manifest):"not_executed"},{"stereo_variant",depth?DaxaStereo::variant_name(depth_config.stereo_variant):"not_executed"},{"effective_estimator",estimator},{"validation_requested",o.validation},{"subscriber_wait_seconds",o.subscriber_wait},
             {"reference_capture_sha256",fixture.capture_sha256},{"reference_record_ordinal",fixture.record_ordinal},
             {"calibration_manifest_sha256",daxa_preprocess_file_sha256(o.manifest)},{"device_serial_override",o.device_serial.empty()?json(nullptr):json(o.device_serial)},
             {"original_calibration_identity",maps.original_identity},{"rectified_calibration_identity",maps.rectified_identity}}}};
@@ -279,7 +288,8 @@ void run(const Options& o, OutputFile& file){
             std::memcpy(image.data.data(),bytes.data(),bytes.size());
             if(which==RosDeliveryOutput::Depth&&depth_speckle){
                 const auto filter_begin=now_ns<steady>();
-                const auto stats=depth_speckle->apply(std::as_writable_bytes(std::span(image.data)));
+                const auto rgba_span=rgb?p.output.rgba_bytes():std::span<const std::byte>{};
+                const auto stats=depth_speckle->apply(std::as_writable_bytes(std::span(image.data)),rgba_span);
                 speckle_filter_ns_total+=now_ns<steady>()-filter_begin;
                 ++speckle_filtered_frames;
                 speckle_input_valid_total+=stats.input_valid_pixels;

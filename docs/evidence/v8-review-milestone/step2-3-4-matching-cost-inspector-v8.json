@@ -1,0 +1,251 @@
+{
+  "schema": "stereoforge.matching_cost_inspector.v8",
+  "fixture": "configs/cameras/zed2/fixtures/SN26041639-fixture",
+  "native_prefix": "artifacts/depth-video/native-stages-20261030-173024-298892311/run-1",
+  "step2_cost_curve_inspection": {
+    "whole_image_census_sparsity": {
+      "popcount_eq_0_fraction": 0.35362887690233097,
+      "popcount_le_2_fraction": 0.4516558379012627,
+      "popcount_le_4_fraction": 0.5201791562319399,
+      "luma_p50": 41.0,
+      "luma_p75": 55.0
+    },
+    "both_lr_consistent": {
+      "fraction_of_image": 0.12614908854166668,
+      "agree_within_1px_fraction": 0.6846523709992345
+    },
+    "cv_consistent_native_failed_breakdown": {
+      "count": 163434,
+      "fraction_of_image": 0.17733723958333333,
+      "raw_census_cost_at_d_cv_median": 5.0,
+      "raw_census_cost_at_d_nat_median": 2.0,
+      "raw_census_cost_at_d_cv_mean": 5.937870944846238,
+      "raw_census_cost_at_d_nat_mean": 2.925450028757786,
+      "raw_census_prefers_wrong_d_nat_before_sgm_fraction": 0.5442319223662151,
+      "abs_luma_diff_at_d_cv_mean": 3.164580197510922,
+      "abs_luma_diff_at_d_nat_mean": 8.88101619002166,
+      "ref_popcount_median": 3.5,
+      "match_cv_popcount_median": 3.0,
+      "match_nat_popcount_median": 1.0,
+      "ref_popcount_le_3_fraction": 0.5
+    }
+  },
+  "step3_and_4_ablation_and_geometry": {
+    "census_24bit": {
+      "raw_selector": {
+        "lr_stats": {
+          "left_selected_fraction": 0.8519965277777778,
+          "right_selected_fraction": 0.84408203125,
+          "opposite_selected_fraction_all_pixels": 0.7498741319444444,
+          "accepted_fraction_all_pixels": 0.19475911458333334,
+          "accepted_fraction_among_opposite_selected": 0.2597224071169351,
+          "abs_lr_error_p50_px": 14.76421070098877,
+          "abs_lr_error_p90_px": 81.6296157836914,
+          "count_compared": 691084,
+          "count_accepted": 179490
+        },
+        "opencv_left_agreement": {
+          "common_fraction": 0.5042035590277778,
+          "abs_disparity_difference_p50_px": 6.182723522186279,
+          "abs_disparity_difference_p90_px": 79.83988952636719,
+          "agree_within_1px_fraction": 0.2871260281401585
+        },
+        "geometric_qualification": {
+          "coherent_surface_fraction_all_pixels": 0.109580078125,
+          "speckle_survival_rate_of_lr_accepted": 0.5626441584489387,
+          "planar_patches_evaluated": 233,
+          "planar_disparity_rmse_median_px": 7.160836018939573,
+          "edge_structure_lr_valid_fraction": 0.3877234552872039
+        }
+      },
+      "calibrated_non_adjacent_u0p03": {
+        "lr_stats": {
+          "left_selected_fraction": 0.7704871961805555,
+          "right_selected_fraction": 0.7614431423611111,
+          "opposite_selected_fraction_all_pixels": 0.6307215711805556,
+          "accepted_fraction_all_pixels": 0.19070203993055557,
+          "accepted_fraction_among_opposite_selected": 0.30235534765936145,
+          "abs_lr_error_p50_px": 10.565475463867188,
+          "abs_lr_error_p90_px": 79.53030395507812,
+          "count_compared": 581273,
+          "count_accepted": 175751
+        },
+        "opencv_left_agreement": {
+          "common_fraction": 0.4615451388888889,
+          "abs_disparity_difference_p50_px": 4.550477981567383,
+          "abs_disparity_difference_p90_px": 77.69557189941406,
+          "agree_within_1px_fraction": 0.31291611811171716
+        },
+        "geometric_qualification": {
+          "coherent_surface_fraction_all_pixels": 0.11622721354166667,
+          "speckle_survival_rate_of_lr_accepted": 0.609470216385682,
+          "planar_patches_evaluated": 203,
+          "planar_disparity_rmse_median_px": 4.184844533870055,
+          "edge_structure_lr_valid_fraction": 0.39524503090512525
+        }
+      }
+    },
+    "census_32bit_multiscale": {
+      "raw_selector": {
+        "lr_stats": {
+          "left_selected_fraction": 0.8581271701388888,
+          "right_selected_fraction": 0.8492903645833333,
+          "opposite_selected_fraction_all_pixels": 0.7633268229166666,
+          "accepted_fraction_all_pixels": 0.20709526909722223,
+          "accepted_fraction_among_opposite_selected": 0.27130615993017587,
+          "abs_lr_error_p50_px": 14.171171188354492,
+          "abs_lr_error_p90_px": 80.01968383789062,
+          "count_compared": 703482,
+          "count_accepted": 190859
+        },
+        "opencv_left_agreement": {
+          "common_fraction": 0.5076171875,
+          "abs_disparity_difference_p50_px": 7.221906661987305,
+          "abs_disparity_difference_p90_px": 80.27091979980469,
+          "agree_within_1px_fraction": 0.27862425719293743
+        },
+        "geometric_qualification": {
+          "coherent_surface_fraction_all_pixels": 0.11301106770833333,
+          "speckle_survival_rate_of_lr_accepted": 0.5456960373888577,
+          "planar_patches_evaluated": 283,
+          "planar_disparity_rmse_median_px": 12.85936281958471,
+          "edge_structure_lr_valid_fraction": 0.39675224451642355
+        }
+      },
+      "calibrated_non_adjacent_u0p03": {
+        "lr_stats": {
+          "left_selected_fraction": 0.7725368923611111,
+          "right_selected_fraction": 0.7647276475694444,
+          "opposite_selected_fraction_all_pixels": 0.63673828125,
+          "accepted_fraction_all_pixels": 0.2009375,
+          "accepted_fraction_among_opposite_selected": 0.3155731419281617,
+          "abs_lr_error_p50_px": 10.022192001342773,
+          "abs_lr_error_p90_px": 77.95713806152344,
+          "count_compared": 586818,
+          "count_accepted": 185184
+        },
+        "opencv_left_agreement": {
+          "common_fraction": 0.4632703993055556,
+          "abs_disparity_difference_p50_px": 5.333334922790527,
+          "abs_disparity_difference_p90_px": 78.42461395263672,
+          "agree_within_1px_fraction": 0.30457664831947534
+        },
+        "geometric_qualification": {
+          "coherent_surface_fraction_all_pixels": 0.11880533854166667,
+          "speckle_survival_rate_of_lr_accepted": 0.5912551840331778,
+          "planar_patches_evaluated": 236,
+          "planar_disparity_rmse_median_px": 8.687250285084861,
+          "edge_structure_lr_valid_fraction": 0.4031216712680159
+        }
+      }
+    },
+    "census_box3x3": {
+      "raw_selector": {
+        "lr_stats": {
+          "left_selected_fraction": 0.8383919270833333,
+          "right_selected_fraction": 0.8316395399305555,
+          "opposite_selected_fraction_all_pixels": 0.7338009982638889,
+          "accepted_fraction_all_pixels": 0.20228624131944445,
+          "accepted_fraction_among_opposite_selected": 0.275669073492727,
+          "abs_lr_error_p50_px": 15.772370338439941,
+          "abs_lr_error_p90_px": 85.75,
+          "count_compared": 676271,
+          "count_accepted": 186427
+        },
+        "opencv_left_agreement": {
+          "common_fraction": 0.5008528645833333,
+          "abs_disparity_difference_p50_px": 4.950000762939453,
+          "abs_disparity_difference_p90_px": 80.42252349853516,
+          "agree_within_1px_fraction": 0.33259240964847286
+        },
+        "geometric_qualification": {
+          "coherent_surface_fraction_all_pixels": 0.1449175347222222,
+          "speckle_survival_rate_of_lr_accepted": 0.7163983757717498,
+          "planar_patches_evaluated": 214,
+          "planar_disparity_rmse_median_px": 2.7243970022502175,
+          "edge_structure_lr_valid_fraction": 0.4130779765657268
+        }
+      },
+      "calibrated_non_adjacent_u0p03": {
+        "lr_stats": {
+          "left_selected_fraction": 0.7538216145833333,
+          "right_selected_fraction": 0.7499565972222222,
+          "opposite_selected_fraction_all_pixels": 0.6148394097222222,
+          "accepted_fraction_all_pixels": 0.199599609375,
+          "accepted_fraction_among_opposite_selected": 0.32463698035423094,
+          "abs_lr_error_p50_px": 10.839872360229492,
+          "abs_lr_error_p90_px": 83.67390441894531,
+          "count_compared": 566636,
+          "count_accepted": 183951
+        },
+        "opencv_left_agreement": {
+          "common_fraction": 0.45834526909722223,
+          "abs_disparity_difference_p50_px": 3.28125,
+          "abs_disparity_difference_p90_px": 78.33087921142578,
+          "agree_within_1px_fraction": 0.36341619891527444
+        },
+        "geometric_qualification": {
+          "coherent_surface_fraction_all_pixels": 0.14986762152777777,
+          "speckle_survival_rate_of_lr_accepted": 0.7508412566389963,
+          "planar_patches_evaluated": 200,
+          "planar_disparity_rmse_median_px": 2.0822309537491175,
+          "edge_structure_lr_valid_fraction": 0.42144011362071837
+        }
+      }
+    },
+    "ortho_hybrid_u32": {
+      "raw_selector": {
+        "lr_stats": {
+          "left_selected_fraction": 0.8299088541666667,
+          "right_selected_fraction": 0.8036241319444445,
+          "opposite_selected_fraction_all_pixels": 0.7012456597222222,
+          "accepted_fraction_all_pixels": 0.29944227430555553,
+          "accepted_fraction_among_opposite_selected": 0.42701479881411425,
+          "abs_lr_error_p50_px": 2.9569387435913086,
+          "abs_lr_error_p90_px": 75.0819320678711,
+          "count_compared": 646268,
+          "count_accepted": 275966
+        },
+        "opencv_left_agreement": {
+          "common_fraction": 0.5059114583333333,
+          "abs_disparity_difference_p50_px": 0.9193563461303711,
+          "abs_disparity_difference_p90_px": 28.921573638916016,
+          "agree_within_1px_fraction": 0.5174327825534909
+        },
+        "geometric_qualification": {
+          "coherent_surface_fraction_all_pixels": 0.22970703125,
+          "speckle_survival_rate_of_lr_accepted": 0.767116238956973,
+          "planar_patches_evaluated": 343,
+          "planar_disparity_rmse_median_px": 1.6539580184043319,
+          "edge_structure_lr_valid_fraction": 0.430135576762824
+        }
+      },
+      "calibrated_non_adjacent_u0p03": {
+        "lr_stats": {
+          "left_selected_fraction": 0.7497580295138889,
+          "right_selected_fraction": 0.7184157986111112,
+          "opposite_selected_fraction_all_pixels": 0.5959038628472222,
+          "accepted_fraction_all_pixels": 0.30051106770833336,
+          "accepted_fraction_among_opposite_selected": 0.5042945455538662,
+          "abs_lr_error_p50_px": 0.9722213745117188,
+          "abs_lr_error_p90_px": 67.05555725097656,
+          "count_compared": 549185,
+          "count_accepted": 276951
+        },
+        "opencv_left_agreement": {
+          "common_fraction": 0.48137803819444447,
+          "abs_disparity_difference_p50_px": 0.7916679382324219,
+          "abs_disparity_difference_p90_px": 23.897035598754883,
+          "agree_within_1px_fraction": 0.5482826087936561
+        },
+        "geometric_qualification": {
+          "coherent_surface_fraction_all_pixels": 0.23958441840277778,
+          "speckle_survival_rate_of_lr_accepted": 0.7972565544085416,
+          "planar_patches_evaluated": 332,
+          "planar_disparity_rmse_median_px": 1.3516483949234739,
+          "edge_structure_lr_valid_fraction": 0.43115004746273633
+        }
+      }
+    }
+  }
+}

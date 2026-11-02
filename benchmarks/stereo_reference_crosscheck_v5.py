@@ -33,6 +33,27 @@ def rgb_from_fixture(root: Path, name: str, manifest: dict) -> np.ndarray:
     return np.frombuffer(data,dtype=np.uint8).reshape(h,w,3).copy()
 
 
+def luma_from_fixture(root: Path, name: str, manifest: dict) -> np.ndarray:
+    shape = manifest.get('rectified') or manifest.get('rectification')
+    if not shape or 'width' not in shape or 'height' not in shape:
+        raise ValueError('Missing rectified shape in fixture manifest')
+    h,w=int(shape['height']),int(shape['width'])
+    if not (16 <= h <= 8192 and 32 <= w <= 8192):
+        raise ValueError('Invalid fixture dimensions')
+    item=manifest['expected'][name]
+    rel=Path(item['file'])
+    if rel.is_absolute() or '..' in rel.parts:
+        raise ValueError('Unsafe fixture path')
+    f=root/rel
+    data=f.read_bytes()
+    if len(data)!=h*w*4 or len(data)!=int(item['bytes']) or hashlib.sha256(data).hexdigest()!=item['sha256']:
+        raise ValueError('Fixture luma payload size/hash mismatch: '+str(f))
+    arr=np.frombuffer(data,dtype='<u4').reshape(h,w)
+    if np.any(arr>255):
+        raise ValueError('Fixture luma exceeds uint8 range')
+    return arr.astype(np.uint8).copy()
+
+
 def native_maps(prefix:Path, shape:tuple[int,int])->dict[str,np.ndarray]:
     out={}
     for eye in ('left','right'):
@@ -46,15 +67,19 @@ def native_maps(prefix:Path, shape:tuple[int,int])->dict[str,np.ndarray]:
 
 
 def cv_sgbm(left_rgb:np.ndarray,right_rgb:np.ndarray,*,disparities:int,block:int,uniqueness:int)->tuple[np.ndarray,np.ndarray,float]:
-    if left_rgb.shape != right_rgb.shape or left_rgb.ndim!=3 or left_rgb.shape[2]!=3:
-        raise ValueError('Images must be matching RGB')
+    if left_rgb.shape != right_rgb.shape or left_rgb.ndim not in (2,3) or (left_rgb.ndim==3 and left_rgb.shape[2]!=3):
+        raise ValueError('Images must be matching RGB or 2D luma')
     h,w=left_rgb.shape[:2]
     if disparities%16 or disparities<16 or disparities>256 or w<=disparities+block+4:
         raise ValueError('SGBM requires valid multiple-of-16 disparity range and wide images')
     if block not in (3,5,7,9,11) or not(0<=uniqueness<=30):
         raise ValueError('Invalid SGBM block or uniqueness setting')
-    left=cv2.cvtColor(left_rgb,cv2.COLOR_RGB2GRAY)
-    right=cv2.cvtColor(right_rgb,cv2.COLOR_RGB2GRAY)
+    if left_rgb.ndim==2:
+        left=np.ascontiguousarray(left_rgb.astype(np.uint8))
+        right=np.ascontiguousarray(right_rgb.astype(np.uint8))
+    else:
+        left=cv2.cvtColor(left_rgb,cv2.COLOR_RGB2GRAY)
+        right=cv2.cvtColor(right_rgb,cv2.COLOR_RGB2GRAY)
     kwargs={'minDisparity':0,'numDisparities':disparities,'blockSize':block,
             'P1':8*block**2,'P2':32*block**2,'disp12MaxDiff':-1,
             'uniquenessRatio':uniqueness,'speckleWindowSize':0,'speckleRange':0,
@@ -121,7 +146,7 @@ def compare_view(native:np.ndarray,reference:np.ndarray,native_valid:np.ndarray,
 
 def classify_texture(image:np.ndarray,native_l:np.ndarray,native_r:np.ndarray,lv:np.ndarray,rv:np.ndarray,
                      cv_l:np.ndarray,cv_r:np.ndarray,clv:np.ndarray,crv:np.ndarray)->dict:
-    gray=cv2.cvtColor(image,cv2.COLOR_RGB2GRAY)
+    gray=image.astype(np.uint8) if image.ndim==2 else cv2.cvtColor(image,cv2.COLOR_RGB2GRAY)
     f=gray.astype(np.float32)
     # Neighborhood standard deviation distinguishes smooth, weakly textured and structured regions.
     mean=cv2.boxFilter(f,-1,(9,9),normalize=True)
@@ -171,11 +196,20 @@ def main():
     p.add_argument('--disparities',type=int,default=128)
     p.add_argument('--blocks',type=int,nargs='+',default=[3,5])
     p.add_argument('--uniqueness',type=int,default=5)
+    p.add_argument('--input-mode',choices=('exact-fixture-luma','rgb2gray'),default='exact-fixture-luma')
     a=p.parse_args()
     if a.output.exists():p.error('output already exists; choose a new output path')
     fixture=json.loads((a.fixture/'manifest.json').read_text())
     left=rgb_from_fixture(a.fixture,'rect_left_rgb',fixture)
     right=rgb_from_fixture(a.fixture,'rect_right_rgb',fixture)
+    luma_left=luma_from_fixture(a.fixture,'left_luma',fixture)
+    luma_right=luma_from_fixture(a.fixture,'right_luma',fixture)
+    rgb_gray_left=cv2.cvtColor(left,cv2.COLOR_RGB2GRAY)
+    rgb_gray_right=cv2.cvtColor(right,cv2.COLOR_RGB2GRAY)
+    luma_diff_max=int(max(np.max(np.abs(luma_left.astype(np.int32)-rgb_gray_left.astype(np.int32))),
+                          np.max(np.abs(luma_right.astype(np.int32)-rgb_gray_right.astype(np.int32)))))
+    sgbm_left=luma_left if a.input_mode=='exact-fixture-luma' else left
+    sgbm_right=luma_right if a.input_mode=='exact-fixture-luma' else right
     shape=left.shape[:2]
     native=native_maps(a.native_prefix,shape)
     nl,nr=native['left_disparity'],native['right_disparity']
@@ -185,20 +219,25 @@ def main():
         'warning':'OpenCV SGBM is a different estimator, NOT ground truth. High consistency need not imply correct depth.',
         'fixture':str(a.fixture),'native_prefix':str(a.native_prefix),
         'config':{'disparities':a.disparities,'blocks':a.blocks,'uniqueness':a.uniqueness,
+                  'input_mode':a.input_mode,'luma_vs_rgb2gray_max_abs_diff':luma_diff_max,
+                  'opencv_p1_formula':'8*block^2','opencv_p2_formula':'32*block^2',
+                  'opencv_uniqueness_policy':'non_adjacent_disparity_margin_pct',
+                  'native_uniqueness_policy':'all_disparity_strict_minimum',
                   'opencv_mode':'SGBM','speckle_filter':0,'opencv_lr_crosscheck':-1,'lr_tolerance_px':1},
         'native_native':summarize_pair(nl,nr,nlv,nrv), 'reference_profiles':{}}
     for block in a.blocks:
-        cl,cr,seconds=cv_sgbm(left,right,disparities=a.disparities,block=block,uniqueness=a.uniqueness)
+        cl,cr,seconds=cv_sgbm(sgbm_left,sgbm_right,disparities=a.disparities,block=block,uniqueness=a.uniqueness)
         clv=valid_map(cl,disparities=a.disparities);crv=valid_map(cr,disparities=a.disparities)
         name=f'block{block}_unique{a.uniqueness}'
         result['reference_profiles'][name]={
             'elapsed_cpu_seconds':seconds,
+            'p1':int(8*block**2),'p2':int(32*block**2),
             'cv_cv':summarize_pair(cl,cr,clv,crv),
             'nativeL_cvR':summarize_pair(nl,cr,nlv,crv),
             'cvL_nativeR':summarize_pair(cl,nr,clv,nrv),
             'native_cv_left':compare_view(nl,cl,nlv,clv),
             'native_cv_right':compare_view(nr,cr,nrv,crv),
-            'texture_bins':classify_texture(left,nl,nr,nlv,nrv,cl,cr,clv,crv)}
+            'texture_bins':classify_texture(luma_left,nl,nr,nlv,nrv,cl,cr,clv,crv)}
         if a.image and block==a.blocks[0]:
             plot_diagnostic(left,nl,nr,nlv,nrv,cl,cr,clv,crv,a.image)
     a.output.parent.mkdir(parents=True,exist_ok=True)

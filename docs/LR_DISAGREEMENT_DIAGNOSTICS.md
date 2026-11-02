@@ -65,3 +65,7 @@ If *independent, high-quality* left/right feature matches have large vertical
 residuals, inspect rectification/calibration and row indexing. If feature
 matches follow epipolar rows but native LR agreement remains poor, inspect
 stereo cost/aggregation and right-view selection first.
+
+## Resolution & `v8` Correspondence-First Evidence
+
+See [`docs/correspondence-ortho-hybrid-v8-evidence.md`](correspondence-ortho-hybrid-v8-evidence.md) and the tracked JSON reports in [`docs/evidence/v8-review-milestone/`](evidence/v8-review-milestone/) for the controlled exact-luma OpenCV cross-check, pre/post-SGM cost-curve inspection, single-variable matching-cost ablations (`ortho_thermo32`), full-resolution native Daxa GPU qualification, and `297.3 FPS` (`3.36 ms` p50) multiresolution refinement results.

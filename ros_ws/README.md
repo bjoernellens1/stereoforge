@@ -174,16 +174,15 @@ whole difference to the filter. Keep `depth_speckle_min_pixels:=0` as the
 baseline; never enable filtering by default based only on a cleaner-looking
 image.
 
-The connected-component filter currently uses **four-connected** neighbors,
-a fixed metric depth difference (`depth_speckle_delta_m`, default 0.05 m)
-and a minimum area. With the ZED 2 HD fixture (`f_x B ≈ 63.04 px·m`),
-a one-pixel disparity difference corresponds approximately to
-`ΔZ ≈ Z²/(f_x B)`: 0.063 m at 2 m, 0.143 m at 3 m. Thus the 0.05 m edge
-criterion can break a real surface into small components, which the 50-pixel
-threshold then erases. Low initial validity exacerbates the effect.
-This heuristic should be replaced or carefully tuned using *real stereo*
-validity/quality metrics; increasing `depth_speckle_delta_m` blindly can
-merge foreground with background.
+The connected-component filter supports **eight-connected** disparity-domain
+continuity (`depth_speckle_delta_px`, default `1.25` px using calibrated `f_x B`)
+as well as legacy metric depth difference (`depth_speckle_delta_m`, default `0.05` m,
+used when `depth_speckle_delta_px:=0`) and a minimum area (`depth_speckle_min_pixels`).
+With the ZED 2 HD fixture (`f_x B ≈ 63.04 px·m`), a one-pixel disparity difference
+corresponds approximately to `ΔZ ≈ Z²/(f_x B)`: 0.063 m at 2 m, 0.143 m at 3 m.
+Using disparity-domain continuity (`|q_i - q_j| <= depth_speckle_delta_px`, where
+`q = f_x B / Z`) keeps slanted and distant surfaces (> 1.8 m) intact while
+removing isolated foreground speckles.
 
 When the opt-in filter is active, the publisher reports total valid pixels
 before and after filtering, removed components, filtered frames and mean CPU

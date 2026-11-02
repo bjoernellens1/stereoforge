@@ -28,7 +28,9 @@ void census(uint3 tid:SV_DispatchThreadID) {
         if(ox==0&&oy==0)continue;
         if(image[(y+oy)*int(width)+x+ox]<image[i])value|=1u<<bit;
         bit++;
-    }}
+    }
+    const int2 sym[8]={int2(0,1),int2(0,-1),int2(1,0),int2(-1,0),int2(0,2),int2(0,-2),int2(2,0),int2(-2,0)};
+    for(uint k=0;k<8;k++){int2 d=sym[k];if(image[(y+d.x)*int(width)+x+d.y]<image[(y-d.x)*int(width)+x-d.y])value|=1u<<(24u+k);}}
     descriptor[i]=value; descriptor_valid[i]=valid?1:0;
 }
 

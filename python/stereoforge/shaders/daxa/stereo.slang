@@ -18,7 +18,7 @@ void census(uint3 gid:SV_GroupID,uint3 local:SV_GroupThreadID){
     uint* image=(uint*)(pc.pass==0?p.left_address:p.right_address);
     uint* descriptor=(uint*)(pc.pass==0?p.left_desc_address:p.right_desc_address);
     uint* valid=(uint*)(pc.pass==0?p.left_valid_address:p.right_valid_address);
-    bool supported=sgm_census_supported(p.width,p.height,i);uint value=0;if(supported)value=sgm_census(image,p.width,p.height,i);descriptor[i]=value;valid[i]=supported?1:0;
+    bool supported=sgm_census_supported(p.width,p.height,i);uint value=0;if(supported)value=((p.subpixel&2u)!=0)?sgm_ortho_thermo_census(image,p.width,p.height,i):sgm_census(image,p.width,p.height,i);descriptor[i]=value;valid[i]=supported?1:0;
 }
 [shader("compute")][numthreads(64,1,1)]
 void cost(uint3 gid:SV_GroupID,uint3 local:SV_GroupThreadID){

@@ -69,7 +69,7 @@ class Settings:
             raise ValueError('disparities must be 2..128')
         if type(self.radius) is not int or self.radius not in (2, 4, 8):
             raise ValueError('target-pixel radius must be 2,4,8')
-        if type(self.min_margin) is not int or not 1 <= self.min_margin <= 24:
+        if type(self.min_margin) is not int or not 1 <= self.min_margin <= 32:
             raise ValueError('positive integer Census uniqueness margin required')
         if type(self.subpixel) is not bool or type(self.recovery) is not bool:
             raise ValueError('boolean profiles required')
@@ -223,7 +223,7 @@ def predict_prior(disparity, confidence, valid, target_shape, settings=Settings(
 
 
 def census(image, support):
-    """5x5 row-major comparison, centre excluded, lowest bit upper-left."""
+    """5x5 row-major comparison, centre excluded, lowest bit upper-left, plus 8-bit TCS."""
     image = _image(image, 'luma')
     if image.dtype.kind not in 'ui' or np.any(image < 0) or np.any(image > 255):
         raise ValueError('luma must be integer0..255')
@@ -242,6 +242,9 @@ def census(image, support):
                 continue
             inner |= (image[2+dy:h-2+dy, 2+dx:w-2+dx] < centre).astype(np.uint32) << bit
             bit += 1
+    for dy, dx in ((0, 1), (0, -1), (1, 0), (-1, 0), (0, 2), (0, -2), (2, 0), (-2, 0)):
+        inner |= (image[2+dy:h-2+dy, 2+dx:w-2+dx] < image[2-dy:h-2-dy, 2-dx:w-2-dx]).astype(np.uint32) << bit
+        bit += 1
     valid[2:-2, 2:-2] = footprint
     descriptor[~valid] = 0
     return Census(descriptor, valid)
@@ -255,7 +258,7 @@ def select_costs(costs, supported, lower, upper, settings=Settings()):
     raw floating output is canonical invalid. Global endpoints remain raw-valid.
     """
     costs = np.asarray(costs)
-    if costs.ndim != 3 or costs.shape[0] != settings.disparities or min(costs.shape[1:]) <= 0 or costs.dtype.kind not in 'ui' or np.any(costs < 0) or np.any(costs > 24):
+    if costs.ndim != 3 or costs.shape[0] != settings.disparities or min(costs.shape[1:]) <= 0 or costs.dtype.kind not in 'ui' or np.any(costs < 0) or np.any(costs > 32):
         raise ValueError('costs must be [D,H,W] bounded integer Census Hamming costs')
     supported = _mask(supported, 'cost support', costs.shape)
     shape = costs.shape[1:]
@@ -265,11 +268,11 @@ def select_costs(costs, supported, lower, upper, settings=Settings()):
     ds = np.arange(settings.disparities, dtype=np.int32)[:, None, None]
     allowed = supported & (ds >= lower) & (ds <= upper)
     count = allowed.sum(axis=0, dtype=np.uint32)
-    #25 is exclusively an ordering key; never enters a subpixel/confidence formula.
-    ordering = np.where(allowed, costs, 25)
+    #33 is exclusively an ordering key; never enters a subpixel/confidence formula.
+    ordering = np.where(allowed, costs, 33)
     winner = ordering.argmin(axis=0).astype(np.int32)
     best = np.take_along_axis(ordering, winner[None], axis=0)[0].astype(np.int32)
-    second = np.min(np.where(allowed & (ds != winner), costs, 25), axis=0).astype(np.int32)
+    second = np.min(np.where(allowed & (ds != winner), costs, 33), axis=0).astype(np.int32)
     reasons = np.zeros(shape, np.uint32)
     reasons[count < 2] |= np.uint32(Reason.TOO_FEW)
     unique = (count >= 2) & (second-best >= settings.min_margin)
@@ -533,7 +536,7 @@ def _division(low, high):
 
 def confidence_bounds(best, second):
     best = np.asarray(best); second = np.asarray(second)
-    if best.shape != second.shape or best.dtype.kind not in 'iu' or second.dtype.kind not in 'iu' or np.any(best < 0) or np.any(second > 24) or np.any(second <= best):
+    if best.shape != second.shape or best.dtype.kind not in 'iu' or second.dtype.kind not in 'iu' or np.any(best < 0) or np.any(second > 32) or np.any(second <= best):
         raise ValueError('unique supported integer Census costs required')
     exact = (_exact(second)-_exact(best))/_exact(np.maximum(second, 1))
     b = _division(exact, exact)
@@ -542,7 +545,7 @@ def confidence_bounds(best, second):
 
 def subpixel_bounds(minus, best, plus, winner):
     arrays = [np.asarray(a) for a in (minus, best, plus, winner)]
-    if any(a.shape != arrays[0].shape or a.dtype.kind not in 'iu' for a in arrays) or any(np.any((a < 0) | (a > 24)) for a in arrays[:3]) or np.any((arrays[3] < 0) | (arrays[3] > 127)):
+    if any(a.shape != arrays[0].shape or a.dtype.kind not in 'iu' for a in arrays) or any(np.any((a < 0) | (a > 32)) for a in arrays[:3]) or np.any((arrays[3] < 0) | (arrays[3] > 127)):
         raise ValueError('bounded integer costs/winner required')
     m, b, p, w = [_exact(a) for a in arrays]
     den = (m-2*b)+p

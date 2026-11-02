@@ -15,7 +15,7 @@ INVALID_COST=10000
 DIRECTIONS=((1,0),(-1,0),(0,1),(0,-1),(1,1),(-1,-1),(1,-1),(-1,1))
 
 def census(image):
-    """5x5, 24-bit Census; border descriptors zero and explicitly invalid."""
+    """5x5, 32-bit multi-scale Census; border descriptors zero and explicitly invalid."""
     image=np.asarray(image)
     if image.ndim!=2:
         raise ValueError("census expects grayscale HxW")
@@ -29,6 +29,9 @@ def census(image):
             if dx==dy==0: continue
             out[2:-2,2:-2] |= (image[2+dy:h-2+dy,2+dx:w-2+dx]<center).astype(np.uint32)<<bit
             bit+=1
+    for dy,dx in ((0,1),(0,-1),(1,0),(-1,0),(0,2),(0,-2),(2,0),(-2,0)):
+        out[2:-2,2:-2] |= (image[2+dy:h-2+dy,2+dx:w-2+dx]<image[2-dy:h-2-dy,2-dx:w-2-dx]).astype(np.uint32)<<bit
+        bit+=1
     valid[2:-2,2:-2]=True
     return out,valid
 
