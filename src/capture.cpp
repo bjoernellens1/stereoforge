@@ -2,8 +2,10 @@
 #include <algorithm>
 #include <atomic>
 #include <bit>
+#include <cctype>
 #include <condition_variable>
 #include <exception>
+#include <filesystem>
 #include <fstream>
 #include <limits>
 #include <mutex>
@@ -31,8 +33,26 @@ void validate_config(const CaptureConfig& c){
         throw std::invalid_argument("invalid capture config: dimensions, bounded pool/queue or source timeout");
 }
 #ifdef SF_NATIVE_CAPTURE_ZED
+bool can_reset_single_zed2_mcu(std::string_view expected_serial={}){
+    namespace fs=std::filesystem;
+    std::error_code ec;
+    unsigned zed_mcu_count=0,serial_match_count=0;
+    for(const auto& entry:fs::directory_iterator("/sys/class/hidraw",ec)){
+        if(ec)return false;
+        std::ifstream uevent(entry.path()/"device/uevent");
+        if(!uevent)continue;
+        std::string text((std::istreambuf_iterator<char>(uevent)),std::istreambuf_iterator<char>());
+        std::transform(text.begin(),text.end(),text.begin(),[](unsigned char c){return char(std::toupper(c));});
+        if(text.find("2B03:0000F780")==std::string::npos&&text.find("2B03:F780")==std::string::npos)continue;
+        ++zed_mcu_count;
+        if(!expected_serial.empty()&&text.find(expected_serial)!=std::string::npos)++serial_match_count;
+    }
+    if(zed_mcu_count==1)return true;
+    return zed_mcu_count>1&&!expected_serial.empty()&&serial_match_count==1&&zed_mcu_count==1;
+}
 class CameraSource {
     CaptureConfig config_;
+    sl_oc::video::VideoParams video_params_;
     std::unique_ptr<sl_oc::video::VideoCapture> video_;
     std::unique_ptr<sl_oc::sensors::SensorCapture> sensors_;
     std::thread sensor_thread_;
@@ -40,7 +60,7 @@ class CameraSource {
     std::mutex mutex_;
     std::array<CaptureImuSample,max_imu> samples_{};
     size_t sample_count_=0;
-    uint64_t sensor_drops_=0,last_timestamp_=0;
+    uint64_t sensor_drops_=0,last_timestamp_=0,consecutive_timeout_ms_=0,recoveries_=0;
     std::string device_,sensor_status_="unavailable",controls_;
     uint64_t control_time_=0;
 public:
@@ -53,10 +73,11 @@ public:
         else throw std::invalid_argument("unsupported ZED resolution");
         if((c.fps!=15&&c.fps!=30&&c.fps!=60&&c.fps!=100)||(c.eye_width==2208&&c.fps!=15)||(c.eye_width==1920&&c.fps>30)||(c.eye_width==1280&&c.fps>60))throw std::invalid_argument("unsupported ZED resolution/fps");
         p.fps=static_cast<sl_oc::video::FPS>(c.fps);
+        video_params_=p;
         video_=std::make_unique<sl_oc::video::VideoCapture>(p);
         if(!video_->initializeVideo(c.device_id)||video_->getSerialNumber()<=0){
             video_.reset();
-            sl_oc::sensors::SensorCapture::resetSensorModule();
+            if(can_reset_single_zed2_mcu(c.device_serial_override))sl_oc::sensors::SensorCapture::resetSensorModule();
             video_=std::make_unique<sl_oc::video::VideoCapture>(p);
             if(!video_->initializeVideo(c.device_id))throw std::runtime_error("cannot initialize ZED video: USB mode, permissions or device ownership");
         }
@@ -92,7 +113,23 @@ public:
     ~CameraSource(){stopping_=true;if(sensor_thread_.joinable())sensor_thread_.join();video_.reset();sensors_.reset();}
     CaptureSourceStatus read(CaptureFrame& f,std::chrono::milliseconds timeout){
         auto s=video_->snapshotFrame(f.packed_yuyv,uint64_t(timeout.count()),last_timestamp_);
-        if(!s.timestamp||s.timestamp==last_timestamp_)return CaptureSourceStatus::timeout;
+        if(!s.timestamp||s.timestamp==last_timestamp_){
+            consecutive_timeout_ms_+=uint64_t(std::max<int64_t>(1,timeout.count()));
+            if(!stopping_&&consecutive_timeout_ms_>=2000&&recoveries_<2&&can_reset_single_zed2_mcu(config_.device_serial_override)){
+                consecutive_timeout_ms_=0;++recoveries_;video_.reset();
+                sl_oc::sensors::SensorCapture::resetSensorModule();
+                auto reinit=std::make_unique<sl_oc::video::VideoCapture>(video_params_);
+                if(reinit->initializeVideo(config_.device_id)){
+                    int rw=0,rh=0;reinit->getFrameSize(rw,rh);
+                    if(rw==int(config_.eye_width*2)&&rh==int(config_.height)){
+                        video_=std::move(reinit);
+                        if(sensors_)video_->enableSensorSync(sensors_.get());
+                    }
+                }
+            }
+            return CaptureSourceStatus::timeout;
+        }
+        consecutive_timeout_ms_=0;
         last_timestamp_=s.timestamp;
         if(s.channels!=2)throw std::runtime_error("unexpected camera pixel format");
         f.source_width=s.width;f.height=s.height;f.stride_bytes=s.width*2;f.frame_id=s.frame_id;f.camera_timestamp_ns=s.timestamp;

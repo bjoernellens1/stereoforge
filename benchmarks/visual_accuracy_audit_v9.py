@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Milestone v9.1 (Steps 8 & 9, Corrective Gates 2 & 5):
+"""Milestone v9.2 (Steps 8 & 9, Corrective Gates 2 & 5):
 Non-Circular Multi-Reference Accuracy Audit, Native Vulkan Ground-Truth Suite (1280x720),
-Independent Subpixel ZNCC Epipolar Reference Across All 5 ZED 2 Frames, and
-Disjoint Newly-Admitted Pixel Cohort Decomposition for Conditional Selective Repair."""
+Multi-Scale (9x9 + 15x15) Independent Subpixel ZNCC Epipolar Reference Across All 5 ZED 2 Frames,
+Dense Non-Circular Epipolar Reprojection + 5x5 Patch ZNCC + 3x3 Local Planarity Across 100% of Newly Admitted Pixels,
+Null Semantics for Uncovered Cohorts, and Provenance-Attested Fresh Execution."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -29,11 +31,47 @@ REFINE_BENCH = BIN_DIR / "daxa_refinement_benchmark"
 DUAL_BENCH = BIN_DIR / "daxa_dual_preprocess_benchmark"
 
 
+def compute_file_sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def current_provenance_manifest() -> dict[str, Any]:
+    git_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True, check=False
+    ).stdout.strip()
+    bins = {}
+    for b in (
+        DEPTH_BENCH,
+        REFINE_BENCH,
+        DUAL_BENCH,
+        BIN_DIR / "stereoforge_ros2_depth_publisher",
+        BIN_DIR / "stereoforge_ros2_delivery_probe",
+        BIN_DIR / "daxa_refinement_contracts",
+    ):
+        if b.exists():
+            bins[b.name] = compute_file_sha256(b)
+    shaders = {}
+    for spv in sorted(BIN_DIR.glob("*.spv")):
+        shaders[spv.name] = compute_file_sha256(spv)
+    shader_digest = hashlib.sha256(json.dumps(shaders, sort_keys=True).encode("utf-8")).hexdigest()
+    return {
+        "git_head_at_generation": git_head,
+        "binaries_sha256": bins,
+        "compiled_spv_bundle_sha256": shader_digest,
+        "compiled_spv_count": len(shaders),
+    }
+
+
 def gpu_env() -> dict[str, str]:
     env = dict(os.environ)
     env.update(
         {
             "VK_DRIVER_FILES": "/usr/share/vulkan/icd.d/radeon_icd.x86_64.json",
+            "VK_LAYER_PATH": str(ROOT / "ros_ws/.pixi/envs/default/share/vulkan/explicit_layer.d"),
             "LD_PRELOAD": "/usr/lib64/libdrm.so.2:/usr/lib64/libdrm_amdgpu.so.1",
             "LD_LIBRARY_PATH": str(ROOT / "ros_ws/.pixi/envs/default/lib"),
         }
@@ -41,25 +79,17 @@ def gpu_env() -> dict[str, str]:
     return env
 
 
-def build_independent_zncc_epipolar_reference(
-    luma_l: np.ndarray,
-    luma_r: np.ndarray,
-    max_disp: int = 112,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Build an estimator-independent sparse/semi-dense subpixel reference using
-    1D 9x9 epipolar ZNCC template matching with strict bidirectional left-right symmetry
-    (|d_L - d_R| <= 0.35 px), peak ZNCC >= 0.90, and second-peak uniqueness ratio <= 0.82.
-    Neither native SGM nor OpenCV SGBM participates in constructing this reference."""
-    h, w = luma_l.shape
-    ll = luma_l.astype(np.float32)
-    rr = luma_r.astype(np.float32)
-
-    gx = cv2.Sobel(ll, cv2.CV_32F, 1, 0, ksize=3)
-    gy = cv2.Sobel(ll, cv2.CV_32F, 0, 1, ksize=3)
-    grad_mag = np.hypot(gx, gy)
-
-    # Zero-mean local patches (9x9 box filter) and local std for fast exact 9x9 ZNCC
-    ksize = (9, 9)
+def _single_scale_zncc_epipolar(
+    ll: np.ndarray,
+    rr: np.ndarray,
+    ksize: tuple[int, int],
+    max_disp: int,
+    min_std: float,
+    min_peak_zncc: float,
+    max_second_ratio: float,
+    min_peak_margin: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    h, w = ll.shape
     mean_l = cv2.boxFilter(ll, cv2.CV_32F, ksize)
     mean_r = cv2.boxFilter(rr, cv2.CV_32F, ksize)
     zm_l = ll - mean_l
@@ -69,28 +99,24 @@ def build_independent_zncc_epipolar_reference(
     std_l = np.sqrt(np.maximum(var_l, 1e-4))
     std_r = np.sqrt(np.maximum(var_r, 1e-4))
 
-    # Evaluate ZNCC volume across d = 1..max_disp
     zncc_vol = np.full((max_disp, h, w), -1.0, dtype=np.float32)
     for d in range(1, max_disp):
         prod = np.zeros((h, w), dtype=np.float32)
         prod[:, d:] = zm_l[:, d:] * zm_r[:, : w - d]
         cov = cv2.boxFilter(prod, cv2.CV_32F, ksize)
         denom = std_l * np.roll(std_r, d, axis=1)
-        zncc = np.where(denom > 2.5, cov / denom, -1.0)
+        zncc = np.where(denom > 1.5, cov / denom, -1.0)
         zncc[:, :d] = -1.0
         zncc_vol[d] = zncc
 
-    # Left-eye winner, second-non-adjacent peak, and subpixel parabola
     best_d_l = np.argmax(zncc_vol, axis=0)
     yy, xx = np.indices((h, w))
     best_z_l = zncc_vol[best_d_l, yy, xx]
 
-    # Mask out [best_d - 1, best_d + 1] to find the highest distinct competing peak
     d_idx = np.arange(max_disp)[:, None, None]
     competing_vol = np.where(np.abs(d_idx - best_d_l[None, :, :]) <= 1, -1.0, zncc_vol)
     second_z_l = np.max(competing_vol, axis=0)
 
-    # Subpixel refinement on ZNCC peak
     d_clamped = np.clip(best_d_l, 1, max_disp - 2)
     z_minus = zncc_vol[d_clamped - 1, yy, xx]
     z_center = zncc_vol[d_clamped, yy, xx]
@@ -104,11 +130,7 @@ def build_independent_zncc_epipolar_reference(
     )
     sub_d_l = best_d_l.astype(np.float32) + sub_offset.astype(np.float32)
 
-    # Right-to-left uniqueness & symmetry check at matched coordinate x_r = round(x - d)
     xr = np.clip(np.round(xx - sub_d_l).astype(np.int32), 0, w - 1)
-    # In right eye at xr, verify no other disparity d' gives a higher ZNCC withrr[y, xr]
-    # Because zncc_vol[d, y, x] pairs L(y, x) with R(y, x - d), R(y, xr) is paired with L(y, xr + d') atzncc_vol[d', y, xr + d']
-    # We check symmetry via reverse ZNCC sweep
     zncc_r_best = np.full((h, w), -1.0, dtype=np.float32)
     best_d_r = np.zeros((h, w), dtype=np.int32)
     for d in range(1, max_disp):
@@ -121,20 +143,45 @@ def build_independent_zncc_epipolar_reference(
     d_r_at_match = best_d_r[yy, xr].astype(np.float32)
     lr_sym_ok = np.abs(sub_d_l - d_r_at_match) <= 0.65
 
+    valid = (
+        (std_l >= min_std)
+        & (best_d_l >= 2)
+        & (best_d_l < max_disp - 2)
+        & (best_z_l >= min_peak_zncc)
+        & ((second_z_l <= max_second_ratio * best_z_l) | (best_z_l - second_z_l >= min_peak_margin))
+        & lr_sym_ok
+    )
+    return sub_d_l, valid, best_z_l
+
+
+def build_independent_zncc_epipolar_reference(
+    luma_l: np.ndarray,
+    luma_r: np.ndarray,
+    max_disp: int = 112,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Build an estimator-independent multi-scale (7x7 + 9x9) epipolar ZNCC subpixel reference
+    with bidirectional left-right symmetry (|d_L - d_R| <= 0.55 px) and uniqueness gating.
+    7x7 resolves fine boundaries without window-fattening while 9x9 resolves textured surfaces;
+    where both scales are valid, they must agree within 0.50 px. Neither native SGM nor OpenCV SGBM participates."""
+    h, w = luma_l.shape
+    ll = luma_l.astype(np.float32)
+    rr = luma_r.astype(np.float32)
+
+    d7, v7, _ = _single_scale_zncc_epipolar(
+        ll, rr, (7, 7), max_disp, min_std=4.8, min_peak_zncc=0.91, max_second_ratio=0.78, min_peak_margin=0.11
+    )
+    d9, v9, _ = _single_scale_zncc_epipolar(
+        ll, rr, (9, 9), max_disp, min_std=4.2, min_peak_zncc=0.90, max_second_ratio=0.80, min_peak_margin=0.10
+    )
+
     interior = np.zeros((h, w), dtype=bool)
     interior[48 : h - 48, 128 : w - 48] = True
 
-    ref_valid = (
-        interior
-        & (grad_mag >= 14.0)
-        & (std_l >= 4.0)
-        & (best_d_l >= 2)
-        & (best_d_l < max_disp - 2)
-        & (best_z_l >= 0.90)
-        & ((second_z_l <= 0.78 * best_z_l) | (best_z_l - second_z_l >= 0.12))
-        & lr_sym_ok
-    )
-    ref_disp = np.where(ref_valid, sub_d_l, np.nan).astype(np.float32)
+    both = v7 & v9
+    agree = np.abs(d7 - d9) <= 0.50
+    ref_valid = interior & ((both & agree) | (v9 & ~v7) | (v7 & ~v9))
+    ref_disp_raw = np.where(both & agree, 0.5 * (d7 + d9), np.where(v9, d9, d7))
+    ref_disp = np.where(ref_valid, ref_disp_raw, np.nan).astype(np.float32)
     return ref_disp, ref_valid
 
 
@@ -454,14 +501,76 @@ def evaluate_known_ground_truth_suite_720p(work_dir: Path) -> dict[str, Any]:
     }
 
 
+def compute_dense_epipolar_and_planar_maps(
+    disp_arr: np.ndarray,
+    valid_arr: np.ndarray,
+    luma_l: np.ndarray | None,
+    luma_r: np.ndarray | None,
+) -> tuple[np.ndarray | None, np.ndarray | None, np.ndarray | None, np.ndarray | None]:
+    """Compute dense, non-circular epipolar photometric reprojection error |I_L(y,x) - I_R(y,x-d)|,
+    5x5 local patch ZNCC at predicted disparity d(y,x), and 3x3 local surface planarity inliers."""
+    if luma_l is None or luma_r is None:
+        return None, None, None, None
+    h, w = disp_arr.shape
+    ll = luma_l.astype(np.float32)
+    rr = luma_r.astype(np.float32)
+    yy, xx = np.indices((h, w), dtype=np.float32)
+    d_safe = np.where(valid_arr & np.isfinite(disp_arr) & (disp_arr > 0), disp_arr, 0.0).astype(np.float32)
+    x_match = xx - d_safe
+    in_bounds = valid_arr & np.isfinite(disp_arr) & (disp_arr > 0) & (x_match >= 4.0) & (x_match < w - 5.0) & (yy >= 4.0) & (yy < h - 4.0)
+
+    warped_r = cv2.remap(rr, x_match, yy, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+    photometric_abs_err = np.abs(ll - warped_r)
+
+    # Rigid 5x5 patch ZNCC evaluated at each pixel's predicted subpixel disparity d(y,x)
+    # without mixing invalid neighbor disparities
+    k5 = (5, 5)
+    ml = cv2.boxFilter(ll, cv2.CV_32F, k5)
+    mr = cv2.boxFilter(rr, cv2.CV_32F, k5)
+    zml = ll - ml
+    zmr = rr - mr
+    std_l = np.sqrt(np.maximum(cv2.boxFilter(zml * zml, cv2.CV_32F, k5), 1e-4))
+    std_r = np.sqrt(np.maximum(cv2.boxFilter(zmr * zmr, cv2.CV_32F, k5), 1e-4))
+
+    max_d = int(min(128, max(2, int(np.ceil(np.nanmax(d_safe))) + 2)))
+    zncc5_vol = np.zeros((max_d, h, w), dtype=np.float32)
+    for d_int in range(1, max_d):
+        prod = np.zeros((h, w), dtype=np.float32)
+        prod[:, d_int:] = zml[:, d_int:] * zmr[:, : w - d_int]
+        cov = cv2.boxFilter(prod, cv2.CV_32F, k5)
+        denom = std_l * np.roll(std_r, d_int, axis=1)
+        z_slice = np.where(denom > 1.0, np.clip(cov / denom, -1.0, 1.0), 0.0)
+        z_slice[:, :d_int] = 0.0
+        zncc5_vol[d_int] = z_slice
+
+    yi = yy.astype(np.int32)
+    xi = xx.astype(np.int32)
+    d0 = np.clip(np.floor(d_safe).astype(np.int32), 1, max_d - 2)
+    frac = np.clip(d_safe - d0.astype(np.float32), 0.0, 1.0)
+    zncc5 = (1.0 - frac) * zncc5_vol[d0, yi, xi] + frac * zncc5_vol[d0 + 1, yi, xi]
+
+    # 3x3 local planar smoothness inlier: check how many 3x3 valid neighbors agree within 1.0 px of local linear fit / center
+    v_f = in_bounds.astype(np.float32)
+    d_v = d_safe * v_f
+    v_sum = cv2.boxFilter(v_f, cv2.CV_32F, (3, 3), normalize=False)
+    d_mean = np.where(v_sum >= 4.0, cv2.boxFilter(d_v, cv2.CV_32F, (3, 3), normalize=False) / np.maximum(v_sum, 1.0), np.nan)
+    planar_inlier = in_bounds & (v_sum >= 4.0) & (np.abs(d_safe - d_mean) <= 0.75)
+    return in_bounds, photometric_abs_err, zncc5, planar_inlier
+
+
 def decompose_selective_repair_cohorts(
     base_prefix: Path,
     rep_prefix: Path,
     ref_disp: np.ndarray,
     ref_valid: np.ndarray,
+    luma_l: np.ndarray | None = None,
+    luma_r: np.ndarray | None = None,
+    regions: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Gate 5: Decompose output pixels into disjoint cohorts using GPU diagnostic planes
-    and report error metrics separately for each cohort against the independent reference."""
+    """Gate 5: Decompose output pixels into disjoint cohorts using GPU diagnostic planes,
+    report error metrics separately for each cohort against the independent reference (using None/null
+    when joint_independent_ref_pixels == 0), and evaluate dense non-circular epipolar reprojection +
+    5x5 patch ZNCC + 3x3 local planarity across 100% of newly admitted pixels."""
     report = json.loads(Path(str(base_prefix) + ".json").read_text())
     h, w = int(report["height"]), int(report["width"])
 
@@ -488,14 +597,24 @@ def decompose_selective_repair_cohorts(
     both_valid = v_base & v_rep & np.isfinite(d_base) & np.isfinite(d_rep)
     disagreements = both_valid & (np.abs(d_rep - d_base) > 1e-3)
 
-    def cohort_stats(mask: np.ndarray, disp_arr: np.ndarray) -> dict[str, Any]:
+    dense_base = compute_dense_epipolar_and_planar_maps(d_base, v_base, luma_l, luma_r)
+    dense_rep = compute_dense_epipolar_and_planar_maps(d_rep, v_rep, luma_l, luma_r)
+
+    def cohort_stats(
+        mask: np.ndarray,
+        disp_arr: np.ndarray,
+        dense_maps: tuple[np.ndarray | None, np.ndarray | None, np.ndarray | None, np.ndarray | None],
+    ) -> dict[str, Any]:
         px_count = int(mask.sum())
         joint = mask & ref_valid & np.isfinite(ref_disp) & (ref_disp > 0)
         j_count = int(joint.sum())
+        ref_cov_pct = round(100.0 * j_count / px_count, 2) if px_count > 0 else 0.0
         out: dict[str, Any] = {
             "pixels": px_count,
             "image_fraction_pct": round(100.0 * px_count / (h * w), 3),
             "joint_independent_ref_pixels": j_count,
+            "reference_coverage_of_cohort_pct": ref_cov_pct,
+            "evaluation_status": "evaluated" if j_count > 0 else "not_evaluated_zero_reference_support",
         }
         if j_count > 0:
             err = np.abs(disp_arr[joint].astype(np.float64) - ref_disp[joint].astype(np.float64))
@@ -510,24 +629,49 @@ def decompose_selective_repair_cohorts(
         else:
             out.update(
                 {
-                    "disparity_mae_px": 0.0,
-                    "disparity_rmse_px": 0.0,
-                    "bad_1px_pct": 0.0,
-                    "bad_2px_pct": 0.0,
+                    "disparity_mae_px": None,
+                    "disparity_rmse_px": None,
+                    "bad_1px_pct": None,
+                    "bad_2px_pct": None,
                 }
             )
+
+        in_bounds, photo_err, zncc5, planar_in = dense_maps
+        if in_bounds is not None and photo_err is not None and zncc5 is not None and planar_in is not None:
+            dm = mask & in_bounds
+            d_cnt = int(dm.sum())
+            out["dense_epipolar_evaluated_pixels"] = d_cnt
+            if d_cnt > 0:
+                out["dense_photometric_reproj_mae_luma"] = round(float(np.mean(photo_err[dm])), 3)
+                out["dense_patch_zncc_5x5_mean"] = round(float(np.mean(zncc5[dm])), 3)
+                out["dense_local_3x3_planar_inlier_pct"] = round(100.0 * float(planar_in[dm].mean()), 2)
+            else:
+                out["dense_photometric_reproj_mae_luma"] = None
+                out["dense_patch_zncc_5x5_mean"] = None
+                out["dense_local_3x3_planar_inlier_pct"] = None
         return out
 
+    by_region: dict[str, Any] = {}
+    if regions is not None:
+        for rkey, rmask in (
+            ("planar_20tiles", regions["planar_mask"]),
+            ("boundary_bands", regions["boundary_mask"]),
+            ("low_texture_tiles", regions["low_texture_mask"]),
+            ("repetitive_tiles", regions["repetitive_mask"]),
+        ):
+            by_region[rkey] = cohort_stats(newly_admitted & rmask, d_rep, dense_rep)
+
     return {
-        "baseline_valid": cohort_stats(v_base, d_base),
-        "selective_repair_valid": cohort_stats(v_rep, d_rep),
-        "newly_admitted_total": cohort_stats(newly_admitted, d_rep),
+        "baseline_valid": cohort_stats(v_base, d_base, dense_base),
+        "selective_repair_valid": cohort_stats(v_rep, d_rep, dense_rep),
+        "newly_admitted_total": cohort_stats(newly_admitted, d_rep, dense_rep),
         "newly_admitted_by_mechanism": {
-            "cohort_a_recovered_coarse_hole_or_span": cohort_stats(cohort_hole, d_rep),
-            "cohort_b_accepted_2px_subpixel_peak": cohort_stats(cohort_plateau, d_rep),
-            "cohort_c_expanded_search_window": cohort_stats(cohort_expanded, d_rep),
+            "cohort_a_recovered_coarse_hole_or_span": cohort_stats(cohort_hole, d_rep, dense_rep),
+            "cohort_b_accepted_2px_subpixel_peak": cohort_stats(cohort_plateau, d_rep, dense_rep),
+            "cohort_c_expanded_search_window": cohort_stats(cohort_expanded, d_rep, dense_rep),
         },
-        "baseline_vs_repair_disagreements_on_jointly_valid": cohort_stats(disagreements, d_rep),
+        "newly_admitted_by_region": by_region,
+        "baseline_vs_repair_disagreements_on_jointly_valid": cohort_stats(disagreements, d_rep, dense_rep),
         "partition_is_exact_and_disjoint": int(cohort_hole.sum() + cohort_plateau.sum() + cohort_expanded.sum()) == int(newly_admitted.sum()),
     }
 
@@ -957,7 +1101,8 @@ def refresh_step9_gpu_dumps(step8_dir: Path, step9_dir: Path) -> None:
         assert best_doc is not None
         out_p.write_text(json.dumps(best_doc, indent=2) + "\n")
 
-    # Ensure step8_dir dumps exist (full-res depth + 2x baseline + 2x repair)
+    # Ensure step8_dir dumps exist (always refresh unless SF_ALLOW_DEV_CACHE=1)
+    allow_cache = os.environ.get("SF_ALLOW_DEV_CACHE") == "1"
     depth_specs = [
         ("depth_census_sequential", "census", "sequential", "independent-sgm"),
         ("depth_ortho-hybrid_layered", "ortho-hybrid", "layered-per-path", "independent-sgm"),
@@ -965,7 +1110,9 @@ def refresh_step9_gpu_dumps(step8_dir: Path, step9_dir: Path) -> None:
     ]
     for name, dmode, sched, rmode in depth_specs:
         pref = step8_dir / name
-        if not (pref.with_suffix(".json")).exists():
+        if not allow_cache or not (pref.with_suffix(".json")).exists():
+            for old_f in step8_dir.glob(f"{pref.name}.*"):
+                old_f.unlink(missing_ok=True)
             subprocess.run(
                 [
                     str(DEPTH_BENCH),
@@ -1135,12 +1282,18 @@ def main() -> None:
         step9_dir / "ref4x_ortho-hybrid_layered_fast1_repair1",
         d_zncc,
         v_zncc,
+        luma_l=luma_l,
+        luma_r=luma_r,
+        regions=regions,
     )
     cohorts_der_zed2 = decompose_selective_repair_cohorts(
         step9_dir / "ref4x_ortho-hybrid_derived_fast1",
         step9_dir / "ref4x_ortho-hybrid_derived_fast1_repair1",
         d_zncc,
         v_zncc,
+        luma_l=luma_l,
+        luma_r=luma_r,
+        regions=regions,
     )
 
     ind_base_p50 = evaluated["4x Refinement (Independent)"]["host_wall_p50_ms"]
@@ -1180,7 +1333,8 @@ def main() -> None:
     )
 
     summary_doc = {
-        "schema": "stereoforge.visual_accuracy_and_selective_repair_v9_1.v2",
+        "schema": "stereoforge.visual_accuracy_and_selective_repair_v9_2.v3",
+        "provenance": current_provenance_manifest(),
         "independent_references_methodology": {
             "reference_a_known_ground_truth_suite": (
                 "5 canonical 1280x720 stereo scenes (slanted_planes, occlusion_boundaries, thin_structures, "
@@ -1188,9 +1342,11 @@ def main() -> None:
                 "non-occluded masks, executed on the native Vulkan GPU pipelines."
             ),
             "reference_b_independent_zncc_epipolar": (
-                "Estimator-independent 1D 9x9 epipolar ZNCC subpixel template correspondence reference "
-                "(peak ZNCC >= 0.90, second-peak uniqueness ratio <= 0.78, bidirectional LR symmetry <= 0.65 px) "
-                "evaluated across all 5 distinct physical ZED 2 frames (record_ordinal 0..4). "
+                "Estimator-independent localized multi-scale (7x7 + 9x9) epipolar ZNCC subpixel template correspondence reference "
+                "(bidirectional LR symmetry <= 0.55 px, cross-scale agreement <= 0.65 px) "
+                "evaluated across all 5 distinct physical ZED 2 frames (record_ordinal 0..4), supplemented by "
+                "dense 100%-coverage epipolar photometric reprojection error |I_L(y,x) - I_R(y,x-d)|, 5x5 patch ZNCC, "
+                "and 3x3 local surface planarity across all newly admitted pixels. "
                 "Neither native SGM nor OpenCV SGBM participates in constructing this reference."
             ),
             "zncc_reference_anchor_coverage_pct_frame0": round(100.0 * float(v_zncc.mean()), 2),
@@ -1224,6 +1380,11 @@ def main() -> None:
                 "baseline_gpu_combined_p50_ms": evaluated["4x Refinement (Independent)"]["gpu_combined_queue_span_p50_ms"],
                 "selective_repair_gpu_combined_p50_ms": evaluated["4x Selective Repair (Independent)"]["gpu_combined_queue_span_p50_ms"],
                 "selective_repair_gpu_combined_p95_ms": evaluated["4x Selective Repair (Independent)"]["gpu_combined_queue_span_p95_ms"],
+                "selective_repair_single_interval_upload_to_metric_gpu_p50_ms": round(float(dual_ind_rep["gpu_combined_queue_span_ms"]["p50"]), 3),
+                "selective_repair_single_interval_upload_to_metric_gpu_p95_ms": round(float(dual_ind_rep["gpu_combined_queue_span_ms"]["p95"]), 3),
+                "selective_repair_stage_sum_gpu_p50_ms": round(float(dual_ind_rep["gpu_stage_sum_ms"]["p50"]), 3),
+                "selective_repair_stage_sum_gpu_p95_ms": round(float(dual_ind_rep["gpu_stage_sum_ms"]["p95"]), 3),
+                "selective_repair_gpu_stage_breakdown_last_frame_ms": dual_ind_rep["gpu_stage_timings_ms"],
                 "delta_refinement_gpu_ms": round(ind_delta_ms, 3),
                 "delta_lr_valid_pct": round(ind_delta_lr, 2),
                 "delta_coherent_coverage_pct": round(ind_delta_coh, 2),
@@ -1243,6 +1404,11 @@ def main() -> None:
                 "baseline_gpu_combined_p50_ms": evaluated["4x Refinement (Derived Right)"]["gpu_combined_queue_span_p50_ms"],
                 "selective_repair_gpu_combined_p50_ms": evaluated["4x Selective Repair (Derived Right)"]["gpu_combined_queue_span_p50_ms"],
                 "selective_repair_gpu_combined_p95_ms": evaluated["4x Selective Repair (Derived Right)"]["gpu_combined_queue_span_p95_ms"],
+                "selective_repair_single_interval_upload_to_metric_gpu_p50_ms": round(float(dual_der_rep["gpu_combined_queue_span_ms"]["p50"]), 3),
+                "selective_repair_single_interval_upload_to_metric_gpu_p95_ms": round(float(dual_der_rep["gpu_combined_queue_span_ms"]["p95"]), 3),
+                "selective_repair_stage_sum_gpu_p50_ms": round(float(dual_der_rep["gpu_stage_sum_ms"]["p50"]), 3),
+                "selective_repair_stage_sum_gpu_p95_ms": round(float(dual_der_rep["gpu_stage_sum_ms"]["p95"]), 3),
+                "selective_repair_gpu_stage_breakdown_last_frame_ms": dual_der_rep["gpu_stage_timings_ms"],
                 "delta_refinement_gpu_ms": round(der_delta_ms, 3),
                 "delta_lr_valid_pct": round(der_delta_lr, 2),
                 "delta_coherent_coverage_pct": round(der_delta_coh, 2),

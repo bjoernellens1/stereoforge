@@ -40,10 +40,14 @@ inline nlohmann::json ros_delivery_event_json(const RosDeliveryTraceRecord& r,
                 e["thread_cpu_timing"]={{"status","unavailable"},{"reason",r.thread_cpu_status==RosThreadCpuStatus::ClockReadFailed?"clock_read_failed":"nonmonotonic"}};
             else throw std::invalid_argument("missing thread cpu sample");
         } else if(r.thread_cpu_status!=RosThreadCpuStatus::Disabled)throw std::invalid_argument("undeclared thread cpu sample");
+        if(r.payload_fnv1a64)e["payload_fnv1a64"]=r.payload_fnv1a64;
+        if(r.valid_pixels)e["valid_pixels"]=r.valid_pixels;
     } else {
         auto const& output_config=config.at("outputs").at(output);
         e.update(json{{"arrival_system_ns",r.arrival_system_ns},{"width",r.width},{"height",r.height},{"step",r.step},
             {"encoding",output_config.at("encoding")},{"frame_id",output_config.at("frame_id")},{"payload_bytes",r.payload_bytes}});
+        if(r.payload_fnv1a64)e["payload_fnv1a64"]=r.payload_fnv1a64;
+        if(r.valid_pixels)e["valid_pixels"]=r.valid_pixels;
     }
     return e;
 }

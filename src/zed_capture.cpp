@@ -5,8 +5,12 @@
 #include <pybind11/stl.h>
 #include "videocapture.hpp"
 #include "sensorcapture.hpp"
+#include <algorithm>
 #include <atomic>
 #include <array>
+#include <cctype>
+#include <filesystem>
+#include <fstream>
 #include <map>
 #include <optional>
 #include <string>
@@ -92,6 +96,20 @@ py::dict encode_controls(const ControlSnapshot& snapshot) {
     result["readback_limitations"]=snapshot.readback_limitations;
     return result;
 }
+bool can_reset_single_zed2_mcu() {
+    unsigned zed_mcu_count = 0;
+    std::error_code ec;
+    for (const auto& entry : std::filesystem::directory_iterator("/sys/class/hidraw", ec)) {
+        if (ec) return false;
+        std::ifstream uevent(entry.path() / "device/uevent");
+        if (!uevent) continue;
+        std::string text((std::istreambuf_iterator<char>(uevent)), std::istreambuf_iterator<char>());
+        std::transform(text.begin(), text.end(), text.begin(), [](unsigned char c) { return char(std::toupper(c)); });
+        if (text.find("00002B03:0000F780") != std::string::npos || text.find("2B03:F780") != std::string::npos)
+            ++zed_mcu_count;
+    }
+    return zed_mcu_count == 1;
+}
 } // namespace
 
 
@@ -104,6 +122,10 @@ class ZedCapture {
     std::deque<sl_oc::sensors::data::Imu> samples_;
     std::atomic<uint64_t> dropped_{0};
     uint64_t last_timestamp_ = 0;
+    uint64_t consecutive_timeout_ms_ = 0;
+    unsigned recoveries_ = 0;
+    sl_oc::video::VideoParams video_params_{};
+    int device_id_ = -1;
     int serial_ = 0, width_, height_;
     bool sensors_available_ = false;
     std::string sensor_status_ = "unavailable";
@@ -162,10 +184,12 @@ public:
             throw std::invalid_argument("unsupported ZED resolution/framerate combination");
         if (device_id < -1) throw std::invalid_argument("invalid video device id");
         params.fps=static_cast<sl_oc::video::FPS>(fps);
+        video_params_=params;
+        device_id_=device_id;
         video_=std::make_unique<sl_oc::video::VideoCapture>(params);
         if (!video_->initializeVideo(device_id) || video_->getSerialNumber()<=0) {
             video_.reset();
-            sl_oc::sensors::SensorCapture::resetSensorModule();
+            if (can_reset_single_zed2_mcu()) sl_oc::sensors::SensorCapture::resetSensorModule();
             video_=std::make_unique<sl_oc::video::VideoCapture>(params);
             if (!video_->initializeVideo(device_id)) throw std::runtime_error("cannot initialize ZED Open Capture video; check USB mode, permissions and device ownership");
         }
@@ -247,8 +271,22 @@ public:
             std::lock_guard<std::mutex> io_lock(io_mutex_);
             if (!video_) throw std::runtime_error("camera is closed");
             frame=video_->snapshotFrame(bytes,static_cast<uint64_t>(timeout_ms));
-            if (!frame.timestamp || frame.timestamp==last_timestamp_)
+            if (!frame.timestamp || frame.timestamp==last_timestamp_) {
+                consecutive_timeout_ms_ += static_cast<uint64_t>(timeout_ms);
+                if (!stop_.load() && consecutive_timeout_ms_ >= 2000 && recoveries_ < 2 && can_reset_single_zed2_mcu()) {
+                    consecutive_timeout_ms_ = 0;
+                    ++recoveries_;
+                    video_.reset();
+                    sl_oc::sensors::SensorCapture::resetSensorModule();
+                    auto reinit = std::make_unique<sl_oc::video::VideoCapture>(video_params_);
+                    if (reinit->initializeVideo(device_id_)) {
+                        video_ = std::move(reinit);
+                        if (sensors_) video_->enableSensorSync(sensors_.get());
+                    }
+                }
                 throw FrameTimeout("no new ZED frame within timeout (last frame repeated or camera disconnected)");
+            }
+            consecutive_timeout_ms_ = 0;
             if (frame.width!=2*width_ || frame.height!=height_ || frame.channels!=2)
                 throw std::runtime_error("unexpected ZED YUYV frame format");
             last_timestamp_=frame.timestamp;

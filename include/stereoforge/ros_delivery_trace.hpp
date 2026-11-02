@@ -25,10 +25,22 @@ struct RosDeliveryTraceRecord {
     std::uint64_t producer_ticket=0,copy_ticket=0,producer_complete_observed_ns=0,copy_complete_observed_ns=0;
     std::uint64_t producer_enqueue_begin_ns=0,producer_enqueue_end_ns=0,export_enqueue_end_ns=0;
     std::uint64_t copy_begin_ns=0,copy_end_ns=0,publish_begin_ns=0,publish_end_ns=0,arrival_system_ns=0;
-    std::uint32_t capture_queue=0,pending=0,width=0,height=0,step=0;
-    std::uint64_t payload_bytes=0;
+    std::uint32_t capture_queue=0,pending=0,width=0,height=0,step=0,valid_pixels=0;
+    std::uint64_t payload_bytes=0,payload_fnv1a64=0;
 };
 static_assert(std::is_trivially_copyable_v<RosDeliveryTraceRecord>);
+inline std::uint64_t fnv1a64_words(const void* data, std::size_t bytes) noexcept {
+    std::uint64_t h=14695981039346656037ull;
+    const auto* p=static_cast<const std::uint8_t*>(data);
+    std::size_t n8=bytes/8;
+    for(std::size_t i=0;i<n8;++i){
+        std::uint64_t w=0;
+        __builtin_memcpy(&w,p+i*8,8);
+        h=(h^w)*1099511628211ull;
+    }
+    for(std::size_t i=n8*8;i<bytes;++i)h=(h^p[i])*1099511628211ull;
+    return h;
+}
 class RosDeliveryTrace {
     std::vector<RosDeliveryTraceRecord> records_;
     std::size_t limit_;

@@ -12,6 +12,7 @@ public:
     DaxaDualPreprocess(DaxaRectification full, DaxaRectification coarse, unsigned slots, std::shared_ptr<DaxaFoundation>);
     Frame enqueue(CaptureLease);
     size_t collect();
+    DaxaPreprocessTiming timings(const DaxaFrame&) const;
     DaxaPreprocessReadback readback(const DaxaFrame&) const;
     std::shared_ptr<DaxaFoundation> context() const;
 };
