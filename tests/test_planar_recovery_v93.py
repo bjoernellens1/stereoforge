@@ -59,3 +59,23 @@ def test_mismatched_coarse_geometry_rejected():
     except ValueError:
         return
     raise AssertionError("mismatched coarse right geometry must be rejected")
+
+
+def test_slanted_plane_preserves_affine_disparity():
+    h, w = 96, 160
+    y, x = np.indices((h, w), dtype=np.float32)
+    gt = (22 + 0.025 * x + 0.040 * y).astype(np.float32)
+    valid = np.ones((h, w), bool)
+    valid[35:62, 68:96] = False
+    measured = np.where(valid, gt, np.nan)
+    cy, cx = np.indices((h // 4, w // 4), dtype=np.float32)
+    coarse_d = (22 + 0.025 * (4 * cx + 1.5) + 0.04 * (4 * cy + 1.5)) / 4
+    gray = np.full((h, w), 128, np.float32)
+    result = recover_planar_reference(
+        measured, valid, coarse_d, coarse_d.copy(),
+        np.ones_like(coarse_d, bool), np.ones_like(coarse_d, bool),
+        gray, gray, config=PlanarRecoveryConfig(max_luma_gradient_dn=200),
+    )
+    inferred = result.provenance == 2
+    assert inferred.sum() > 50, result.diagnostics
+    assert np.max(np.abs(result.depth_disparity[inferred] - gt[inferred])) < 0.25
