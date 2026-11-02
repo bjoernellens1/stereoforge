@@ -51,12 +51,12 @@ bool thread_cpu_now(std::uint64_t& value) noexcept {
 }
 struct Options {
     std::string source,manifest,replay,mode="depth",map,frame,run,trace,reliability="best_effort",stereo_variant="packed-specialized",device_serial;
-    std::string pipeline_mode="full-sgm",coarse_manifest,descriptor_mode="census";
+    std::string pipeline_mode="full-sgm",coarse_manifest,descriptor_mode="census",coarse_schedule="sequential",coarse_right_mode="independent-sgm";
     std::string depth_topic="/stereoforge/depth",rgb_topic="/stereoforge/rectified_rgb";
     std::string depth_rate="adaptive",rate_report;
     unsigned depth_speckle_min_pixels=0; double depth_speckle_delta_m=0.05; double depth_speckle_delta_px=1.25;
     unsigned min_depth_fps=5,max_depth_fps=60,consumer_min_depth_fps=5,max_depth_age_ms=250,downshift_ms=3000;
-    unsigned fps=60,disparities=128,warmup=5,max_frames=100000;int device_id=-1;double duration=600,subscriber_wait=0;bool validation=false,thread_cpu_timing=false,fast_mode=false;
+    unsigned fps=60,disparities=128,warmup=5,max_frames=100000;int device_id=-1;double duration=600,subscriber_wait=0;bool validation=false,thread_cpu_timing=false,fast_mode=false,refinement_subpixel=false,selective_repair=false;
 };
 unsigned number(const std::string& s,unsigned lo,unsigned hi){size_t n=0;auto v=std::stoull(s,&n);if(n!=s.size()||v<lo||v>hi)throw std::invalid_argument("integer option outside bounds");return static_cast<unsigned>(v);}
 DepthRateConfig depth_rate_config(const Options& o) {
@@ -93,6 +93,10 @@ Options parse(int argc,char** argv){
         else if(a=="--stereo-variant")o.stereo_variant=v;else if(a=="--pipeline")o.pipeline_mode=v;else if(a=="--coarse-manifest")o.coarse_manifest=v;
         else if(a=="--descriptor-mode"){if(v!="census"&&v!="ortho-hybrid")throw std::invalid_argument("invalid descriptor mode");o.descriptor_mode=v;}
         else if(a=="--fast-mode")o.fast_mode=(number(v,0,1)==1);
+        else if(a=="--coarse-schedule"){if(v!="sequential"&&v!="paired-per-path"&&v!="layered-per-path"&&v!="shared-census-sequential")throw std::invalid_argument("invalid coarse schedule");o.coarse_schedule=v;}
+        else if(a=="--coarse-right-reference-mode"){if(v!="independent-sgm"&&v!="left-aggregated-selection")throw std::invalid_argument("invalid coarse right reference mode");o.coarse_right_mode=v;}
+        else if(a=="--refinement-subpixel")o.refinement_subpixel=(number(v,0,1)==1);
+        else if(a=="--selective-repair")o.selective_repair=(number(v,0,1)==1);
         else if(a=="--fps"||a=="--capture-fps"){o.fps=number(v,15,60);if(o.fps!=15&&o.fps!=30&&o.fps!=60)throw std::invalid_argument("unsupported camera FPS");}else if(a=="--disparities")o.disparities=number(v,32,256);
         else if(a=="--max-frames")o.max_frames=number(v,1,200000);else if(a=="--warmup")o.warmup=number(v,0,30);
         else if(a=="--device-id"){if(v=="-1")o.device_id=-1;else o.device_id=static_cast<int>(number(v,0,255));}
@@ -193,9 +197,11 @@ void run(const Options& o, OutputFile& file){
     std::uint64_t last_id=first->frame_id,last_capture=first->camera_timestamp_ns;
     auto context=std::make_shared<DaxaFoundation>(o.validation);
     std::unique_ptr<DaxaDepthPipeline> pipeline;std::unique_ptr<DaxaPreprocess> preprocess,full_preprocess;std::unique_ptr<DaxaRefinement> refinement;std::unique_ptr<DaxaHostExport> exporter;std::unique_ptr<DaxaDualPreprocess> dual_preprocess;
-    DaxaRefinementConfig refinement_config;refinement_config.disparities=o.disparities;refinement_config.borrow_full_frame=true;refinement_config.ortho_hybrid=(o.descriptor_mode=="ortho-hybrid");refinement_config.fast_mode=o.fast_mode;
+    DaxaRefinementConfig refinement_config;refinement_config.disparities=o.disparities;refinement_config.borrow_full_frame=true;refinement_config.ortho_hybrid=(o.descriptor_mode=="ortho-hybrid");refinement_config.fast_mode=o.fast_mode;refinement_config.subpixel=o.refinement_subpixel?1u:0u;refinement_config.selective_repair=o.selective_repair;refinement_config.allow_derived_coarse=(o.coarse_right_mode=="left-aggregated-selection");
     uint32_t coarse_scale=(experimental&&maps.width==coarse_maps.width*4)?4u:2u;
     DaxaDepthConfig depth_config{StereoConfig{experimental?coarse_maps.width:maps.width,experimental?coarse_maps.height:maps.height,experimental?o.disparities/coarse_scale:o.disparities,4,8,32,true,o.descriptor_mode=="ortho-hybrid"},1.f,2,32};
+    depth_config.stereo_schedule=o.coarse_schedule=="sequential"?DaxaDepthStereoSchedule::Sequential:o.coarse_schedule=="paired-per-path"?DaxaDepthStereoSchedule::PairedPerPath:o.coarse_schedule=="layered-per-path"?DaxaDepthStereoSchedule::LayeredPerPath:DaxaDepthStereoSchedule::SharedCensusSequential;
+    depth_config.right_reference_mode=o.coarse_right_mode=="left-aggregated-selection"?DaxaRightReferenceMode::LeftAggregatedSelection:DaxaRightReferenceMode::IndependentSGM;
     depth_config.stereo_variant=o.stereo_variant=="packed-specialized-overwrite-quad"?DaxaSgmVariant::PackedSpecializedOverwriteQuad:(o.stereo_variant=="packed-specialized-overwrite"?DaxaSgmVariant::PackedSpecializedOverwrite:DaxaSgmVariant::PackedSpecialized);
     if(depth){depth_config.validate();DaxaDualPreprocess::Frame pair;DaxaDepthPipeline::Frame prototype;
         if(dual){dual_preprocess=std::make_unique<DaxaDualPreprocess>(maps,coarse_maps,2,context);pair=dual_preprocess->enqueue(first);pipeline=std::make_unique<DaxaDepthPipeline>(depth_config,context,pair.coarse);prototype=pipeline->enqueue_preprocessed(pair.coarse);}
@@ -250,6 +256,8 @@ void run(const Options& o, OutputFile& file){
         {"radius",refinement_config.radius},{"min_margin",refinement_config.min_margin},
         {"prior_confidence_floor",refinement_config.prior_confidence_floor},{"max_coarse_span",refinement_config.max_coarse_span},
         {"lr_tolerance",refinement_config.lr_tolerance},{"subpixel",refinement_config.subpixel},
+        {"descriptor_mode",o.descriptor_mode},{"fast_mode",refinement_config.fast_mode},{"selective_repair",refinement_config.selective_repair},
+        {"coarse_schedule",o.coarse_schedule},{"coarse_right_reference_mode",o.coarse_right_mode},
         {"borrow_full_frame",refinement_config.borrow_full_frame},{"refinement_shader_identity",DaxaRefinement::shader_identity()},
         {"refinement_compiler_sha256",DaxaRefinement::compiler_sha256()},
         {"preprocess_shader_identity",DaxaPreprocess::shader_identity()},{"depth_shader_identity",DaxaDepthPipeline::shader_identity()},

@@ -11,6 +11,7 @@ struct DaxaRefinementConfig {
     bool ortho_hybrid=false;
     bool fast_mode=false;
     bool allow_derived_coarse=false;
+    bool selective_repair=false;
     void validate()const;
 };
 void validate_daxa_refinement_geometry(const DaxaRectification& coarse,const DaxaRectification& target);
