@@ -587,8 +587,8 @@ def decompose_selective_repair_cohorts(
     newly_admitted = (~v_base) & v_rep & np.isfinite(d_rep) & (d_rep > 0)
 
     # Disjoint partition of newly admitted pixels:
-    # 1. Recovered coarse hole: baseline failed with REF_NO_PRIOR (bit 1 == 1) or REF_PRIOR_SPAN (bit 16 == 16)
-    cohort_hole = newly_admitted & ((r_base & (1 | 16)) != 0)
+    # 1. Recovered coarse hole or prior span: baseline failed with REF_NO_PRIOR (bit 1 == 1) or REF_PRIOR_SPAN (bit 4 == 4)
+    cohort_hole = newly_admitted & ((r_base & (1 | 4)) != 0)
     # 2. Expanded search window: not a coarse hole, and search span > 4 (radius > 2)
     cohort_expanded = newly_admitted & (~cohort_hole) & (span_rep > 4)
     # 3. Accepted 2-pixel subpixel peak tie resolution (plus induced LR partner survival)

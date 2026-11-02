@@ -37,7 +37,7 @@ void match(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=
             predicted=predicted/w_valid;
             float span_limit=repair?(p.max_span*3.0f):(p.max_span*2.5f);
             if(mx-mn>span_limit)reason|=REF_PRIOR_SPAN;
-            else if(repair&&!hole_fallback&&(mx-mn>p.max_span*2.0f))boundary_repair=true;
+            else if(repair&&!hole_fallback&&(mx-mn>p.max_span*2.5f))boundary_repair=true;
         }else reason|=REF_NO_PRIOR;
     }
     bool prior=reason==0;predicted=predicted*mult;if(!skip_diag){fplane(9)[t]=prior?predicted:refinement_invalid();uplane(10)[t]=uint(prior);}
@@ -58,6 +58,7 @@ void match(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=
     if(!skip_diag){uplane(11)[t]=lo;uplane(12)[t]=hi;}
     uint best=0xffffffff,second=0xffffffff,third=0xffffffff,winner=0xffffffff,count=0,work=0,minus=0xffffffff,plus=0xffffffff;
     uint prev_cost=0xffffffff;bool supported=uplane(25)[t]!=0;if(prior&&!supported)reason|=REF_UNSUPPORTED;
+    bool plateau_tie=false,strict_reject=false;
     if(prior&&supported){
         uint c0=uplane(24)[t];
         uint c_l=(x>0&&uplane(25)[t-1]!=0)?uplane(24)[t-1]:c0;
@@ -80,7 +81,7 @@ void match(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=
                 else if(cost<second){third=second;second=cost;}
                 else if(cost<third){third=cost;}
             }}if(winner!=0xffffffff&&d==winner+1)plus=cost;prev_cost=cost;}
-            if(pass_idx==0&&repair&&!boundary_repair&&!hole_fallback&&best>32u){
+            if(pass_idx==0&&repair&&!boundary_repair&&!hole_fallback&&second<best+p.min_margin&&best>32u){
                 uint lo2=uint(max(0,int(lo)-2)),hi2=uint(min(int(p.disparities)-1,int(hi)+2));
                 if(lo2<lo||hi2>hi){
                     lo=lo2;hi=hi2;expanded_sweep=true;
@@ -91,13 +92,13 @@ void match(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=
             }
             break;
         }
-        if(repair&&!hole_fallback&&!expanded_sweep&&!boundary_repair&&count>=3&&second==best&&best<=14u&&(plus==best||minus==best)&&third>=best+max(p.min_margin+2u,3u))
-            second=best+p.min_margin;
-        if((hole_fallback||boundary_repair||expanded_sweep)&&(best>16u||second<best+p.min_margin+1u))
-            second=best;
+        plateau_tie=repair&&!hole_fallback&&!expanded_sweep&&!boundary_repair&&count>=3&&second==best&&best<=14u&&(plus==best||minus==best)&&third>=best+max(p.min_margin+2u,3u);
+        strict_reject=(hole_fallback||boundary_repair||expanded_sweep)&&(best>16u||second<best+p.min_margin+1u);
     }
-    bool unique=count>=2&&second-best>=p.min_margin;if(count<2)reason|=REF_TOO_FEW;if(count>=2&&!unique)reason|=REF_AMBIGUOUS;bool restricted=!hybrid&&count>0&&((winner==lo&&lo>0)||(winner==hi&&hi+1<p.disparities));if(restricted)reason|=REF_RESTRICTED;if(count>0&&(winner==0||winner+1==p.disparities))reason|=REF_GLOBAL;bool valid=unique&&!restricted;
-    float d=float(winner),confidence=0;bool applied=false;if(valid){confidence=clamp(float(second-best)/float(max(second,1u)),0.f,1.f);if((p.subpixel&1u)!=0){if(minus!=0xffffffff&&plus!=0xffffffff){precise float denominator=(float(minus)-2.f*float(best))+float(plus);precise float numerator=.5f*(float(minus)-float(plus));precise float offset=denominator!=0?clamp(numerator/denominator,-1.f,1.f):0;d=d+offset;applied=true;}else reason|=REF_MISSING_SUBPIXEL;}}
+    uint eff_margin=plateau_tie?p.min_margin:(second-best);
+    uint eff_second=plateau_tie?(best+p.min_margin):second;
+    bool unique=count>=2&&eff_margin>=p.min_margin&&!strict_reject;if(count<2)reason|=REF_TOO_FEW;if(count>=2&&!unique)reason|=REF_AMBIGUOUS;bool restricted=!hybrid&&count>0&&((winner==lo&&lo>0)||(winner==hi&&hi+1<p.disparities));if(restricted)reason|=REF_RESTRICTED;if(count>0&&(winner==0||winner+1==p.disparities))reason|=REF_GLOBAL;bool valid=unique&&!restricted;
+    float d=float(winner),confidence=0;bool applied=false;if(valid){confidence=clamp(float(eff_margin)/float(max(eff_second,1u)),0.f,1.f);if((p.subpixel&1u)!=0){if(minus!=0xffffffff&&plus!=0xffffffff){precise float denominator=(float(minus)-2.f*float(best))+float(plus);precise float numerator=.5f*(float(minus)-float(plus));precise float offset=denominator!=0?clamp(numerator/denominator,-1.f,1.f):0;d=d+offset;applied=true;}else reason|=REF_MISSING_SUBPIXEL;}}
     if(!skip_diag){uplane(13)[t]=reason;uplane(14)[t]=prior?1:0;uplane(15)[t]=winner;uplane(16)[t]=best;uplane(17)[t]=second;uplane(18)[t]=count;uplane(19)[t]=work;uplane(20)[t]=uint(applied);}fplane(21)[t]=valid?d:refinement_invalid();fplane(22)[t]=valid?confidence:0;uplane(23)[t]=uint(valid);
 }
 [shader("compute")][numthreads(64,1,1)]
