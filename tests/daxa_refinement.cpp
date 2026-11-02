@@ -45,8 +45,11 @@ static void gpu_4x_ortho_hybrid_and_repair(){
         cap720->packed_yuyv.resize(2560*720*2,128);
         for(unsigned y=0;y<720;++y){
             for(unsigned x=0;x<1280;++x){
-                // Top region (orig y < 400 -> rect y < 440): rich texture with orig shift 8 px (rect disparity 16 px); bottom region (orig y >= 420 -> rect y >= 480): flat plateau
-                uint8_t luma=(y>=420)?120:uint8_t(40+((x*13+y*7)^((x/3)*29+(y/5)*19))%180);
+                // Top region (orig y < 400 -> rect y < 440): rich texture with orig shift 8 px (rect disparity 16 px) and a uniform planar gap surrounded by compatible surface texture; bottom region (orig y >= 420 -> rect y >= 480): flat plateau
+                bool gap=(x>=600&&x<607&&y>=260&&y<267);
+                bool ring=(x>=588&&x<620&&y>=248&&y<280);
+                uint32_t pat=((x*13+y*7)^((x/3)*29+(y/5)*19));
+                uint8_t luma=(y>=420||gap)?120:(ring?uint8_t(108+pat%25):uint8_t(40+pat%180));
                 cap720->packed_yuyv[(y*2560+x)*2]=luma;
                 unsigned rx=(x>=8)?(x-8):0;
                 cap720->packed_yuyv[(y*2560+1280+rx)*2]=luma;
@@ -61,17 +64,32 @@ static void gpu_4x_ortho_hybrid_and_repair(){
         auto f720=full720.enqueue(in720);
         DaxaRefinementConfig base_cfg;base_cfg.disparities=128;base_cfg.borrow_full_frame=true;base_cfg.ortho_hybrid=true;base_cfg.fast_mode=false;base_cfg.selective_repair=false;
         DaxaRefinementConfig rep_cfg=base_cfg;rep_cfg.selective_repair=true;
-        DaxaRefinement ref_base(context,c720,f720,base_cfg),ref_rep(context,c720,f720,rep_cfg);
-        auto out_base=ref_base.process(c720,f720),out_rep=ref_rep.process(c720,f720);
-        out_base.wait();out_rep.wait();
-        check(out_base.timings().total_gpu_ms>0.0&&out_rep.timings().total_gpu_ms>0.0);
-        auto rb_base=ref_base.readback(out_base),rb_rep=ref_rep.readback(out_rep);
+        DaxaRefinementConfig plan_cfg=rep_cfg;plan_cfg.planar_recovery=true;
+        DaxaRefinement ref_base(context,c720,f720,base_cfg),ref_rep(context,c720,f720,rep_cfg),ref_plan(context,c720,f720,plan_cfg);
+        auto out_base=ref_base.process(c720,f720),out_rep=ref_rep.process(c720,f720),out_plan=ref_plan.process(c720,f720);
+        out_base.wait();out_rep.wait();out_plan.wait();
+        check(out_base.timings().total_gpu_ms>0.0&&out_rep.timings().total_gpu_ms>0.0&&out_plan.timings().planar_gpu_ms>0.0);
+        auto rb_base=ref_base.readback(out_base),rb_rep=ref_rep.readback(out_rep),rb_plan=ref_plan.readback(out_plan);
         check(rb_rep.disparity.size()==2*1280*720);
-        unsigned valid_textured=0,valid_flat_plateau=0;
+        check(std::memcmp(rb_rep.disparity.data(),rb_plan.disparity.data(),rb_rep.disparity.size()*sizeof(float))==0);
+        check(std::memcmp(rb_rep.confidence.data(),rb_plan.confidence.data(),rb_rep.confidence.size()*sizeof(float))==0);
+        check(rb_rep.validity==rb_plan.validity);
+        unsigned valid_textured=0,valid_flat_plateau=0,inferred_gap=0;
         for(unsigned y=40;y<360;++y)for(unsigned x=40;x<1240;++x)if(rb_rep.validity[y*1280+x])++valid_textured;
-        for(unsigned y=540;y<680;++y)for(unsigned x=100;x<1180;++x)if(rb_rep.validity[y*1280+x])++valid_flat_plateau;
-        check(valid_textured>200000&&valid_flat_plateau==0);
-        out_base={};out_rep={};f720={};c720={};ref_base.collect();ref_rep.collect();full720.collect_completed_sources();depth720.collect();
+        for(unsigned y=540;y<680;++y)for(unsigned x=100;x<1180;++x)if(rb_rep.metric_validity[y*1280+x]||rb_plan.metric_validity[y*1280+x])++valid_flat_plateau;
+        const float expected_z=float(520.0*4.0*0.12/16.0);
+        for(size_t i=0;i<1280*720;++i){
+            if(rb_rep.provenance[i]==1u){
+                check(rb_plan.provenance[i]==1u&&rb_plan.validity[i]==1u&&rb_plan.metric_validity[i]==1u);
+                check(std::memcmp(&rb_rep.depth[i],&rb_plan.depth[i],sizeof(float))==0);
+                check(std::memcmp(&rb_rep.metric_confidence[i],&rb_plan.metric_confidence[i],sizeof(float))==0);
+            } else if(rb_plan.provenance[i]==2u){
+                check(rb_plan.validity[i]==0u&&rb_plan.metric_validity[i]==1u&&std::abs(rb_plan.depth[i]-expected_z)<0.5f);
+                ++inferred_gap;
+            }
+        }
+        check(valid_textured>200000&&valid_flat_plateau==0&&inferred_gap>0);
+        out_base={};out_rep={};out_plan={};f720={};c720={};ref_base.collect();ref_rep.collect();ref_plan.collect();full720.collect_completed_sources();depth720.collect();
     }
     context->close();
     check(!context->validation_errors&&!context->validation_warnings);

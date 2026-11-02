@@ -105,3 +105,107 @@ void match(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=
 void lr(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=2*n)return;uint eye=t/n,i=t%n,target=0;float d=fplane(21)[t];bool valid=false;if(uplane(23)[t]!=0&&refinement_target(p.width,i%p.width,d,eye!=0,target)){uint j=(1-eye)*n+(i/p.width)*p.width+target;valid=observation_lr(d,fplane(21)[j],uplane(23)[t],uplane(23)[j],p.lr_tolerance);}if((p.subpixel&4u)==0&&uplane(23)[t]!=0&&!valid)uplane(13)[t]|=REF_LR_FAILED;fplane(0)[t]=valid?d:refinement_invalid();fplane(1)[t]=valid?fplane(22)[t]:0;uplane(2)[t]=uint(valid);}
 [shader("compute")][numthreads(64,1,1)]
 void metric(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=2*n)return;uint eye=t/n,i=t%n,target=0;float z=refinement_invalid(),d=fplane(0)[t];bool valid=uplane(2)[t]!=0&&d>0&&(d-p.principal_offset)>0;if(valid&&refinement_target(p.width,i%p.width,d,eye!=0,target)){uint j=(1-eye)*n+(i/p.width)*p.width+target;valid=uplane(25)[t]!=0&&uplane(25)[j]!=0;if(valid){precise float numerator=p.fx*p.baseline;precise float denominator=d-p.principal_offset;z=numerator/denominator;valid=isfinite(z)&&z>0;}}else valid=false;fplane(3)[t]=valid?z:refinement_invalid();fplane(4)[t]=valid?fplane(1)[t]:0;uplane(5)[t]=uint(valid);uplane(6)[t]=valid?1:0;((uint2*)p.output[7])[t]=valid?uint2(p.source_low,p.source_high):uint2(0xffffffff,0xffffffff);((uint2*)p.output[8])[t]=uint2(0,0);}
+[shader("compute")][numthreads(64,1,1)]
+void planar(uint3 tid:SV_DispatchThreadID){
+    uint n=p.width*p.height,t=tid.x;if(t>=n)return;
+    // Never overwrite provenance=1 measured depth or unsupported border pixels.
+    if(uplane(5)[t]!=0||uplane(25)[t]==0)return;
+    uint x=t%p.width,y=t/p.width;
+    if(x<12u||x+12u>=p.width||y<12u||y+12u>=p.height)return;
+    uint* gray_l=p.borrowed[0]!=0?(uint*)p.borrowed[0]:uplane(27);
+    uint* gray_r=p.borrowed[0]!=0?(uint*)p.borrowed[1]:uplane(27)+n;
+    float i0=float(gray_l[t]);
+    float gx=abs(float(gray_l[t+1])-float(gray_l[t-1])),gy=abs(float(gray_l[t+p.width])-float(gray_l[t-p.width]));
+    if(gx+gy>28.f)return;
+    bool scale4=(p.width==p.coarse_width*4u);
+    uint c_shift=scale4?2u:1u;
+    precise float step=scale4?.25f:.5f,mult=scale4?4.f:2.f;
+    precise float cx=(float(x)+.5f)*step-.5f,cy=(float(y)+.5f)*step-.5f;
+    int ix=int(floor(cx)),iy=int(floor(cy));
+    precise float wx=cx-float(ix),wy=cy-float(iy);
+    precise float weights[4]={(1.f-wx)*(1.f-wy),wx*(1.f-wy),(1.f-wx)*wy,wx*wy};
+    float mn=3.402823466e38f,mx=-3.402823466e38f;
+    precise float predicted=0,w_valid=0;
+    [unroll]for(uint tap=0;tap<4;++tap){
+        int xx=ix+int(tap&1),yy=iy+int(tap>>1);
+        if(xx<0||yy<0||xx>=int(p.coarse_width)||yy>=int(p.coarse_height))continue;
+        uint j=uint(yy)*p.coarse_width+uint(xx);
+        float d=((float*)p.coarse[0])[j];
+        if(((uint*)p.coarse[2])[j]!=0&&isfinite(d)&&d>=0&&d<=float(p.disparities-1)*step){
+            precise float w=weights[tap]+.001f;predicted=predicted+d*w;w_valid=w_valid+w;mn=min(mn,d);mx=max(mx,d);
+        }
+    }
+    if(w_valid<.70f||(mx-mn)>p.max_span*1.25f)return;
+    float d_coarse=(predicted/w_valid)*mult;
+    if(d_coarse<1.5f||d_coarse>=float(p.disparities-1))return;
+    // Single-pass 100-tap odd-offset quadrant stencil dy,dx in {-9,-7,-5,-3,-1,1,3,5,7,9} (25 taps/quadrant)
+    uint n_anc=0,qmask=0;
+    float sx=0,sy=0,sxx=0,syy=0,sxy=0,su=0,sxu=0,syu=0,suu=0;
+    for(int dy=-9;dy<=9;dy+=2){
+        uint ay=uint(int(y)+dy),row=ay*p.width,cy_a=min(ay>>c_shift,p.coarse_height-1u)*p.coarse_width,qy=(dy>0)?2u:0u;
+        float fy_d=float(dy),max_u_y=2.8f+.45f*abs(fy_d);
+        for(int dx=-9;dx<=9;dx+=2){
+            uint ax=uint(int(x)+dx),idx=row+ax;
+            if(uplane(2)[idx]==0)continue;
+            if(abs(float(gray_l[idx])-i0)>18.f)continue;
+            float da=fplane(0)[idx];
+            if(!isfinite(da)||da<=0.f)continue;
+            uint cj=cy_a+min(ax>>c_shift,p.coarse_width-1u);
+            if(((uint*)p.coarse[2])[cj]==0)continue;
+            float dc_a=((float*)p.coarse[0])[cj]*mult;
+            if(abs(da-dc_a)>(dc_a>=114.f?2.8f:1.6f))continue;
+            float fx_d=float(dx),u=da-d_coarse;
+            if(abs(u)>max_u_y+.20f*abs(fx_d))continue;
+            ++n_anc;
+            qmask|=1u<<(qy+(dx>0?1u:0u));
+            sx+=fx_d;sy+=fy_d;sxx+=fx_d*fx_d;syy+=fy_d*fy_d;sxy+=fx_d*fy_d;
+            su+=u;sxu+=fx_d*u;syu+=fy_d*u;suu+=u*u;
+        }
+    }
+    if(n_anc<5u||countbits(qmask)<3u)return;
+    float fn=float(n_anc),inv_n=1.f/fn;
+    float mx_a=sx*inv_n,my_a=sy*inv_n,mu_a=su*inv_n;
+    float cxx=sxx-fn*mx_a*mx_a,cyy=syy-fn*my_a*my_a,cxy=sxy-fn*mx_a*my_a;
+    float det=cxx*cyy-cxy*cxy;
+    if(det<2.0f*fn*(cxx+cyy)||det<=1.f)return;
+    float cxu=sxu-fn*mx_a*mu_a,cyu=syu-fn*my_a*mu_a,cuu=suu-fn*mu_a*mu_a;
+    float a=(cyy*cxu-cxy*cyu)/det;
+    float b=(cxx*cyu-cxy*cxu)/det;
+    if(abs(a)>.25f||abs(b)>.65f)return;
+    float ssr=max(0.f,cuu-a*cxu-b*cyu);
+    float rmse=sqrt(ssr*inv_n);
+    float max_rmse=clamp(.32f+.0048f*d_coarse,.36f,.90f);
+    if(rmse>max_rmse)return;
+    float u_pred=mu_a-a*mx_a-b*my_a;
+    if(abs(u_pred)>(d_coarse>=114.f?2.8f:1.8f))return;
+    float d_plane=d_coarse+u_pred;
+    if(d_plane<=max(.5f,p.principal_offset+.5f)||d_plane>=float(p.disparities-1))return;
+    int d_int=int(floor(d_plane+.5f));
+    int rx=int(x)-d_int;
+    float xr_f=float(x)-d_plane;
+    int rx0=int(floor(xr_f));
+    if(rx<1||rx+1>=int(p.width)||rx0<0||rx0+1>=int(p.width))return;
+    uint jr=n+y*p.width+uint(rx);
+    if(uplane(25)[jr]==0)return;
+    float wf=xr_f-float(rx0);
+    float r_luma=(1.f-wf)*float(gray_r[y*p.width+uint(rx0)])+wf*float(gray_r[y*p.width+uint(rx0+1)]);
+    if(abs(i0-r_luma)>24.f)return;
+    uint c0=uplane(24)[t],base=countbits(c0^uplane(24)[jr]);
+    uint m_l=(uplane(25)[t-1]!=0&&uplane(25)[jr-1]!=0)?countbits(uplane(24)[t-1]^uplane(24)[jr-1]):base;
+    uint m_r=(uplane(25)[t+1]!=0&&uplane(25)[jr+1]!=0)?countbits(uplane(24)[t+1]^uplane(24)[jr+1]):base;
+    uint m_u=(uplane(25)[t-p.width]!=0&&uplane(25)[jr-p.width]!=0)?countbits(uplane(24)[t-p.width]^uplane(24)[jr-p.width]):base;
+    uint m_d=(uplane(25)[t+p.width]!=0&&uplane(25)[jr+p.width]!=0)?countbits(uplane(24)[t+p.width]^uplane(24)[jr+p.width]):base;
+    uint cost_plane=2u*base+m_l+m_r+m_u+m_d;
+    if(cost_plane>30u)return;
+    precise float numerator=p.fx*p.baseline;
+    precise float denominator=d_plane-p.principal_offset;
+    float z=numerator/denominator;
+    if(!isfinite(z)||z<=0.f)return;
+    float conf=clamp((1.f-rmse/.55f)*(1.f-float(cost_plane)/28.f)*min(fn/16.f,1.f),.05f,.85f);
+    fplane(3)[t]=z;
+    fplane(4)[t]=conf;
+    uplane(5)[t]=1u;
+    uplane(6)[t]=2u;
+    ((uint2*)p.output[7])[t]=uint2(p.source_low,p.source_high);
+    ((uint2*)p.output[8])[t]=uint2(0,0);
+}

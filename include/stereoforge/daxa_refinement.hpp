@@ -12,6 +12,7 @@ struct DaxaRefinementConfig {
     bool fast_mode=false;
     bool allow_derived_coarse=false;
     bool selective_repair=false;
+    bool planar_recovery=false;
     void validate()const;
 };
 void validate_daxa_refinement_geometry(const DaxaRectification& coarse,const DaxaRectification& target);
@@ -32,7 +33,7 @@ struct DaxaRefinementReadback {
 struct DaxaRefinementTiming {
     static constexpr unsigned stages=5;
     bool canonical_pack=false;const char* first_stage_name="rectify";
-    std::array<double,stages> stage_gpu_ms{};double total_gpu_ms=0;
+    std::array<double,stages> stage_gpu_ms{};double planar_gpu_ms=0;double total_gpu_ms=0;
     uint64_t start_tick=0,end_tick=0;double timestamp_period=0;uint32_t timestamp_bits=0;
 };
 class DaxaRefinement {

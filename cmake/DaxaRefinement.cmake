@@ -28,7 +28,7 @@ set(sf_refinement_spirv)
 file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/python/stereoforge/shaders/daxa/refinement.slang" SF_DAXA_REFINEMENT_WRAPPER_SHA256)
 file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/python/stereoforge/shaders/ops/refinement.slang" SF_DAXA_REFINEMENT_OPS_SHA256)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS python/stereoforge/shaders/daxa/refinement.slang python/stereoforge/shaders/ops/refinement.slang)
-foreach(entry rectify census match lr metric)
+foreach(entry rectify census match lr metric planar)
   set(output "${CMAKE_CURRENT_BINARY_DIR}/daxa-refinement-${entry}.spv")
   add_custom_command(OUTPUT "${output}"
     COMMAND "${SF_REFINEMENT_SLANGC}" "${CMAKE_CURRENT_SOURCE_DIR}/python/stereoforge/shaders/daxa/refinement.slang"
