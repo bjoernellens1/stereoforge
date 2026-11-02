@@ -79,3 +79,15 @@ def test_slanted_plane_preserves_affine_disparity():
     inferred = result.provenance == 2
     assert inferred.sum() > 50, result.diagnostics
     assert np.max(np.abs(result.depth_disparity[inferred] - gt[inferred])) < 0.25
+
+
+def test_step_discontinuity_does_not_bridge_depth_edge():
+    args = list(_scene())
+    args[2][:, 20:] = 10.0
+    args[3][:, 20:] = 10.0
+    args[0][:, 80:] = np.where(args[1][:, 80:], 40.0, np.nan)
+    result = recover_planar_reference(
+        *args, config=PlanarRecoveryConfig(max_luma_gradient_dn=200)
+    )
+    assert np.sum(result.provenance[:, 76:84] == 2) == 0
+    assert np.sum(result.provenance[:, 55:75] == 2) > 0
