@@ -37,11 +37,14 @@ Evaluated across `N = 5` interleaved trials (`120` measured frames + `20` warmup
 
 | Dual-Preprocess + 4× Refinement Pipeline (`1280×720`, `5 × 120` Interleaved Frames) | Median Trial GPU Span `p50 / p95 / p99` (`FPS`) | 5-Trial `p95` Mean ± Std (`All 5 <= 4.167 ms`) | Stage-Sum GPU `p50 / p95` | Host Wall `p50 / p95` | `dual_preprocess` GPU | `coarse` GPU | `refinement_metric` GPU | `refinement_planar` GPU `p50` | 30-Plane Bit-Exact | Vulkan Validation Errors |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :---: | ---: |
-| `dual4x_selective_repair_only` (`--planar-recovery 0`) | **`3.048 / 3.084 / 3.141 ms` (`328.0 FPS`)** | `3.086 ± 0.018 ms` (**`5/5 true`**) | `3.000 / 3.022 ms` | `3.295 / 3.373 ms` | `0.334 ms` | `1.174 ms` | `0.382 ms` | `0.000 ms` | `true` | `0` |
-| **`dual4x_selective_repair_plus_planar` (`--planar-recovery 1`, default `a=10, 3×3 affine`)** | **`3.636 / 3.689 / 3.750 ms` (`275.0 FPS`)** | **`3.689 ± 0.012 ms` (`5/5 true`)** | **`3.567 / 3.594 ms`** | **`3.889 / 3.969 ms`** | **`0.316 ms`** | **`1.181 ms`** | **`0.618 ms`** | **`0.361 ms` (`2.38×` faster vs. `0.861 ms`)** | **`true`** | **`0`** |
+| `dual4x_selective_repair_only` (`--planar-recovery 0`) | **`3.036 / 3.086 / 3.107 ms` (`329.4 FPS`)** | `3.093 ± 0.038 ms` (**`5/5 true`**) | `2.983 / 3.007 ms` | `3.297 / 3.435 ms` | `0.343 ms` | `1.160 ms` | `0.373 ms` | `0.000 ms` | `true` | `0` |
+| **`dual4x_selective_repair_plus_planar` (`--planar-recovery 1`, default `a=10, 3×3 affine`)** | **`3.520 / 3.620 / 3.715 ms` (`284.1 FPS`)** | **`3.655 ± 0.053 ms` (`5/5 true`)** | **`3.471 / 3.572 ms`** | **`3.761 / 3.977 ms`** | **`0.296 ms`** | **`1.132 ms`** | **`0.626 ms`** | **`0.360 ms` (`2.39×` faster vs. `0.861 ms`)** | **`true`** | **`0`** |
 
-- **5-Trial Interleaved `gpu_combined_queue_span_ms.p95` Distribution (`dual4x_selective_repair_plus_planar`):** `[3.6990, 3.6692, 3.7042, 3.6888, 3.6818] ms` (`mean = 3.6886 ms`, `std = 0.0124 ms`, **`478 µs` safety margin below `4.167 ms`**, with even `p99 = 3.750 ms` and `host_wall.p95 = 3.969 ms` passing `<= 4.167 ms` across all 5 trials).
-- **5-Trial Interleaved `gpu_planar_recovery_ms.p50` Distribution:** `[0.3610, 0.3608, 0.3628, 0.3611, 0.3633] ms` (down from `0.861 ms` via coarse-first workgroup early-out, shared-memory tile caching, and one-time zero initialization of `AgeNs` / `CompletedAgeNs`).
+- **5-Trial Interleaved `gpu_combined_queue_span_ms.p95` Distribution (`dual4x_selective_repair_plus_planar`):** `[3.6187, 3.6203, 3.7418, 3.6037, 3.6897] ms` (`mean = 3.6548 ms`, `std = 0.0527 ms`, **`547 µs` safety margin below `4.167 ms`** on the median trial and **`512 µs` safety margin** on the 5-trial mean, with `p99 = 3.715 ms` passing `<= 4.167 ms` across all 5 trials).
+- **5-Trial Interleaved `gpu_planar_recovery_ms.p50` Distribution:** `[0.3616, 0.3598, 0.3645, 0.3580, 0.3615] ms` (down from `0.861 ms` via coarse-first workgroup early-out, shared-memory tile caching, and one-time zero initialization of `AgeNs` / `CompletedAgeNs`).
+- **Explicit Planar Feature Overhead Accounting (`planar_feature_overhead_accounting_ms`):**
+  - Enabling `--planar-recovery 1` adds both the `planar` recovery compute pass (`pass == 5`: `0.358 ms` stage / `0.360 ms` median `p50`) **and** two-eye completed-buffer initialization inside `metric` (`pass == 4`: `0.373 ms -> 0.626 ms`, `+0.252 ms`).
+  - Total stage-level planar overhead is `0.358 + 0.252 = 0.610 ms`, corresponding to an end-to-end GPU queue-span delta of `+0.484 ms` at `p50` (`3.036 -> 3.520 ms`), `+0.534 ms` at median-trial `p95` (`3.086 -> 3.620 ms`), and `+0.562 ms` across the 5-trial mean `p95` (`3.093 -> 3.655 ms`).
 
 ---
 
@@ -77,6 +80,8 @@ In `benchmarks/planar_recovery_v93.py`, planar surface evaluation is strictly se
 | **`v93_planar_a10_affine3x3_default` (`a=10, 3×3 affine, ray_guard=1, lr_guard=1`)** | **`true`** | **`244,070`** | **`15,574`** | **`34.80% / +1.11% / 35.91%`** | **`2.965 DN / 86.68%`** | **`70.17% + 6.61% = 76.78%` (`prov=6`: `1.25 mm / 1.39 mm`)** | **`55 px (+0.99%)` / `0.918 px` / `4.30 mm` / `3.98°`** | **`9 px (+0.42%)` / `0.540 px` / `2.87 mm`** |
 | `v93_planar_a16_affine3x3` (`a=16, 3×3 affine, ray_guard=1, lr_guard=1`) | `true` | `244,070` | `6,736` | `34.80% / +0.34% / 35.13%` | `2.179 DN / 87.35%` | `70.17% + 2.90% = 73.06%` (`prov=6`: `1.19 mm / 1.30 mm`) | `12 px (+0.22%)` / `1.274 px` / `5.54 mm` / `32.49°` | `0 px` |
 
+- **Explicit Research Finding — Horizontal Tabletop Sparsity Limitation:** While guarded planar recovery substantially improves coverage on the upright AprilTag calibration target (`+146 px` / `+6.61%` coverage at `1.25 mm` depth MAE and `1.39 mm` orthogonal RMSE against the independent multi-scale ZNCC plane) and on synthetic low-texture surfaces (`+16,402 px` at `0.162 px` MAE with `0.00%` bad `>1 px`), completion on the physical horizontal tabletop remains sparse (`+55 px` / `+0.99%` on `horizontal_desk_plane_clean` at `0.918 px` disparity MAE / `4.30 mm` orthogonal RMSE / `3.98°` normal error, and `+1.11%` across the broad desk ROI from `34.80%` to `35.91%`). Under steep grazing-angle foreshortening, low-contrast woodgrain yields sparse primary stereo anchors (`prov == 1`) within the 9 px stencil radius, bounding local interpolation density when `min_anchors = 10` is enforced to prevent hallucination.
+
 ---
 
 ## 6. `[P2]` Causal Color Tie-Break Ablation (`D-Y` vs. `D-UV` vs. `D-YUV` vs. `D-UV-Shuffled`)
@@ -94,12 +99,19 @@ To test whether selective color tie-breaking (`Variant D`) derives its coverage 
 
 ---
 
-## 7. `[P1-A]` Sustained 4-Topic Live & Replay ROS 2 Delivery Qualification (`stereoforge_ros2_depth_publisher` + `stereoforge_ros2_delivery_probe`)
+## 7. `[P1-A]` Sustained 4-Topic Live, Endurance (`600f`), Shared-GPU Contention & Replay ROS 2 Delivery Qualification (`stereoforge_ros2_depth_publisher` + `stereoforge_ros2_delivery_probe`)
 
 Concurrent publisher (`--planar-recovery 1 --verify-payload-checksum --thread-cpu-timing`) and subscriber (`--expect-completed 1`) qualification across all 4 synchronized topics (`/stereoforge/.../depth` `32FC1`, `/stereoforge/.../depth_completed` `32FC1`, `/stereoforge/.../depth_completed_provenance` `mono8`, `/stereoforge/.../rectified_rgb` `rgba8`):
 
-| ROS 2 4-Topic Delivery Run (`180` Measured Frames @ `60 Hz`, `KeepLast(16)`) | Capture / Publish / Receive FPS | Published (`depth / comp_depth / comp_prov / rgb`) | Received (`depth / comp_depth / comp_prov / rgb`) | Synchronized 4-Topic Quads | 64-Bit FNV-1a Checksum Matches (`4 × 180`) | Queue / Slot Drops | Inferred Planar Gain (`p50 / p95 px`) | Host-Ingress to Subscriber E2E `p50 / p95` |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| **`live_physical_zed2_camera_60hz_180f` (`--source camera`)** | **`60.0 / 59.3 / 59.6 FPS`** | **`180 / 180 / 180 / 180`** | **`180 / 180 / 180 / 180` (`100%`)** | **`180 / 180`** | **`720 / 720` (`0` mismatches)** | **`0 / 0`** | **`+10,941 / +11,599 px`** | **`7.098 / 17.317 ms`** |
-| `deterministic_replay_180f` (`--source replay`) | `60.0 / 127.0 / 128.8 FPS` | `180 / 180 / 180 / 180` | `180 / 180 / 180 / 180` (`100%`) | `180 / 180` | `720 / 720` (`0` mismatches) | `0 / 0` | `+23,848 / +24,041 px` | — (replay) |
+| ROS 2 4-Topic Delivery Run (`KeepLast(16)`, Reliable) | Capture / Publish / Receive FPS | Published (`depth / comp_depth / comp_prov / rgb`) | Received (`depth / comp_depth / comp_prov / rgb`) | Synchronized 4-Topic Quads | 64-Bit FNV-1a Checksum Matches | Queue / Slot Drops | Inferred Planar Gain (`p50 / p95 px`) | Host-Ingress to Publish `p50 / p95` | Host-Ingress to Subscriber E2E `p50 / p95` |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **`live_physical_zed2_camera_60hz_180f` (`3.0 s` live camera)** | **`60.0 / 59.3 / 59.5 FPS`** | **`180 / 180 / 180 / 180`** | **`180 / 180 / 180 / 180` (`100%`)** | **`180 / 180`** | **`720 / 720` (`0` mismatches)** | **`0 / 0`** | **`+12,362 / +13,195 px`** | **`6.687 / 6.972 ms`** | **`6.986 / 17.307 ms`** |
+| **`live_physical_zed2_camera_60hz_600f_endurance` (`10.0 s` live camera)** | **`59.9 / 59.7 / 59.8 FPS`** | **`600 / 600 / 600 / 600`** | **`600 / 600 / 600 / 600` (`100%`)** | **`600 / 600`** | **`2,400 / 2,400` (`0` mismatches)** | **`0 / 0`** | **`+13,495 / +14,346 px`** | **`6.683 / 7.285 ms`** | **`7.012 / 17.115 ms`** |
+| **`live_physical_zed2_camera_60hz_180f_gpu_contention` (concurrent GPU load)** | **`60.0 / 59.4 / 59.6 FPS`** | **`180 / 180 / 180 / 180`** | **`180 / 180 / 180 / 180` (`100%`)** | **`180 / 180`** | **`720 / 720` (`0` mismatches)** | **`0 / 0`** | **`+13,484 / +14,456 px`** | **`6.685 / 9.439 ms`** | **`6.930 / 18.716 ms`** |
+| `deterministic_replay_180f` (`--source replay`) | `60.0 / 130.8 / 132.5 FPS` | `180 / 180 / 180 / 180` | `180 / 180 / 180 / 180` (`100%`) | `180 / 180` | `720 / 720` (`0` mismatches) | `0 / 0` | `+23,848 / +24,041 px` | — (replay) | — (replay) |
+
+- **Separate Qualification Claims (`qualification_claims_and_scientific_findings`):**
+  1. **Offline GPU Processing Throughput:** `3.520 ms` `p50` / `3.620 ms` `p95` / `3.715 ms` `p99` (`5/5` interleaved trials `<= 4.167 ms`, `240+ FPS` budget).
+  2. **Sustained Live 60 Hz 4-Topic Delivery Rate:** `100%` lossless delivery with `0` queue/slot drops and `100%` 64-bit FNV-1a payload checksum verification across `180` standard frames (`720/720`), `600` endurance frames (`2,400/2,400`), and `180` frames under active concurrent `daxa_dual_preprocess_benchmark` GPU contention (`720/720`).
+  3. **End-to-End Latency Distinction:** Publisher `host_ingress_to_publish_ms` `p95` is strictly sub-frame (`6.972 ms` standard, `7.285 ms` over 600 frames, `9.439 ms` under active GPU contention vs. `16.667 ms` frame period), whereas full `host_ingress_to_subscriber_arrival_e2e_ms` (`p50 = 6.986–7.012 ms`, `p95 = 17.115–18.716 ms`) includes 4-topic `12 MB/frame` FastDDS serialization and single-threaded subscriber FNV-1a64 verification callbacks, and thus slightly exceeds one `16.667 ms` frame period at `p95`.
 
