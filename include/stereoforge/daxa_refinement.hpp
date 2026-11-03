@@ -10,6 +10,7 @@ struct DaxaRefinementConfig {
     bool borrow_full_frame=false;
     bool ortho_hybrid=false;
     bool fast_mode=false;
+    bool ultra_fast=false;
     bool allow_derived_coarse=false;
     bool selective_repair=false;
     bool planar_recovery=false;

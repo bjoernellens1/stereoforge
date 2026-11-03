@@ -1,0 +1,141 @@
+{
+  "joint_3_metric_tuple": {
+    "Delta_T_competing_workload": {
+      "competing_probe_contended_gpu_p50_ms": 4.5644,
+      "competing_probe_contended_wall_ms": 3505.6,
+      "competing_probe_solo_gpu_p50_ms": 3.0686,
+      "competing_probe_solo_wall_ms": 3192.95,
+      "delta_competing_gpu_p50_ms": 1.4958,
+      "delta_competing_gpu_p50_pct": 48.75,
+      "estimated_30hz_duty_scaled_slowdown_pct": 5.41,
+      "estimated_60hz_duty_scaled_slowdown_pct": 10.81
+    },
+    "E_frame_mj": {
+      "active_gpu_power_mean_w": 43.31,
+      "active_gpu_power_peak_w": 63.02,
+      "gross_energy_mj_per_frame": 160.103,
+      "idle_gpu_power_w": 14.93,
+      "idle_gpu_temp_c": 43.0,
+      "net_dynamic_energy_mj_per_frame": 104.904,
+      "net_dynamic_power_w": 28.38,
+      "sustained_run_elapsed_s": 3.633,
+      "sustained_run_frames": 260
+    },
+    "T_frame_ms": {
+      "gpu_combined_p50_ms": 3.6967,
+      "gpu_combined_p95_ms": 4.0852,
+      "gpu_combined_p99_ms": 4.1973,
+      "host_wall_p50_ms": 3.8938,
+      "serialized_gpu_time_fraction_at_30hz_pct": 11.09,
+      "serialized_gpu_time_fraction_at_60hz_pct": 22.18
+    }
+  },
+  "provenance": {
+    "binaries_sha256": {
+      "daxa_depth_benchmark": "93b56173c8ae3720107523b32e25e7e2047fbacf4a870692052410416668e8ac",
+      "daxa_dual_preprocess_benchmark": "652c040657eabbad8aca70ddcd2ceb4e2a5c155d8cd06c260417df5ee902f0e3",
+      "daxa_refinement_benchmark": "4bef1645a55461c7e3d6b0c3d45266ef51812a6760ddca616bfc1dda9a9e311a",
+      "daxa_refinement_contracts": "21ef733fc3d565cc302440a0820c1c78c3f665a16e2c03a1ba9995e632d8242d",
+      "stereoforge_ros2_delivery_probe": "efd22fc212b05169077f7dd3c8a2ed4d478ac484f8ce254eaa885fb1a082f372",
+      "stereoforge_ros2_depth_publisher": "c866391c38e1e14f1d628db6ba56599d5720594ed3798c5f0b3eb2d3db9d2a4a"
+    },
+    "compiled_spv_bundle_sha256": "5f3810464bc109ac7a0320d7188e322250cb7ae54922b31ebd51ea4b85bf3194",
+    "compiled_spv_count": 79,
+    "git_head_at_generation": "f3e7a59bdcbcd5136f2e4819c3c77f3c37207bb9"
+  },
+  "roofline_and_memory_traffic_model": {
+    "effective_reference_bandwidth_gbps": 288.0,
+    "per_stage_breakdown": [
+      {
+        "achieved_effective_bw_gbps": 209.08,
+        "measured_gpu_ms": 0.3108,
+        "read_mb": 19.354,
+        "roofline_bandwidth_floor_ms": 0.2376,
+        "stage": "dual_preprocess",
+        "total_traffic_mb": 64.973,
+        "write_mb": 45.619
+      },
+      {
+        "achieved_effective_bw_gbps": 76.44,
+        "measured_gpu_ms": 1.1816,
+        "read_mb": 58.982,
+        "roofline_bandwidth_floor_ms": 0.3256,
+        "stage": "coarse_sgm",
+        "total_traffic_mb": 90.317,
+        "write_mb": 31.334
+      },
+      {
+        "achieved_effective_bw_gbps": 148.36,
+        "measured_gpu_ms": 0.2236,
+        "read_mb": 18.432,
+        "roofline_bandwidth_floor_ms": 0.1272,
+        "stage": "refinement_census",
+        "total_traffic_mb": 33.178,
+        "write_mb": 14.746
+      },
+      {
+        "achieved_effective_bw_gbps": 250.37,
+        "measured_gpu_ms": 0.681,
+        "read_mb": 89.395,
+        "roofline_bandwidth_floor_ms": 0.604,
+        "stage": "refinement_guided_match",
+        "total_traffic_mb": 170.496,
+        "write_mb": 81.101
+      },
+      {
+        "achieved_effective_bw_gbps": 320.37,
+        "measured_gpu_ms": 0.1841,
+        "read_mb": 29.491,
+        "roofline_bandwidth_floor_ms": 0.2168,
+        "stage": "refinement_lr",
+        "total_traffic_mb": 58.982,
+        "write_mb": 29.491
+      },
+      {
+        "achieved_effective_bw_gbps": 203.22,
+        "measured_gpu_ms": 0.6168,
+        "read_mb": 29.491,
+        "roofline_bandwidth_floor_ms": 0.4472,
+        "stage": "refinement_metric",
+        "total_traffic_mb": 125.338,
+        "write_mb": 95.846
+      },
+      {
+        "achieved_effective_bw_gbps": 31.6,
+        "measured_gpu_ms": 0.396,
+        "read_mb": 11.612,
+        "roofline_bandwidth_floor_ms": 0.0555,
+        "stage": "refinement_planar_recovery",
+        "total_traffic_mb": 12.515,
+        "write_mb": 0.903
+      }
+    ],
+    "total_bandwidth_roofline_floor_ms": 2.0139,
+    "total_measured_stage_sum_ms": 3.5939,
+    "total_pipeline_read_mb": 256.76,
+    "total_pipeline_traffic_mb": 555.8,
+    "total_pipeline_write_mb": 299.04,
+    "v10_2_architectural_traffic_reduction_plan": {
+      "guided_match_diagnostic_plane_writes_mb": 58.98,
+      "lr_metric_fusion_intermediate_traffic_mb": 51.61,
+      "right_eye_completed_buffer_init_writes_mb": 25.8,
+      "total_eliminable_global_memory_traffic_mb": 136.4
+    }
+  },
+  "schema": "stereoforge.v10_0_roofline_and_energy_baseline.v1",
+  "stage_timings_ms": {
+    "coarse_total_ms": 1.1815649881095887,
+    "dual_preprocess_decode_ms": 0.04179941941452026,
+    "dual_preprocess_rectify_ms": 0.2343252208213806,
+    "dual_preprocess_total_ms": 0.3107504296646118,
+    "dual_preprocess_upload_ms": 0.030337641895294188,
+    "refinement_census_ms": 0.2236248900604248,
+    "refinement_guided_match_ms": 0.6809738587646484,
+    "refinement_lr_ms": 0.18410981092071532,
+    "refinement_metric_ms": 0.6167718741989136,
+    "refinement_planar_recovery_ms": 0.39603246659088137,
+    "refinement_total_ms": 2.114176962409973,
+    "single_interval_upload_to_metric_gpu_ms": 3.6828073796281813,
+    "stage_sum_gpu_ms": 3.6064923801841733
+  }
+}

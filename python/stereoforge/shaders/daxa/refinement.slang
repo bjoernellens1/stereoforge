@@ -23,17 +23,17 @@ void census(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>
 [shader("compute")][numthreads(64,1,1)]
 void match(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=2*n)return;uint eye=t/n,i=t%n,x=i%p.width,y=i/p.width,cn=p.coarse_width*p.coarse_height;
     // Half-pixel 2x/4x coordinates are exact binary32 fractions.
-    bool scale4=(p.width==p.coarse_width*4u),hybrid=(p.subpixel&2u)!=0,skip_diag=(p.subpixel&4u)!=0,repair=(p.subpixel&8u)!=0;
-    precise float step=scale4?.25f:.5f,mult=scale4?4.f:2.f;
-    precise float cx=(float(x)+.5f)*step-.5f,cy=(float(y)+.5f)*step-.5f;int ix=int(floor(cx)),iy=int(floor(cy));precise float wx=cx-float(ix),wy=cy-float(iy);precise float weights[4]={(1.f-wx)*(1.f-wy),wx*(1.f-wy),(1.f-wx)*wy,wx*wy};precise float predicted=0,w_valid=0;float mn=3.402823466e38f,mx=-3.402823466e38f;uint reason=0;bool boundary_repair=false,hole_fallback=false,expanded_sweep=false;
+    bool scale4=(p.width==p.coarse_width*4u),hybrid=(p.subpixel&2u)!=0,ultra=(p.subpixel&16u)!=0,skip_diag=(p.subpixel&4u)!=0,repair=(p.subpixel&8u)!=0;
+    SF_PRECISE float step=scale4?.25f:.5f,mult=scale4?4.f:2.f;
+    SF_PRECISE float cx=(float(x)+.5f)*step-.5f,cy=(float(y)+.5f)*step-.5f;int ix=int(floor(cx)),iy=int(floor(cy));SF_PRECISE float wx=cx-float(ix),wy=cy-float(iy);SF_PRECISE float weights[4]={(1.f-wx)*(1.f-wy),wx*(1.f-wy),(1.f-wx)*wy,wx*wy};SF_PRECISE float predicted=0,w_valid=0;float mn=3.402823466e38f,mx=-3.402823466e38f;uint reason=0;bool boundary_repair=false,hole_fallback=false,expanded_sweep=false;
     if(!hybrid){
         [unroll]for(uint tap=0;tap<4;++tap){if(weights[tap]==0)continue;int xx=ix+int(tap&1),yy=iy+int(tap>>1);if(xx<0||yy<0||xx>=int(p.coarse_width)||yy>=int(p.coarse_height)){reason|=REF_OUTSIDE;continue;}uint j=eye*cn+uint(yy)*p.coarse_width+uint(xx);float d=((float*)p.coarse[0])[j],confidence=((float*)p.coarse[1])[j];if(((uint*)p.coarse[2])[j]==0)reason|=REF_NO_PRIOR;if(!isfinite(d))reason|=REF_NONFINITE;if(confidence<p.prior_floor)reason|=REF_LOW_CONFIDENCE;if(isfinite(d)){if(d<0||d>float(p.disparities-1)*step)reason|=REF_OUTSIDE;mn=min(mn,d);mx=max(mx,d);predicted=predicted+d*weights[tap];}}
         if(mx-mn>p.max_span)reason|=REF_PRIOR_SPAN;
     }else{
-        [unroll]for(uint tap=0;tap<4;++tap){int xx=ix+int(tap&1),yy=iy+int(tap>>1);if(xx<0||yy<0||xx>=int(p.coarse_width)||yy>=int(p.coarse_height))continue;uint j=eye*cn+uint(yy)*p.coarse_width+uint(xx);float d=((float*)p.coarse[0])[j];if(((uint*)p.coarse[2])[j]!=0&&isfinite(d)&&d>=0&&d<=float(p.disparities-1)*step){precise float w=weights[tap]+.001f;predicted=predicted+d*w;w_valid=w_valid+w;mn=min(mn,d);mx=max(mx,d);}}
+        [unroll]for(uint tap=0;tap<4;++tap){int xx=ix+int(tap&1),yy=iy+int(tap>>1);if(xx<0||yy<0||xx>=int(p.coarse_width)||yy>=int(p.coarse_height))continue;uint j=eye*cn+uint(yy)*p.coarse_width+uint(xx);float d=((float*)p.coarse[0])[j];if(((uint*)p.coarse[2])[j]!=0&&isfinite(d)&&d>=0&&d<=float(p.disparities-1)*step){SF_PRECISE float w=weights[tap]+.001f;predicted=predicted+d*w;w_valid=w_valid+w;mn=min(mn,d);mx=max(mx,d);}}
         int rx=int(floor(cx+.5f)),ry=int(floor(cy+.5f));
         if(w_valid==0.f){[unroll]for(int dy=-1;dy<=1;++dy)[unroll]for(int dx=-1;dx<=1;++dx){int xx=rx+dx,yy=ry+dy;if(xx<0||yy<0||xx>=int(p.coarse_width)||yy>=int(p.coarse_height))continue;uint j=eye*cn+uint(yy)*p.coarse_width+uint(xx);float d=((float*)p.coarse[0])[j];if(((uint*)p.coarse[2])[j]!=0&&isfinite(d)&&d>=0&&d<=float(p.disparities-1)*step){predicted=predicted+d;w_valid=w_valid+1.f;mn=min(mn,d);mx=max(mx,d);}}}
-        if(repair&&w_valid==0.f){
+        if(repair&&!ultra&&w_valid==0.f){
             [unroll]for(int dy=-2;dy<=2;dy+=2)[unroll]for(int dx=-2;dx<=2;dx+=2){int xx=rx+dx,yy=ry+dy;if(xx<0||yy<0||xx>=int(p.coarse_width)||yy>=int(p.coarse_height))continue;uint j=eye*cn+uint(yy)*p.coarse_width+uint(xx);float d=((float*)p.coarse[0])[j];if(((uint*)p.coarse[2])[j]!=0&&isfinite(d)&&d>=0&&d<=float(p.disparities-1)*step){predicted=predicted+d;w_valid=w_valid+1.f;mn=min(mn,d);mx=max(mx,d);}}
             if(w_valid<3.f||(mx-mn)>p.max_span*1.5f)w_valid=0.f;
             else hole_fallback=true;
@@ -65,15 +65,17 @@ void match(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=
     uint prev_cost=0xffffffff;bool supported=uplane(25)[t]!=0;if(prior&&!supported)reason|=REF_UNSUPPORTED;
     bool plateau_tie=false,strict_reject=false;
     if(prior&&supported){
-        uint c0=uplane(24)[t];
-        uint c_l=(x>0&&uplane(25)[t-1]!=0)?uplane(24)[t-1]:c0;
-        uint c_r=(x+1<p.width&&uplane(25)[t+1]!=0)?uplane(24)[t+1]:c0;
-        uint c_u=(y>0&&uplane(25)[t-p.width]!=0)?uplane(24)[t-p.width]:c0;
-        uint c_d=(y+1<p.height&&uplane(25)[t+p.width]!=0)?uplane(24)[t+p.width]:c0;
+        uint c0=uplane(24)[t],c_l=c0,c_r=c0,c_u=c0,c_d=c0;
+        if(hybrid&&!(ultra&&eye!=0)){
+            c_l=(x>0&&uplane(25)[t-1]!=0)?uplane(24)[t-1]:c0;
+            c_r=(x+1<p.width&&uplane(25)[t+1]!=0)?uplane(24)[t+1]:c0;
+            c_u=(y>0&&uplane(25)[t-p.width]!=0)?uplane(24)[t-p.width]:c0;
+            c_d=(y+1<p.height&&uplane(25)[t+p.width]!=0)?uplane(24)[t+p.width]:c0;
+        }
         for(uint pass_idx=0;pass_idx<2;++pass_idx){
             for(uint d=lo;d<=hi;++d){uint cost=0xffffffff;int xx=int(x)+(eye!=0?int(d):-int(d));if(xx>=0&&xx<int(p.width)){uint j=(1-eye)*n+y*p.width+uint(xx);if(uplane(25)[j]!=0){
                 uint base=countbits(c0^uplane(24)[j]);
-                if(!hybrid){cost=base;}else{
+                if(!hybrid){cost=base;}else if(ultra&&eye!=0){cost=6u*base+uint(abs(int(d)-centre));}else{
                     uint m_l=(xx>0&&uplane(25)[j-1]!=0)?countbits(c_l^uplane(24)[j-1]):base;
                     uint m_r=(xx+1<int(p.width)&&uplane(25)[j+1]!=0)?countbits(c_r^uplane(24)[j+1]):base;
                     uint m_u=(y>0&&uplane(25)[j-p.width]!=0)?countbits(c_u^uplane(24)[j-p.width]):base;
@@ -86,7 +88,7 @@ void match(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=
                 else if(cost<second){third=second;second=cost;}
                 else if(cost<third){third=cost;}
             }}if(winner!=0xffffffff&&d==winner+1)plus=cost;prev_cost=cost;}
-            if(pass_idx==0&&repair&&!boundary_repair&&!hole_fallback&&second<best+p.min_margin&&best>32u){
+            if(pass_idx==0&&repair&&!ultra&&!boundary_repair&&!hole_fallback&&second<best+p.min_margin&&best>32u){
                 uint lo2=uint(max(0,int(lo)-2)),hi2=uint(min(int(p.disparities)-1,int(hi)+2));
                 if(lo2<lo||hi2>hi){
                     lo=lo2;hi=hi2;expanded_sweep=true;
@@ -103,37 +105,62 @@ void match(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=
     uint eff_margin=plateau_tie?p.min_margin:(second-best);
     uint eff_second=plateau_tie?(best+p.min_margin):second;
     bool unique=count>=2&&eff_margin>=p.min_margin&&!strict_reject;if(count<2)reason|=REF_TOO_FEW;if(count>=2&&!unique)reason|=REF_AMBIGUOUS;bool restricted=!hybrid&&count>0&&((winner==lo&&lo>0)||(winner==hi&&hi+1<p.disparities));if(restricted)reason|=REF_RESTRICTED;if(count>0&&(winner==0||winner+1==p.disparities))reason|=REF_GLOBAL;bool valid=unique&&!restricted;
-    float d=float(winner),confidence=0;bool applied=false;if(valid){confidence=clamp(float(eff_margin)/float(max(eff_second,1u)),0.f,1.f);if((p.subpixel&1u)!=0){if(minus!=0xffffffff&&plus!=0xffffffff){precise float denominator=(float(minus)-2.f*float(best))+float(plus);precise float numerator=.5f*(float(minus)-float(plus));precise float offset=denominator!=0?clamp(numerator/denominator,-1.f,1.f):0;d=d+offset;applied=true;}else reason|=REF_MISSING_SUBPIXEL;}}
-    if(!skip_diag){uplane(13)[t]=reason;uplane(14)[t]=prior?1:0;uplane(15)[t]=winner;uplane(16)[t]=best;uplane(17)[t]=second;uplane(18)[t]=count;uplane(19)[t]=work;uplane(20)[t]=uint(applied);}fplane(21)[t]=valid?d:refinement_invalid();fplane(22)[t]=valid?confidence:0;uplane(23)[t]=uint(valid);
+    float d=float(winner),confidence=0;bool applied=false;if(valid){confidence=clamp(float(eff_margin)/float(max(eff_second,1u)),0.f,1.f);if((p.subpixel&1u)!=0&&!(ultra&&eye!=0)){if(minus!=0xffffffff&&plus!=0xffffffff){SF_PRECISE float denominator=(float(minus)-2.f*float(best))+float(plus);SF_PRECISE float numerator=.5f*(float(minus)-float(plus));SF_PRECISE float offset=denominator!=0?clamp(numerator/denominator,-1.f,1.f):0;d=d+offset;applied=true;}else reason|=REF_MISSING_SUBPIXEL;}}
+    if(!skip_diag){uplane(13)[t]=reason;uplane(14)[t]=prior?1:0;uplane(15)[t]=winner;uplane(16)[t]=best;uplane(17)[t]=second;uplane(18)[t]=count;uplane(19)[t]=work;uplane(20)[t]=uint(applied);}fplane(21)[t]=valid?d:refinement_invalid();if((p.subpixel&20u)!=20u||eye==0)fplane(22)[t]=valid?confidence:0;uplane(23)[t]=uint(valid);
 }
 [shader("compute")][numthreads(64,1,1)]
-void lr(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=2*n)return;uint eye=t/n,i=t%n,target=0;float d=fplane(21)[t];bool valid=false;if(uplane(23)[t]!=0&&refinement_target(p.width,i%p.width,d,eye!=0,target)){uint j=(1-eye)*n+(i/p.width)*p.width+target;valid=observation_lr(d,fplane(21)[j],uplane(23)[t],uplane(23)[j],p.lr_tolerance);}if((p.subpixel&4u)==0&&uplane(23)[t]!=0&&!valid)uplane(13)[t]|=REF_LR_FAILED;fplane(0)[t]=valid?d:refinement_invalid();fplane(1)[t]=valid?fplane(22)[t]:0;uplane(2)[t]=uint(valid);}
+void lr(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=2*n)return;bool skip_r=((p.subpixel&20u)==20u);if(skip_r&&p.completed[0]==0&&t>=n)return;uint eye=t/n,i=t%n,target=0;float d=fplane(21)[t];bool valid=false;if(uplane(23)[t]!=0&&refinement_target(p.width,i%p.width,d,eye!=0,target)){uint j=(1-eye)*n+(i/p.width)*p.width+target;valid=observation_lr(d,fplane(21)[j],uplane(23)[t],uplane(23)[j],p.lr_tolerance);}if((p.subpixel&4u)==0&&uplane(23)[t]!=0&&!valid)uplane(13)[t]|=REF_LR_FAILED;fplane(0)[t]=valid?d:refinement_invalid();if(!skip_r||eye==0)fplane(1)[t]=valid?fplane(22)[t]:0;uplane(2)[t]=uint(valid);}
 void write_completed(uint t,float z,float c,uint v,uint prov,uint2 sid,float d){
     ((float*)p.completed[0])[t]=z;((float*)p.completed[1])[t]=c;((uint*)p.completed[2])[t]=v;((uint*)p.completed[3])[t]=prov;
     ((uint2*)p.completed[4])[t]=sid;((float*)p.completed[6])[t]=d;
 }
 [shader("compute")][numthreads(64,1,1)]
-void metric(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=2*n)return;uint eye=t/n,i=t%n,target=0;float z=refinement_invalid(),d=fplane(0)[t];bool valid=uplane(2)[t]!=0&&d>0&&(d-p.principal_offset)>0;if(valid&&refinement_target(p.width,i%p.width,d,eye!=0,target)){uint j=(1-eye)*n+(i/p.width)*p.width+target;valid=uplane(25)[t]!=0&&uplane(25)[j]!=0;if(valid){precise float numerator=p.fx*p.baseline;precise float denominator=d-p.principal_offset;z=numerator/denominator;valid=isfinite(z)&&z>0;}}else valid=false;float z_out=valid?z:refinement_invalid(),c_out=valid?fplane(1)[t]:0;uint v_out=uint(valid),prov_out=valid?SF_PROVENANCE_STEREO:0u;uint2 sid=valid?uint2(p.source_low,p.source_high):uint2(0xffffffff,0xffffffff);fplane(3)[t]=z_out;fplane(4)[t]=c_out;uplane(5)[t]=v_out;uplane(6)[t]=prov_out;((uint2*)p.output[7])[t]=sid;if(p.completed[0]!=0)write_completed(t,z_out,c_out,v_out,prov_out,sid,valid?d:refinement_invalid());}
+void metric(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=2*n)return;if((p.subpixel&20u)==20u&&t>=n)return;uint eye=t/n,i=t%n,target=0;float z=refinement_invalid(),d=fplane(0)[t];bool valid=uplane(2)[t]!=0&&d>0&&(d-p.principal_offset)>0;if(valid&&refinement_target(p.width,i%p.width,d,eye!=0,target)){uint j=(1-eye)*n+(i/p.width)*p.width+target;valid=uplane(25)[t]!=0&&uplane(25)[j]!=0;if(valid){SF_PRECISE float numerator=p.fx*p.baseline;SF_PRECISE float denominator=d-p.principal_offset;z=numerator/denominator;valid=isfinite(z)&&z>0;}}else valid=false;float z_out=valid?z:refinement_invalid(),c_out=valid?fplane(1)[t]:0;uint v_out=uint(valid),prov_out=valid?SF_PROVENANCE_STEREO:0u;uint2 sid=valid?uint2(p.source_low,p.source_high):uint2(0xffffffff,0xffffffff);fplane(3)[t]=z_out;fplane(4)[t]=c_out;uplane(5)[t]=v_out;uplane(6)[t]=prov_out;((uint2*)p.output[7])[t]=sid;if(p.completed[0]!=0)write_completed(t,z_out,c_out,v_out,prov_out,sid,valid?d:refinement_invalid());}
+#if !defined(SF_CPU_TARGET)
 groupshared uint gs_has_candidate;
 groupshared uint gs_has_valid_coarse;
 groupshared float gs_disp[34][34];
 groupshared float gs_luma[34][34];
 groupshared float gs_coarse_d[8][8];
 groupshared float4 gs_coarse_plane[4][4];
+#endif
+float planar_tile_luma(uint* gray_l,uint lx,uint ly,uint x,uint y,int dx,int dy){
+#if !defined(SF_CPU_TARGET)
+    return gs_luma[int(ly)+dy][int(lx)+dx];
+#else
+    return float(gray_l[uint(int(y)+dy)*p.width+uint(int(x)+dx)]);
+#endif
+}
+float planar_tile_disp(uint lx,uint ly,uint x,uint y,int dx,int dy){
+#if !defined(SF_CPU_TARGET)
+    return gs_disp[int(ly)+dy][int(lx)+dx];
+#else
+    uint idx=uint(int(y)+dy)*p.width+uint(int(x)+dx);
+    return (uplane(2)[idx]!=0)?fplane(0)[idx]:-1.f;
+#endif
+}
 [shader("compute")][numthreads(16,16,1)]
 void planar(uint3 tid:SV_DispatchThreadID,uint3 gid:SV_GroupID,uint3 gtid:SV_GroupThreadID,uint gidx:SV_GroupIndex){
     if(p.completed[0]==0)return;
+#if !defined(SF_CPU_TARGET)
     if(gidx==0u){gs_has_candidate=0u;gs_has_valid_coarse=0u;}
     GroupMemoryBarrierWithGroupSync();
+#endif
     uint x=tid.x,y=tid.y,n=p.width*p.height,t=y*p.width+x;
     bool in_bounds=(x>=12u&&x+12u<p.width&&y>=12u&&y+12u<p.height);
     bool is_cand=in_bounds&&(uplane(5)[t]==0u)&&(uplane(25)[t]!=0u);
+#if !defined(SF_CPU_TARGET)
     if(is_cand)InterlockedOr(gs_has_candidate,1u);
     GroupMemoryBarrierWithGroupSync();
     if(gs_has_candidate==0u)return;
+#else
+    if(!is_cand)return;
+#endif
     bool scale4=(p.width==p.coarse_width*4u);
     bool use_coarse_affine=(p.planar_cfg&256u)!=0;
-    precise float step=scale4?.25f:.5f,mult=scale4?4.f:2.f;
+    bool ultra=(p.subpixel&16u)!=0;
+    SF_PRECISE float step=scale4?.25f:.5f,mult=scale4?4.f:2.f;
+#if !defined(SF_CPU_TARGET)
     if(scale4&&use_coarse_affine){
         if(gidx<64u){
             uint cy_i=gidx>>3u,cx_i=gidx&7u;
@@ -186,14 +213,16 @@ void planar(uint3 tid:SV_DispatchThreadID,uint3 gid:SV_GroupID,uint3 gtid:SV_Gro
         }
         GroupMemoryBarrierWithGroupSync();
     }
+#endif
     uint min_anc=max(p.planar_cfg&0xffu,1u);
     bool ray_guard=(p.planar_cfg&512u)!=0;
     bool coarse_lr_guard=(p.planar_cfg&1024u)!=0;
-    precise float cx=(float(x)+.5f)*step-.5f,cy=(float(y)+.5f)*step-.5f;
+    SF_PRECISE float cx=(float(x)+.5f)*step-.5f,cy=(float(y)+.5f)*step-.5f;
     uint cn=p.coarse_width*p.coarse_height;
     float d_coarse=0.f,ac_full=0.f,bc_full=0.f;
     bool strong_coarse=false;
     if(is_cand){
+#if !defined(SF_CPU_TARGET)
         if(scale4&&use_coarse_affine){
             uint px=gtid.x>>2u,py=gtid.y>>2u;
             float4 plane=gs_coarse_plane[py][px];
@@ -205,9 +234,11 @@ void planar(uint3 tid:SV_DispatchThreadID,uint3 gid:SV_GroupID,uint3 gtid:SV_Gro
                 d_coarse=(plane.x+ac_full*(cx-float(rcx))+bc_full*(cy-float(rcy)))*mult;
                 strong_coarse=(plane.w>1.5f);
             }
-        }else if(use_coarse_affine){
-            int rcx=clamp(int(floor(cx+.5f)),1,int(p.coarse_width)-2);
-            int rcy=clamp(int(floor(cy+.5f)),1,int(p.coarse_height)-2);
+        }else
+#endif
+        if(use_coarse_affine){
+            int rcx=clamp(scale4?int(x>>2u):int(floor(cx+.5f)),1,int(p.coarse_width)-2);
+            int rcy=clamp(scale4?int(y>>2u):int(floor(cy+.5f)),1,int(p.coarse_height)-2);
             uint c_cnt=0;
             float c_mn=3.402823466e38f,c_mx=-3.402823466e38f;
             float csx=0,csy=0,csxx=0,csyy=0,csxy=0,csd=0,csxd=0,csyd=0,csdd=0;
@@ -241,24 +272,25 @@ void planar(uint3 tid:SV_DispatchThreadID,uint3 gid:SV_GroupID,uint3 gtid:SV_Gro
                     if(abs(ac)>.60f||abs(bc)>.85f||c_rmse>.55f)is_cand=false;
                 }
                 if(is_cand){
-                    d_coarse=(cmd+ac*(cx-float(rcx)-cmx)+bc*(cy-float(rcy)-cmy))*mult;
+                    float plane_x=cmd-ac*cmx-bc*cmy;
+                    d_coarse=(plane_x+ac*(cx-float(rcx))+bc*(cy-float(rcy)))*mult;
                     ac_full=ac;bc_full=bc;
                     strong_coarse=(c_cnt>=6u&&c_rmse<=.42f);
                 }
             }
         }else{
             int ix=int(floor(cx)),iy=int(floor(cy));
-            precise float wx=cx-float(ix),wy=cy-float(iy);
-            precise float weights[4]={(1.f-wx)*(1.f-wy),wx*(1.f-wy),(1.f-wx)*wy,wx*wy};
+            SF_PRECISE float wx=cx-float(ix),wy=cy-float(iy);
+            SF_PRECISE float weights[4]={(1.f-wx)*(1.f-wy),wx*(1.f-wy),(1.f-wx)*wy,wx*wy};
             float mn=3.402823466e38f,mx=-3.402823466e38f;
-            precise float predicted=0,w_valid=0;
+            SF_PRECISE float predicted=0,w_valid=0;
             for(uint tap=0;tap<4;++tap){
                 int xx=ix+int(tap&1),yy=iy+int(tap>>1);
                 if(xx<0||yy<0||xx>=int(p.coarse_width)||yy>=int(p.coarse_height))continue;
                 uint j=uint(yy)*p.coarse_width+uint(xx);
                 float d=((float*)p.coarse[0])[j];
                 if(((uint*)p.coarse[2])[j]!=0&&isfinite(d)&&d>=0&&d<=float(p.disparities-1)*step){
-                    precise float w=weights[tap]+.001f;predicted=predicted+d*w;w_valid=w_valid+w;mn=min(mn,d);mx=max(mx,d);
+                    SF_PRECISE float w=weights[tap]+.001f;predicted=predicted+d*w;w_valid=w_valid+w;mn=min(mn,d);mx=max(mx,d);
                 }
             }
             if(w_valid<.70f||(mx-mn)>p.max_span*1.25f)is_cand=false;
@@ -316,13 +348,20 @@ void planar(uint3 tid:SV_DispatchThreadID,uint3 gid:SV_GroupID,uint3 gtid:SV_Gro
                 if(uplane(2)[idx_p]!=0u)qpre|=1u<<(qp&3u);
             }
             if(countbits(qpre)<2u)is_cand=false;
+#if !defined(SF_CPU_TARGET)
             else InterlockedOr(gs_has_valid_coarse,1u);
+#endif
         }
     }
+#if !defined(SF_CPU_TARGET)
     GroupMemoryBarrierWithGroupSync();
     if(gs_has_valid_coarse==0u)return;
+#else
+    if(!is_cand)return;
+#endif
     uint* gray_l=p.borrowed[0]!=0?(uint*)p.borrowed[0]:uplane(27);
     uint* gray_r=p.borrowed[0]!=0?(uint*)p.borrowed[1]:uplane(27)+n;
+#if !defined(SF_CPU_TARGET)
     int base_x=int(gid.x*16u)-9,base_y=int(gid.y*16u)-9;
     for(uint k=gidx;k<34u*34u;k+=256u){
         uint hy=k/34u,hx=k%34u;
@@ -334,15 +373,19 @@ void planar(uint3 tid:SV_DispatchThreadID,uint3 gid:SV_GroupID,uint3 gtid:SV_Gro
     }
     GroupMemoryBarrierWithGroupSync();
     if(!is_cand)return;
+#endif
     uint lx=gtid.x+9u,ly=gtid.y+9u;
-    float i0=gs_luma[ly][lx];
-    float l_xm1=gs_luma[ly][lx-1u],l_xp1=gs_luma[ly][lx+1u],l_ym1=gs_luma[ly-1u][lx],l_yp1=gs_luma[ly+1u][lx];
+    float i0=planar_tile_luma(gray_l,lx,ly,x,y,0,0);
+    float l_xm1=planar_tile_luma(gray_l,lx,ly,x,y,-1,0),l_xp1=planar_tile_luma(gray_l,lx,ly,x,y,1,0);
+    float l_ym1=planar_tile_luma(gray_l,lx,ly,x,y,0,-1),l_yp1=planar_tile_luma(gray_l,lx,ly,x,y,0,1);
     float grad_1=abs(l_xp1-l_xm1)+abs(l_yp1-l_ym1);
     if(!use_coarse_affine&&grad_1>28.f)return;
     float max_ldiff=(use_coarse_affine&&strong_coarse)?(22.f+1.25f*grad_1):18.f;
-    // Single-pass 36-tap quadrant stencil dy,dx in {-9,-5,-2,2,5,9} reading from LDS (gs_disp & gs_luma)
+    // Single-pass 36-tap (or 16-tap in ultra-fast mode) quadrant stencil reading from LDS/tile
     // with coarse-slope-centered residual u_res = da - dc_a and soft-bilateral Cauchy weighting.
     static const int kOff[6]={-9,-5,-2,2,5,9};
+    static const int kOffFast[4]={-8,-3,3,8};
+    uint n_taps=ultra?4u:6u;
     uint n_anc=0,n_inner=0,n_contra=0,qmask=0;
     float anc_mn=3.402823466e38f,anc_mx=-3.402823466e38f;
     float sw=0,sx=0,sy=0,sxx=0,syy=0,sxy=0,su=0,sxu=0,syu=0,suu=0;
@@ -352,19 +395,19 @@ void planar(uint3 tid:SV_DispatchThreadID,uint3 gid:SV_GroupID,uint3 gtid:SV_Gro
         static const int2 kCard[8]={int2(-2,0),int2(2,0),int2(0,-2),int2(0,2),int2(-4,0),int2(4,0),int2(0,-4),int2(0,4)};
         for(uint ci=0u;ci<8u;++ci){
             int2 co=kCard[ci];
-            float sda=gs_disp[int(ly)+co.y][int(lx)+co.x];
+            float sda=planar_tile_disp(lx,ly,x,y,co.x,co.y);
             if(sda>0.f&&abs(sda-(d_coarse+ac_full*float(co.x)+bc_full*float(co.y)))>contra_tol)return;
         }
     }
-    for(uint iy_i=0;iy_i<6u;++iy_i){
-        int dy=kOff[iy_i];
+    for(uint iy_i=0;iy_i<n_taps;++iy_i){
+        int dy=ultra?kOffFast[iy_i]:kOff[iy_i];
         uint qy=(dy>0)?2u:0u;
         float fy_d=float(dy);
-        for(uint ix_i=0;ix_i<6u;++ix_i){
-            int dx=kOff[ix_i];
-            float da=gs_disp[int(ly)+dy][int(lx)+dx];
+        for(uint ix_i=0;ix_i<n_taps;++ix_i){
+            int dx=ultra?kOffFast[ix_i]:kOff[ix_i];
+            float da=planar_tile_disp(lx,ly,x,y,dx,dy);
             if(da<=0.f)continue;
-            float ga=gs_luma[int(ly)+dy][int(lx)+dx];
+            float ga=planar_tile_luma(gray_l,lx,ly,x,y,dx,dy);
             float l_diff=abs(ga-i0);
             if(l_diff>max_ldiff)continue;
             float fx_d=float(dx);
@@ -375,7 +418,7 @@ void planar(uint3 tid:SV_DispatchThreadID,uint3 gid:SV_GroupID,uint3 gtid:SV_Gro
                 continue;
             }
             if(ray_guard&&(abs(dx)>=5||abs(dy)>=5)){
-                float gm=gs_luma[int(ly)+(dy/2)][int(lx)+(dx/2)];
+                float gm=planar_tile_luma(gray_l,lx,ly,x,y,dx/2,dy/2);
                 if(abs(gm-i0)>max(24.f,.85f*max_ldiff)||abs(gm-ga)>max(24.f,.85f*max_ldiff))continue;
             }
             float w_a=1.f/((1.f+1.77f*u_res*u_res)*(1.f+.0025f*l_diff*l_diff));
@@ -397,9 +440,10 @@ void planar(uint3 tid:SV_DispatchThreadID,uint3 gid:SV_GroupID,uint3 gtid:SV_Gro
     float mx_a=sx*inv_w,my_a=sy*inv_w,mu_a=su*inv_w;
     float cxx=sxx-sw*mx_a*mx_a,cyy=syy-sw*my_a*my_a,cxy=sxy-sw*mx_a*my_a;
     float det=cxx*cyy-cxy*cxy;
-    uint min_tier1=strong_coarse?max(min_anc*3u/4u,4u):min_anc;
+    uint eff_min=ultra?max(min_anc*2u/3u,3u):min_anc;
+    uint min_tier1=strong_coarse?max(eff_min*3u/4u,ultra?3u:4u):eff_min;
     bool well_cond=(n_anc>=min_tier1)&&(qcnt>=3u)&&(det>=1.2f*sw*(cxx+cyy))&&(det>.5f);
-    bool tier2_ok=use_coarse_affine&&ray_guard&&coarse_lr_guard&&(!well_cond)&&h_two_sided&&(((n_anc>=max(min_anc/2u,3u))&&(qcnt>=2u))||(strong_coarse&&(n_anc>=max(min_anc/4u,2u))));
+    bool tier2_ok=use_coarse_affine&&ray_guard&&coarse_lr_guard&&(!well_cond)&&h_two_sided&&(((n_anc>=max(eff_min/2u,2u))&&(qcnt>=2u))||(strong_coarse&&(n_anc>=max(eff_min/4u,2u))));
     if(!well_cond&&!tier2_ok)return;
     float cxu=sxu-sw*mx_a*mu_a,cyu=syu-sw*my_a*mu_a,cuu=suu-sw*mu_a*mu_a;
     float da_slope=well_cond?((cyy*cxu-cxy*cyu)/det):0.f;
@@ -437,8 +481,8 @@ void planar(uint3 tid:SV_DispatchThreadID,uint3 gid:SV_GroupID,uint3 gtid:SV_Gro
     uint cost_plane=2u*base+m_l+m_r+m_u+m_d;
     uint max_cost=use_coarse_affine?(grad_mag>16.f?34u:30u):28u;
     if(cost_plane>max_cost)return;
-    precise float numerator=p.fx*p.baseline;
-    precise float denominator=d_plane-p.principal_offset;
+    SF_PRECISE float numerator=p.fx*p.baseline;
+    SF_PRECISE float denominator=d_plane-p.principal_offset;
     float z=numerator/denominator;
     if(!isfinite(z)||z<=0.f)return;
     float conf=clamp((1.f-rmse/.55f)*(1.f-float(cost_plane)/float(max_cost))*min(fn/12.f,1.f),.05f,.85f);

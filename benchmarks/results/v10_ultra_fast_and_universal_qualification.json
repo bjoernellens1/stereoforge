@@ -1,0 +1,461 @@
+{
+  "schema": "stereoforge.v10.ultra_fast_and_universal_qualification.v1",
+  "generated_at_utc": "2026-11-03T17:21:02Z",
+  "provenance": {
+    "git_head_at_generation": "f3e7a59bdcbcd5136f2e4819c3c77f3c37207bb9",
+    "binaries_sha256": {
+      "daxa_depth_benchmark": "93b56173c8ae3720107523b32e25e7e2047fbacf4a870692052410416668e8ac",
+      "daxa_refinement_benchmark": "88e3847c52d9bc6a3de8470e85a7a4d75afaed6f3093afe138ea53e9851ffae0",
+      "daxa_dual_preprocess_benchmark": "f9e21d870a8e937037931045ce42e7af9eacfe19349c75f28dc8bb46bbc0c294",
+      "stereoforge_ros2_depth_publisher": "c866391c38e1e14f1d628db6ba56599d5720594ed3798c5f0b3eb2d3db9d2a4a",
+      "stereoforge_ros2_delivery_probe": "efd22fc212b05169077f7dd3c8a2ed4d478ac484f8ce254eaa885fb1a082f372",
+      "daxa_refinement_contracts": "e59caba8ad554f30d49d081397cf683258a0b3d3239f619156d1eb50e4cde3cf"
+    },
+    "compiled_spv_bundle_sha256": "38f80ffd8313c99c2015fc6b803d3e7912ea5f5786cd8b0ba0f3288489c75c8f",
+    "compiled_spv_count": 79
+  },
+  "v10_0_roofline_and_energy_baseline": {
+    "joint_3_metric_tuple": {
+      "Delta_T_competing_workload": {
+        "competing_probe_contended_gpu_p50_ms": 4.5644,
+        "competing_probe_contended_wall_ms": 3505.6,
+        "competing_probe_solo_gpu_p50_ms": 3.0686,
+        "competing_probe_solo_wall_ms": 3192.95,
+        "delta_competing_gpu_p50_ms": 1.4958,
+        "delta_competing_gpu_p50_pct": 48.75,
+        "estimated_30hz_duty_scaled_slowdown_pct": 5.41,
+        "estimated_60hz_duty_scaled_slowdown_pct": 10.81
+      },
+      "E_frame_mj": {
+        "active_gpu_power_mean_w": 43.31,
+        "active_gpu_power_peak_w": 63.02,
+        "gross_energy_mj_per_frame": 160.103,
+        "idle_gpu_power_w": 14.93,
+        "idle_gpu_temp_c": 43.0,
+        "net_dynamic_energy_mj_per_frame": 104.904,
+        "net_dynamic_power_w": 28.38,
+        "sustained_run_elapsed_s": 3.633,
+        "sustained_run_frames": 260
+      },
+      "T_frame_ms": {
+        "gpu_combined_p50_ms": 3.6967,
+        "gpu_combined_p95_ms": 4.0852,
+        "gpu_combined_p99_ms": 4.1973,
+        "host_wall_p50_ms": 3.8938,
+        "serialized_gpu_time_fraction_at_30hz_pct": 11.09,
+        "serialized_gpu_time_fraction_at_60hz_pct": 22.18
+      }
+    },
+    "provenance": {
+      "binaries_sha256": {
+        "daxa_depth_benchmark": "93b56173c8ae3720107523b32e25e7e2047fbacf4a870692052410416668e8ac",
+        "daxa_dual_preprocess_benchmark": "652c040657eabbad8aca70ddcd2ceb4e2a5c155d8cd06c260417df5ee902f0e3",
+        "daxa_refinement_benchmark": "4bef1645a55461c7e3d6b0c3d45266ef51812a6760ddca616bfc1dda9a9e311a",
+        "daxa_refinement_contracts": "21ef733fc3d565cc302440a0820c1c78c3f665a16e2c03a1ba9995e632d8242d",
+        "stereoforge_ros2_delivery_probe": "efd22fc212b05169077f7dd3c8a2ed4d478ac484f8ce254eaa885fb1a082f372",
+        "stereoforge_ros2_depth_publisher": "c866391c38e1e14f1d628db6ba56599d5720594ed3798c5f0b3eb2d3db9d2a4a"
+      },
+      "compiled_spv_bundle_sha256": "5f3810464bc109ac7a0320d7188e322250cb7ae54922b31ebd51ea4b85bf3194",
+      "compiled_spv_count": 79,
+      "git_head_at_generation": "f3e7a59bdcbcd5136f2e4819c3c77f3c37207bb9"
+    },
+    "roofline_and_memory_traffic_model": {
+      "effective_reference_bandwidth_gbps": 288.0,
+      "per_stage_breakdown": [
+        {
+          "achieved_effective_bw_gbps": 209.08,
+          "measured_gpu_ms": 0.3108,
+          "read_mb": 19.354,
+          "roofline_bandwidth_floor_ms": 0.2376,
+          "stage": "dual_preprocess",
+          "total_traffic_mb": 64.973,
+          "write_mb": 45.619
+        },
+        {
+          "achieved_effective_bw_gbps": 76.44,
+          "measured_gpu_ms": 1.1816,
+          "read_mb": 58.982,
+          "roofline_bandwidth_floor_ms": 0.3256,
+          "stage": "coarse_sgm",
+          "total_traffic_mb": 90.317,
+          "write_mb": 31.334
+        },
+        {
+          "achieved_effective_bw_gbps": 148.36,
+          "measured_gpu_ms": 0.2236,
+          "read_mb": 18.432,
+          "roofline_bandwidth_floor_ms": 0.1272,
+          "stage": "refinement_census",
+          "total_traffic_mb": 33.178,
+          "write_mb": 14.746
+        },
+        {
+          "achieved_effective_bw_gbps": 250.37,
+          "measured_gpu_ms": 0.681,
+          "read_mb": 89.395,
+          "roofline_bandwidth_floor_ms": 0.604,
+          "stage": "refinement_guided_match",
+          "total_traffic_mb": 170.496,
+          "write_mb": 81.101
+        },
+        {
+          "achieved_effective_bw_gbps": 320.37,
+          "measured_gpu_ms": 0.1841,
+          "read_mb": 29.491,
+          "roofline_bandwidth_floor_ms": 0.2168,
+          "stage": "refinement_lr",
+          "total_traffic_mb": 58.982,
+          "write_mb": 29.491
+        },
+        {
+          "achieved_effective_bw_gbps": 203.22,
+          "measured_gpu_ms": 0.6168,
+          "read_mb": 29.491,
+          "roofline_bandwidth_floor_ms": 0.4472,
+          "stage": "refinement_metric",
+          "total_traffic_mb": 125.338,
+          "write_mb": 95.846
+        },
+        {
+          "achieved_effective_bw_gbps": 31.6,
+          "measured_gpu_ms": 0.396,
+          "read_mb": 11.612,
+          "roofline_bandwidth_floor_ms": 0.0555,
+          "stage": "refinement_planar_recovery",
+          "total_traffic_mb": 12.515,
+          "write_mb": 0.903
+        }
+      ],
+      "total_bandwidth_roofline_floor_ms": 2.0139,
+      "total_measured_stage_sum_ms": 3.5939,
+      "total_pipeline_read_mb": 256.76,
+      "total_pipeline_traffic_mb": 555.8,
+      "total_pipeline_write_mb": 299.04,
+      "v10_2_architectural_traffic_reduction_plan": {
+        "guided_match_diagnostic_plane_writes_mb": 58.98,
+        "lr_metric_fusion_intermediate_traffic_mb": 51.61,
+        "right_eye_completed_buffer_init_writes_mb": 25.8,
+        "total_eliminable_global_memory_traffic_mb": 136.4
+      }
+    },
+    "schema": "stereoforge.v10_0_roofline_and_energy_baseline.v1",
+    "stage_timings_ms": {
+      "coarse_total_ms": 1.1815649881095887,
+      "dual_preprocess_decode_ms": 0.04179941941452026,
+      "dual_preprocess_rectify_ms": 0.2343252208213806,
+      "dual_preprocess_total_ms": 0.3107504296646118,
+      "dual_preprocess_upload_ms": 0.030337641895294188,
+      "refinement_census_ms": 0.2236248900604248,
+      "refinement_guided_match_ms": 0.6809738587646484,
+      "refinement_lr_ms": 0.18410981092071532,
+      "refinement_metric_ms": 0.6167718741989136,
+      "refinement_planar_recovery_ms": 0.39603246659088137,
+      "refinement_total_ms": 2.114176962409973,
+      "single_interval_upload_to_metric_gpu_ms": 3.6828073796281813,
+      "stage_sum_gpu_ms": 3.6064923801841733
+    }
+  },
+  "v10_1_portable_slang_cpu_backend": {
+    "compiler": "slangc -target cpp -DSF_CPU_TARGET=1 + g++ -O3 -fopenmp",
+    "entrypoints_compiled": [
+      "rectify",
+      "census",
+      "match",
+      "lr",
+      "metric",
+      "planar"
+    ],
+    "zero_cuda_rocm_vulkan_dependency": true,
+    "bit_exact_parity_with_vulkan": {
+      "census_and_validity_bit_exact_pct": 100.0,
+      "lr_and_metric_validity_bit_exact_pct": 100.0,
+      "provenance_bit_exact_pct": 100.0
+    },
+    "cpu_performance": {
+      "library_path": "/tmp/stereoforge_slang_cpu_cache/libstereoforge_slang_cpu_3bb950793d1ccbb3.so",
+      "resolutions": {
+        "640x360_mobile": {
+          "width": 640,
+          "height": 360,
+          "cpu_p50_ms": 8.85,
+          "cpu_mean_ms": 10.55,
+          "equivalent_cpu_fps": 112.95,
+          "valid_stereo_pixels": 220908
+        },
+        "1280x720_full": {
+          "width": 1280,
+          "height": 720,
+          "cpu_p50_ms": 44.31,
+          "cpu_mean_ms": 45.59,
+          "equivalent_cpu_fps": 22.57,
+          "valid_stereo_pixels": 902522
+        }
+      }
+    }
+  },
+  "v10_2_ultra_fast_gpu_profiles": {
+    "quality_with_planar": {
+      "profile": "quality",
+      "planar_recovery": true,
+      "frames": 180,
+      "warmup": 20,
+      "wall_s": 3.3671,
+      "gpu_combined_p50_ms": 3.9374,
+      "gpu_combined_p95_ms": 4.3006,
+      "gpu_combined_mean_ms": 3.9656,
+      "host_wall_p50_ms": 4.1522,
+      "host_wall_p95_ms": 4.7325,
+      "equivalent_gpu_fps_p50": 254.0,
+      "serialized_gpu_time_fraction_30hz_pct": 11.81,
+      "serialized_gpu_time_fraction_60hz_pct": 23.62,
+      "stage_timings_ms": {
+        "coarse_total_ms": 1.2826,
+        "dual_preprocess_decode_ms": 0.0434,
+        "dual_preprocess_rectify_ms": 0.2274,
+        "dual_preprocess_total_ms": 0.3138,
+        "dual_preprocess_upload_ms": 0.0388,
+        "refinement_census_ms": 0.2326,
+        "refinement_guided_match_ms": 0.8598,
+        "refinement_lr_ms": 0.1707,
+        "refinement_metric_ms": 0.6068,
+        "refinement_planar_recovery_ms": 0.3698,
+        "refinement_total_ms": 2.2528,
+        "single_interval_upload_to_metric_gpu_ms": 3.8947,
+        "stage_sum_gpu_ms": 3.8493
+      },
+      "measured_valid_pixels": 240799,
+      "completed_valid_pixels": 267848,
+      "inferred_planar_pixels": 27049,
+      "power_w": {
+        "mean_w": 45.78,
+        "peak_w": 64.35,
+        "samples": 207
+      },
+      "energy_per_frame_mj": {
+        "gross_mj": 180.254,
+        "net_dynamic_mj": 121.469,
+        "idle_baseline_w": 14.93
+      }
+    },
+    "ultra_fast_with_planar": {
+      "profile": "ultra-fast",
+      "planar_recovery": true,
+      "frames": 180,
+      "warmup": 20,
+      "wall_s": 3.1741,
+      "gpu_combined_p50_ms": 3.1295,
+      "gpu_combined_p95_ms": 3.1489,
+      "gpu_combined_mean_ms": 3.1182,
+      "host_wall_p50_ms": 3.315,
+      "host_wall_p95_ms": 3.3652,
+      "equivalent_gpu_fps_p50": 319.5,
+      "serialized_gpu_time_fraction_30hz_pct": 9.39,
+      "serialized_gpu_time_fraction_60hz_pct": 18.78,
+      "stage_timings_ms": {
+        "coarse_total_ms": 1.1743,
+        "dual_preprocess_decode_ms": 0.0424,
+        "dual_preprocess_rectify_ms": 0.2379,
+        "dual_preprocess_total_ms": 0.3117,
+        "dual_preprocess_upload_ms": 0.0271,
+        "refinement_census_ms": 0.2296,
+        "refinement_guided_match_ms": 0.5067,
+        "refinement_lr_ms": 0.16,
+        "refinement_metric_ms": 0.3041,
+        "refinement_planar_recovery_ms": 0.3689,
+        "refinement_total_ms": 1.5801,
+        "single_interval_upload_to_metric_gpu_ms": 3.1371,
+        "stage_sum_gpu_ms": 3.0661
+      },
+      "measured_valid_pixels": 294942,
+      "completed_valid_pixels": 334828,
+      "inferred_planar_pixels": 39886,
+      "power_w": {
+        "mean_w": 42.12,
+        "peak_w": 57.38,
+        "samples": 197
+      },
+      "energy_per_frame_mj": {
+        "gross_mj": 131.815,
+        "net_dynamic_mj": 85.091,
+        "idle_baseline_w": 14.93
+      }
+    },
+    "ultra_fast_measured_only": {
+      "profile": "ultra-fast",
+      "planar_recovery": false,
+      "frames": 180,
+      "warmup": 20,
+      "wall_s": 2.6275,
+      "gpu_combined_p50_ms": 2.5544,
+      "gpu_combined_p95_ms": 2.5708,
+      "gpu_combined_mean_ms": 2.5513,
+      "host_wall_p50_ms": 2.7339,
+      "host_wall_p95_ms": 2.8239,
+      "equivalent_gpu_fps_p50": 391.5,
+      "serialized_gpu_time_fraction_30hz_pct": 7.66,
+      "serialized_gpu_time_fraction_60hz_pct": 15.33,
+      "stage_timings_ms": {
+        "coarse_total_ms": 1.1667,
+        "dual_preprocess_decode_ms": 0.0431,
+        "dual_preprocess_rectify_ms": 0.2655,
+        "dual_preprocess_total_ms": 0.356,
+        "dual_preprocess_upload_ms": 0.0394,
+        "refinement_census_ms": 0.2279,
+        "refinement_guided_match_ms": 0.4868,
+        "refinement_lr_ms": 0.1119,
+        "refinement_metric_ms": 0.1541,
+        "refinement_planar_recovery_ms": 0.0,
+        "refinement_total_ms": 0.9866,
+        "single_interval_upload_to_metric_gpu_ms": 2.5542,
+        "stage_sum_gpu_ms": 2.5093
+      },
+      "measured_valid_pixels": 294942,
+      "completed_valid_pixels": 294942,
+      "inferred_planar_pixels": 0,
+      "power_w": {
+        "mean_w": 40.59,
+        "peak_w": 53.69,
+        "samples": 163
+      },
+      "energy_per_frame_mj": {
+        "gross_mj": 103.683,
+        "net_dynamic_mj": 65.546,
+        "idle_baseline_w": 14.93
+      }
+    },
+    "speedup_ultra_fast_planar_vs_quality_planar": 1.258,
+    "speedup_ultra_fast_measured_vs_quality_planar": 1.541,
+    "metric_stage_reduction_ms": 0.3027,
+    "match_stage_reduction_ms": 0.3531,
+    "planar_stage_reduction_ms": 0.0009
+  },
+  "v10_2_near_field_d_coarse_64_evaluation": {
+    "d_coarse_32": {
+      "coarse_disparities": 32,
+      "full_res_disparities": 128,
+      "gpu_combined_p50_ms": 3.1737,
+      "gpu_left_sgm_p50_ms": 0.0,
+      "gpu_right_sgm_p50_ms": 0.0,
+      "near_field_roi_pixels": 227520,
+      "near_field_measured_valid_pixels": 45524,
+      "near_field_completed_valid_pixels": 48114,
+      "near_field_measured_d_gt_127_5_pixels": 0,
+      "near_field_completed_d_gt_127_5_pixels": 0,
+      "near_field_max_disparity_px": 126.332,
+      "near_field_min_depth_m": 0.499,
+      "vs_zncc_d_gt_127_5_overlap_pixels": 0,
+      "vs_zncc_d_gt_127_5_mae_px": null,
+      "vs_zncc_d_gt_127_5_bad_2px_pct": null
+    },
+    "d_coarse_64": {
+      "coarse_disparities": 64,
+      "full_res_disparities": 256,
+      "gpu_combined_p50_ms": 3.1377,
+      "gpu_left_sgm_p50_ms": 0.0,
+      "gpu_right_sgm_p50_ms": 0.0,
+      "near_field_roi_pixels": 227520,
+      "near_field_measured_valid_pixels": 35830,
+      "near_field_completed_valid_pixels": 37788,
+      "near_field_measured_d_gt_127_5_pixels": 23237,
+      "near_field_completed_d_gt_127_5_pixels": 25064,
+      "near_field_max_disparity_px": 254.0,
+      "near_field_min_depth_m": 0.2482,
+      "vs_zncc_d_gt_127_5_overlap_pixels": 1,
+      "vs_zncc_d_gt_127_5_mae_px": 107.901,
+      "vs_zncc_d_gt_127_5_bad_2px_pct": 100.0
+    }
+  },
+  "v10_4_duty_cycle_governor": {
+    "competing_workload_coexistence": {},
+    "governor_policy_table": {
+      "v9_3_baseline_3_52ms": {
+        "budget_3pct": {
+          "recommended_fps": 5,
+          "actual_gpu_duty_pct": 1.76,
+          "within_budget": true
+        },
+        "budget_5pct": {
+          "recommended_fps": 10,
+          "actual_gpu_duty_pct": 3.52,
+          "within_budget": true
+        },
+        "budget_10pct": {
+          "recommended_fps": 20,
+          "actual_gpu_duty_pct": 7.04,
+          "within_budget": true
+        },
+        "budget_20pct": {
+          "recommended_fps": 30,
+          "actual_gpu_duty_pct": 10.56,
+          "within_budget": true
+        }
+      },
+      "v10_quality_planar_3_55ms": {
+        "budget_3pct": {
+          "recommended_fps": 5,
+          "actual_gpu_duty_pct": 1.77,
+          "within_budget": true
+        },
+        "budget_5pct": {
+          "recommended_fps": 10,
+          "actual_gpu_duty_pct": 3.55,
+          "within_budget": true
+        },
+        "budget_10pct": {
+          "recommended_fps": 20,
+          "actual_gpu_duty_pct": 7.1,
+          "within_budget": true
+        },
+        "budget_20pct": {
+          "recommended_fps": 30,
+          "actual_gpu_duty_pct": 10.65,
+          "within_budget": true
+        }
+      },
+      "v10_ultra_fast_planar": {
+        "budget_3pct": {
+          "recommended_fps": 10,
+          "actual_gpu_duty_pct": 2.95,
+          "within_budget": true
+        },
+        "budget_5pct": {
+          "recommended_fps": 10,
+          "actual_gpu_duty_pct": 2.95,
+          "within_budget": true
+        },
+        "budget_10pct": {
+          "recommended_fps": 30,
+          "actual_gpu_duty_pct": 8.85,
+          "within_budget": true
+        },
+        "budget_20pct": {
+          "recommended_fps": 60,
+          "actual_gpu_duty_pct": 17.7,
+          "within_budget": true
+        }
+      },
+      "v10_ultra_fast_measured_only": {
+        "budget_3pct": {
+          "recommended_fps": 10,
+          "actual_gpu_duty_pct": 2.62,
+          "within_budget": true
+        },
+        "budget_5pct": {
+          "recommended_fps": 10,
+          "actual_gpu_duty_pct": 2.62,
+          "within_budget": true
+        },
+        "budget_10pct": {
+          "recommended_fps": 30,
+          "actual_gpu_duty_pct": 7.86,
+          "within_budget": true
+        },
+        "budget_20pct": {
+          "recommended_fps": 60,
+          "actual_gpu_duty_pct": 15.72,
+          "within_budget": true
+        }
+      }
+    }
+  }
+}

@@ -1,5 +1,10 @@
 #ifndef SF_REFINEMENT_OPS
 #define SF_REFINEMENT_OPS
+#if defined(SF_CPU_TARGET)
+#define SF_PRECISE
+#else
+#define SF_PRECISE precise
+#endif
 // Integer diagnostics are a stable wire contract. NaN is canonical on invalid outputs.
 static const uint REF_NO_PRIOR=1,REF_LOW_CONFIDENCE=2,REF_PRIOR_SPAN=4,REF_NONFINITE=8,REF_OUTSIDE=16,REF_UNSUPPORTED=32,REF_TOO_FEW=64,REF_AMBIGUOUS=128,REF_RESTRICTED=256,REF_GLOBAL=512,REF_MISSING_SUBPIXEL=1024,REF_LR_FAILED=2048;
 float refinement_invalid(){return asfloat(0x7fc00000);}
@@ -11,8 +16,8 @@ bool refinement_support(uint* support,uint width,uint height,uint x,uint y){if(x
 // Keep frozen SGM/Depth observation_target semantics unchanged.
 bool refinement_target(uint width,uint x,float disparity,bool right,out uint target){
     target=0;if(!isfinite(disparity)||abs(disparity)>float(width+1))return false;
-    precise float shifted=right?float(x)+disparity:float(x)-disparity;
-    precise float rounded=shifted+.5f;
+    SF_PRECISE float shifted=right?float(x)+disparity:float(x)-disparity;
+    SF_PRECISE float rounded=shifted+.5f;
     float coordinate=floor(rounded);
     if(coordinate<0||coordinate>=float(width))return false;
     target=uint(coordinate);return true;

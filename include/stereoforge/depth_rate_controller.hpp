@@ -189,4 +189,57 @@ public:
     }
 };
 
+// Cooperative GPU duty-cycle budget governor (Milestone v10.4).
+// Bounds rolling GPU processing time fraction <= max_duty_fraction (e.g. 0.05 = 5%)
+// while guaranteeing effective_fps >= min_fps.
+struct DutyCycleBudgetConfig {
+    double max_duty_fraction = 0.05;
+    std::uint32_t capture_fps = 60;
+    std::uint32_t min_fps = 5;
+    std::uint32_t max_fps = 60;
+    double ema_alpha = 0.20;
+    void validate() const {
+        if (!std::isfinite(max_duty_fraction) || max_duty_fraction <= 0.0 || max_duty_fraction > 1.0 ||
+            !supported_depth_rate(min_fps) || !supported_depth_rate(max_fps) || min_fps > max_fps ||
+            !capture_fps || capture_fps > 240 || !std::isfinite(ema_alpha) || ema_alpha <= 0.0 || ema_alpha > 1.0)
+            throw std::invalid_argument("invalid GPU duty-cycle budget configuration");
+    }
+};
+
+class DutyCycleBudgetGovernor {
+    DutyCycleBudgetConfig config_;
+    double ema_gpu_ms_ = 0.0;
+    bool initialized_ = false;
+    std::uint32_t recommended_fps_ = 60;
+    std::uint64_t observations_ = 0, budget_throttles_ = 0;
+public:
+    explicit DutyCycleBudgetGovernor(DutyCycleBudgetConfig config = {}) : config_(config) {
+        config_.validate();
+        recommended_fps_ = config_.max_fps;
+    }
+    std::uint32_t observe_gpu_ms(double frame_gpu_ms) {
+        if (!std::isfinite(frame_gpu_ms) || frame_gpu_ms < 0.0)
+            throw std::invalid_argument("GPU frame time must be finite and non-negative");
+        ++observations_;
+        ema_gpu_ms_ = initialized_
+            ? (config_.ema_alpha * frame_gpu_ms + (1.0 - config_.ema_alpha) * ema_gpu_ms_)
+            : frame_gpu_ms;
+        initialized_ = true;
+        std::uint32_t selected = config_.min_fps;
+        for (auto candidate : depth_rates) {
+            if (candidate < config_.min_fps || candidate > config_.max_fps) continue;
+            const double duty = (ema_gpu_ms_ * double(candidate)) / 1000.0;
+            if (duty <= config_.max_duty_fraction) selected = candidate;
+        }
+        if (selected < config_.max_fps) ++budget_throttles_;
+        recommended_fps_ = selected;
+        return recommended_fps_;
+    }
+    double ema_gpu_ms() const noexcept { return ema_gpu_ms_; }
+    double estimated_duty_fraction() const noexcept { return (ema_gpu_ms_ * double(recommended_fps_)) / 1000.0; }
+    std::uint32_t recommended_fps() const noexcept { return recommended_fps_; }
+    std::uint64_t observations() const noexcept { return observations_; }
+    std::uint64_t budget_throttles() const noexcept { return budget_throttles_; }
+};
+
 } // namespace stereoforge
