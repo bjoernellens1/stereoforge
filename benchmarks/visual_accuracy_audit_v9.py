@@ -43,6 +43,14 @@ def current_provenance_manifest() -> dict[str, Any]:
     git_head = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True, check=False
     ).stdout.strip()
+    git_head_ts = subprocess.run(
+        ["git", "show", "-s", "--format=%cI", "HEAD"], cwd=ROOT, capture_output=True, text=True, check=False
+    ).stdout.strip()
+    git_dirty = bool(
+        subprocess.run(
+            ["git", "status", "--porcelain"], cwd=ROOT, capture_output=True, text=True, check=False
+        ).stdout.strip()
+    )
     bins = {}
     for b in (
         DEPTH_BENCH,
@@ -60,6 +68,8 @@ def current_provenance_manifest() -> dict[str, Any]:
     shader_digest = hashlib.sha256(json.dumps(shaders, sort_keys=True).encode("utf-8")).hexdigest()
     return {
         "git_head_at_generation": git_head,
+        "git_head_commit_timestamp": git_head_ts,
+        "working_tree_dirty_at_generation": git_dirty,
         "binaries_sha256": bins,
         "compiled_spv_bundle_sha256": shader_digest,
         "compiled_spv_count": len(shaders),

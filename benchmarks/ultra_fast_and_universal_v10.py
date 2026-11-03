@@ -271,10 +271,35 @@ def evaluate_near_field_d_coarse_64() -> Dict[str, Any]:
         return results_by_d
 
 
-def benchmark_portable_slang_cpu_backend() -> Dict[str, Any]:
-    """Benchmarks the portable Slang-to-C++ CPU backend across 1280x720 and 640x360."""
-    backend = SlangCpuRefinementBackend()
-    out: Dict[str, Any] = {"library_path": str(backend.so_path), "resolutions": {}}
+def benchmark_portable_slang_cpu_backend(
+    *,
+    samples_per_block: int = 34,
+    num_blocks: int = 3,
+    warmup: int = 10,
+) -> Dict[str, Any]:
+    """Benchmarks the portable Slang-to-C++ CPU backend across 1280x720 and 640x360:
+    1. Controlled same-configuration A/B comparison (>= 100 samples across interleaved ABBA blocks)
+       comparing `target_isa="generic"` (portable `-march=x86-64`, unfused per-stage dispatches, owned outputs)
+       vs `target_isa="native"` (`-march=native`, fused OpenMP pipeline, workspace reuse) under identical
+       algorithmic parameters, inputs, thread counts, and bit-exact output parity verification.
+    2. Separate algorithmic profile comparison (`quality` `radius=4, fast_mode=False, ultra_fast=False`
+       vs `v11-fast` `radius=2, fast_mode=True, ultra_fast=True`) so compiler/dispatch speedups are never
+       confounded with algorithmic parameter changes.
+    3. Multi-thread scaling & resource governance (`num_threads` in `{1, 4, 8, 16}`: wall ms, CPU process time
+       ms per frame, and throughput per core).
+    """
+    import os
+
+    native_backend = SlangCpuRefinementBackend(target_isa="native", num_threads=16)
+    generic_backend = SlangCpuRefinementBackend(target_isa="generic", num_threads=16)
+    out: Dict[str, Any] = {
+        "library_path": str(native_backend.so_path),
+        "generic_library_path": str(generic_backend.so_path),
+        "samples_per_configuration": samples_per_block * num_blocks,
+        "interleaved_blocks": num_blocks,
+        "resolutions": {},
+        "thread_scaling_640x360": {},
+    }
 
     for label, (w, h, cw, ch, disp) in (
         ("640x360_mobile", (640, 360, 160, 90, 64)),
@@ -290,56 +315,8 @@ def benchmark_portable_slang_cpu_backend() -> Dict[str, Any]:
         c_disp = np.full(2 * cw * ch, 4.0, dtype=np.float32)
         c_conf = np.full(2 * cw * ch, 0.85, dtype=np.float32)
         c_val = np.ones(2 * cw * ch, dtype=np.uint32)
-
-        # Warmup
-        for _ in range(3):
-            backend.run_pipeline(
-                luma=luma,
-                support=support,
-                coarse_disparity=c_disp,
-                coarse_confidence=c_conf,
-                coarse_validity=c_val,
-                width=w,
-                height=h,
-                coarse_width=cw,
-                coarse_height=ch,
-                fx=520.0,
-                baseline=0.12,
-                principal_offset=0.0,
-                radius=2,
-                disparities=disp,
-                fast_mode=True,
-                ultra_fast=True,
-                planar_recovery=True,
-            )
-        samples_ms = []
-        res = None
-        for _ in range(9):
-            t0 = time.perf_counter()
-            res = backend.run_pipeline(
-                luma=luma,
-                support=support,
-                coarse_disparity=c_disp,
-                coarse_confidence=c_conf,
-                coarse_validity=c_val,
-                width=w,
-                height=h,
-                coarse_width=cw,
-                coarse_height=ch,
-                fx=520.0,
-                baseline=0.12,
-                principal_offset=0.0,
-                radius=2,
-                disparities=disp,
-                fast_mode=True,
-                ultra_fast=True,
-                planar_recovery=True,
-            )
-            samples_ms.append((time.perf_counter() - t0) * 1000.0)
-        samples_ms.sort()
         n0 = w * h
 
-        # Also benchmark the complete camera-to-depth Slang CPU pipeline (preprocess + coarse + depth + refinement)
         yuyv = np.empty((h, 2 * w, 2), dtype=np.uint8)
         yuyv[:, :w, 0] = left_luma.astype(np.uint8)
         yuyv[:, w:, 0] = right_luma.astype(np.uint8)
@@ -348,12 +325,201 @@ def benchmark_portable_slang_cpu_backend() -> Dict[str, Any]:
         my_t = np.tile(np.arange(h, dtype=np.float32)[:, None], (1, w))
         mx_c = np.tile((np.arange(cw, dtype=np.float32) + 0.5) * 4.0 - 0.5, (ch, 1))
         my_c = np.tile(((np.arange(ch, dtype=np.float32) + 0.5) * 4.0 - 0.5)[:, None], (1, cw))
+        t_maps = (mx_t, my_t, mx_t, my_t)
+        c_maps = (mx_c, my_c, mx_c, my_c)
 
-        for _ in range(3):
-            backend.run_full_camera_to_depth_pipeline(
+        # 1. Verify 100% bit-exact output parity between generic unfused and native fused under identical settings
+        ref_generic_q = generic_backend.run_pipeline(
+            luma=luma,
+            support=support,
+            coarse_disparity=c_disp,
+            coarse_confidence=c_conf,
+            coarse_validity=c_val,
+            width=w,
+            height=h,
+            coarse_width=cw,
+            coarse_height=ch,
+            fx=520.0,
+            baseline=0.12,
+            principal_offset=0.0,
+            radius=4,
+            disparities=disp,
+            fast_mode=False,
+            ultra_fast=False,
+            planar_recovery=True,
+            use_fused_dispatch=False,
+            borrow_workspace=False,
+        )
+        ref_native_q = native_backend.run_pipeline(
+            luma=luma,
+            support=support,
+            coarse_disparity=c_disp,
+            coarse_confidence=c_conf,
+            coarse_validity=c_val,
+            width=w,
+            height=h,
+            coarse_width=cw,
+            coarse_height=ch,
+            fx=520.0,
+            baseline=0.12,
+            principal_offset=0.0,
+            radius=4,
+            disparities=disp,
+            fast_mode=False,
+            ultra_fast=False,
+            planar_recovery=True,
+            use_fused_dispatch=True,
+            borrow_workspace=False,
+        )
+        ref_generic_fast = generic_backend.run_pipeline(
+            luma=luma,
+            support=support,
+            coarse_disparity=c_disp,
+            coarse_confidence=c_conf,
+            coarse_validity=c_val,
+            width=w,
+            height=h,
+            coarse_width=cw,
+            coarse_height=ch,
+            fx=520.0,
+            baseline=0.12,
+            principal_offset=0.0,
+            radius=2,
+            disparities=disp,
+            fast_mode=True,
+            ultra_fast=True,
+            planar_recovery=True,
+            use_fused_dispatch=False,
+            borrow_workspace=False,
+        )
+        ref_native_fast = native_backend.run_pipeline(
+            luma=luma,
+            support=support,
+            coarse_disparity=c_disp,
+            coarse_confidence=c_conf,
+            coarse_validity=c_val,
+            width=w,
+            height=h,
+            coarse_width=cw,
+            coarse_height=ch,
+            fx=520.0,
+            baseline=0.12,
+            principal_offset=0.0,
+            radius=2,
+            disparities=disp,
+            fast_mode=True,
+            ultra_fast=True,
+            planar_recovery=True,
+            use_fused_dispatch=True,
+            borrow_workspace=False,
+        )
+        full_generic = generic_backend.run_full_camera_to_depth_pipeline(
+            raw_yuyv=yuyv,
+            target_maps=t_maps,
+            coarse_maps=c_maps,
+            eye_width=w,
+            source_height=h,
+            stride_bytes=4 * w,
+            width=w,
+            height=h,
+            coarse_width=cw,
+            coarse_height=ch,
+            fx=520.0,
+            baseline=0.12,
+            principal_offset=0.0,
+            disparities=disp,
+            radius=2,
+            fast_mode=True,
+            ultra_fast=True,
+            planar_recovery=True,
+            use_fused_dispatch=False,
+            borrow_workspace=False,
+        )
+        full_native = native_backend.run_full_camera_to_depth_pipeline(
+            raw_yuyv=yuyv,
+            target_maps=t_maps,
+            coarse_maps=c_maps,
+            eye_width=w,
+            source_height=h,
+            stride_bytes=4 * w,
+            width=w,
+            height=h,
+            coarse_width=cw,
+            coarse_height=ch,
+            fx=520.0,
+            baseline=0.12,
+            principal_offset=0.0,
+            disparities=disp,
+            radius=2,
+            fast_mode=True,
+            ultra_fast=True,
+            planar_recovery=True,
+            use_fused_dispatch=True,
+            borrow_workspace=False,
+        )
+
+        same_cfg_bit_exact = bool(
+            np.array_equal(ref_generic_q["completed_validity"][:n0], ref_native_q["completed_validity"][:n0])
+            and np.array_equal(
+                ref_generic_q["completed_disparity"][:n0][ref_generic_q["completed_validity"][:n0] != 0],
+                ref_native_q["completed_disparity"][:n0][ref_native_q["completed_validity"][:n0] != 0],
+            )
+            and np.array_equal(ref_generic_fast["completed_validity"][:n0], ref_native_fast["completed_validity"][:n0])
+            and np.array_equal(full_generic["completed_validity"][:n0], full_native["completed_validity"][:n0])
+            and np.array_equal(
+                full_generic["completed_disparity"][:n0][full_generic["completed_validity"][:n0] != 0],
+                full_native["completed_disparity"][:n0][full_native["completed_validity"][:n0] != 0],
+            )
+        )
+
+        # Warmup all 4 controlled configurations
+        for _ in range(warmup):
+            generic_backend.run_pipeline(
+                luma=luma,
+                support=support,
+                coarse_disparity=c_disp,
+                coarse_confidence=c_conf,
+                coarse_validity=c_val,
+                width=w,
+                height=h,
+                coarse_width=cw,
+                coarse_height=ch,
+                fx=520.0,
+                baseline=0.12,
+                principal_offset=0.0,
+                radius=2,
+                disparities=disp,
+                fast_mode=True,
+                ultra_fast=True,
+                planar_recovery=True,
+                use_fused_dispatch=False,
+                borrow_workspace=False,
+            )
+            native_backend.run_pipeline(
+                luma=luma,
+                support=support,
+                coarse_disparity=c_disp,
+                coarse_confidence=c_conf,
+                coarse_validity=c_val,
+                width=w,
+                height=h,
+                coarse_width=cw,
+                coarse_height=ch,
+                fx=520.0,
+                baseline=0.12,
+                principal_offset=0.0,
+                radius=2,
+                disparities=disp,
+                fast_mode=True,
+                ultra_fast=True,
+                planar_recovery=True,
+                use_fused_dispatch=True,
+                borrow_workspace=True,
+            )
+            generic_backend.run_full_camera_to_depth_pipeline(
                 raw_yuyv=yuyv,
-                target_maps=(mx_t, my_t, mx_t, my_t),
-                coarse_maps=(mx_c, my_c, mx_c, my_c),
+                target_maps=t_maps,
+                coarse_maps=c_maps,
                 eye_width=w,
                 source_height=h,
                 stride_bytes=4 * w,
@@ -365,18 +531,207 @@ def benchmark_portable_slang_cpu_backend() -> Dict[str, Any]:
                 baseline=0.12,
                 principal_offset=0.0,
                 disparities=disp,
+                radius=2,
+                fast_mode=True,
+                ultra_fast=True,
+                planar_recovery=True,
+                use_fused_dispatch=False,
+                borrow_workspace=False,
             )
-        full_samples_ms = []
-        full_res = None
-        for _ in range(9):
+            native_backend.run_full_camera_to_depth_pipeline(
+                raw_yuyv=yuyv,
+                target_maps=t_maps,
+                coarse_maps=c_maps,
+                eye_width=w,
+                source_height=h,
+                stride_bytes=4 * w,
+                width=w,
+                height=h,
+                coarse_width=cw,
+                coarse_height=ch,
+                fx=520.0,
+                baseline=0.12,
+                principal_offset=0.0,
+                disparities=disp,
+                radius=2,
+                fast_mode=True,
+                ultra_fast=True,
+                planar_recovery=True,
+                use_fused_dispatch=True,
+                borrow_workspace=True,
+            )
+
+        # Interleaved ABBA blocks (>= 100 samples per configuration)
+        ref_generic_fast_ms: list[float] = []
+        ref_native_fast_owned_ms: list[float] = []
+        ref_native_fast_borrow_ms: list[float] = []
+        ref_native_quality_owned_ms: list[float] = []
+        full_generic_fast_ms: list[float] = []
+        full_native_fast_owned_ms: list[float] = []
+        full_native_fast_borrow_ms: list[float] = []
+
+        for blk in range(num_blocks):
+            order = [0, 1, 2, 3] if (blk % 2 == 0) else [3, 2, 1, 0]
+            for step in order:
+                if step == 0:
+                    for _ in range(samples_per_block):
+                        t0 = time.perf_counter()
+                        generic_backend.run_pipeline(
+                            luma=luma,
+                            support=support,
+                            coarse_disparity=c_disp,
+                            coarse_confidence=c_conf,
+                            coarse_validity=c_val,
+                            width=w,
+                            height=h,
+                            coarse_width=cw,
+                            coarse_height=ch,
+                            fx=520.0,
+                            baseline=0.12,
+                            principal_offset=0.0,
+                            radius=2,
+                            disparities=disp,
+                            fast_mode=True,
+                            ultra_fast=True,
+                            planar_recovery=True,
+                            use_fused_dispatch=False,
+                            borrow_workspace=False,
+                        )
+                        ref_generic_fast_ms.append((time.perf_counter() - t0) * 1000.0)
+                elif step == 1:
+                    for _ in range(samples_per_block):
+                        t0 = time.perf_counter()
+                        native_backend.run_pipeline(
+                            luma=luma,
+                            support=support,
+                            coarse_disparity=c_disp,
+                            coarse_confidence=c_conf,
+                            coarse_validity=c_val,
+                            width=w,
+                            height=h,
+                            coarse_width=cw,
+                            coarse_height=ch,
+                            fx=520.0,
+                            baseline=0.12,
+                            principal_offset=0.0,
+                            radius=2,
+                            disparities=disp,
+                            fast_mode=True,
+                            ultra_fast=True,
+                            planar_recovery=True,
+                            use_fused_dispatch=True,
+                            borrow_workspace=False,
+                        )
+                        ref_native_fast_owned_ms.append((time.perf_counter() - t0) * 1000.0)
+                        t0 = time.perf_counter()
+                        native_backend.run_pipeline(
+                            luma=luma,
+                            support=support,
+                            coarse_disparity=c_disp,
+                            coarse_confidence=c_conf,
+                            coarse_validity=c_val,
+                            width=w,
+                            height=h,
+                            coarse_width=cw,
+                            coarse_height=ch,
+                            fx=520.0,
+                            baseline=0.12,
+                            principal_offset=0.0,
+                            radius=2,
+                            disparities=disp,
+                            fast_mode=True,
+                            ultra_fast=True,
+                            planar_recovery=True,
+                            use_fused_dispatch=True,
+                            borrow_workspace=True,
+                        )
+                        ref_native_fast_borrow_ms.append((time.perf_counter() - t0) * 1000.0)
+                elif step == 2:
+                    for _ in range(samples_per_block):
+                        t0 = time.perf_counter()
+                        generic_backend.run_full_camera_to_depth_pipeline(
+                            raw_yuyv=yuyv,
+                            target_maps=t_maps,
+                            coarse_maps=c_maps,
+                            eye_width=w,
+                            source_height=h,
+                            stride_bytes=4 * w,
+                            width=w,
+                            height=h,
+                            coarse_width=cw,
+                            coarse_height=ch,
+                            fx=520.0,
+                            baseline=0.12,
+                            principal_offset=0.0,
+                            disparities=disp,
+                            radius=2,
+                            fast_mode=True,
+                            ultra_fast=True,
+                            planar_recovery=True,
+                            use_fused_dispatch=False,
+                            borrow_workspace=False,
+                        )
+                        full_generic_fast_ms.append((time.perf_counter() - t0) * 1000.0)
+                elif step == 3:
+                    for _ in range(samples_per_block):
+                        t0 = time.perf_counter()
+                        native_backend.run_full_camera_to_depth_pipeline(
+                            raw_yuyv=yuyv,
+                            target_maps=t_maps,
+                            coarse_maps=c_maps,
+                            eye_width=w,
+                            source_height=h,
+                            stride_bytes=4 * w,
+                            width=w,
+                            height=h,
+                            coarse_width=cw,
+                            coarse_height=ch,
+                            fx=520.0,
+                            baseline=0.12,
+                            principal_offset=0.0,
+                            disparities=disp,
+                            radius=2,
+                            fast_mode=True,
+                            ultra_fast=True,
+                            planar_recovery=True,
+                            use_fused_dispatch=True,
+                            borrow_workspace=False,
+                        )
+                        full_native_fast_owned_ms.append((time.perf_counter() - t0) * 1000.0)
+                        t0 = time.perf_counter()
+                        native_backend.run_full_camera_to_depth_pipeline(
+                            raw_yuyv=yuyv,
+                            target_maps=t_maps,
+                            coarse_maps=c_maps,
+                            eye_width=w,
+                            source_height=h,
+                            stride_bytes=4 * w,
+                            width=w,
+                            height=h,
+                            coarse_width=cw,
+                            coarse_height=ch,
+                            fx=520.0,
+                            baseline=0.12,
+                            principal_offset=0.0,
+                            disparities=disp,
+                            radius=2,
+                            fast_mode=True,
+                            ultra_fast=True,
+                            planar_recovery=True,
+                            use_fused_dispatch=True,
+                            borrow_workspace=True,
+                        )
+                        full_native_fast_borrow_ms.append((time.perf_counter() - t0) * 1000.0)
+
+        # Also measure quality (r=4, fast_mode=False, ultra_fast=False) on native backend to separate algorithmic speedup
+        for _ in range(samples_per_block):
             t0 = time.perf_counter()
-            full_res = backend.run_full_camera_to_depth_pipeline(
-                raw_yuyv=yuyv,
-                target_maps=(mx_t, my_t, mx_t, my_t),
-                coarse_maps=(mx_c, my_c, mx_c, my_c),
-                eye_width=w,
-                source_height=h,
-                stride_bytes=4 * w,
+            native_backend.run_pipeline(
+                luma=luma,
+                support=support,
+                coarse_disparity=c_disp,
+                coarse_confidence=c_conf,
+                coarse_validity=c_val,
                 width=w,
                 height=h,
                 coarse_width=cw,
@@ -384,27 +739,113 @@ def benchmark_portable_slang_cpu_backend() -> Dict[str, Any]:
                 fx=520.0,
                 baseline=0.12,
                 principal_offset=0.0,
+                radius=4,
                 disparities=disp,
+                fast_mode=False,
+                ultra_fast=False,
+                planar_recovery=True,
+                use_fused_dispatch=True,
+                borrow_workspace=False,
             )
-            full_samples_ms.append((time.perf_counter() - t0) * 1000.0)
-        full_samples_ms.sort()
+            ref_native_quality_owned_ms.append((time.perf_counter() - t0) * 1000.0)
+
+        def _p50(arr: list[float]) -> float:
+            s = sorted(arr)
+            return float(s[len(s) // 2])
+
+        p50_ref_gen = _p50(ref_generic_fast_ms)
+        p50_ref_nat_owned = _p50(ref_native_fast_owned_ms)
+        p50_ref_nat_borrow = _p50(ref_native_fast_borrow_ms)
+        p50_ref_qual_owned = _p50(ref_native_quality_owned_ms)
+        p50_full_gen = _p50(full_generic_fast_ms)
+        p50_full_nat_owned = _p50(full_native_fast_owned_ms)
+        p50_full_nat_borrow = _p50(full_native_fast_borrow_ms)
 
         out["resolutions"][label] = {
             "width": w,
             "height": h,
-            "cpu_p50_ms": round(float(samples_ms[len(samples_ms) // 2]), 2),
-            "cpu_mean_ms": round(float(np.mean(samples_ms)), 2),
-            "equivalent_cpu_fps": round(1000.0 / float(samples_ms[len(samples_ms) // 2]), 2),
-            "valid_stereo_pixels": int(np.sum(res["provenance"][:n0] == 1)),
-            "full_camera_to_depth_cpu_p50_ms": round(float(full_samples_ms[len(full_samples_ms) // 2]), 2),
-            "full_camera_to_depth_cpu_mean_ms": round(float(np.mean(full_samples_ms)), 2),
-            "full_camera_to_depth_equivalent_cpu_fps": round(
-                1000.0 / float(full_samples_ms[len(full_samples_ms) // 2]), 2
-            ),
+            "samples_per_variant": len(ref_native_fast_owned_ms),
+            "controlled_same_config_bit_exact_parity": same_cfg_bit_exact,
+            "cpu_p50_ms": round(p50_ref_nat_borrow, 2),
+            "cpu_owned_output_p50_ms": round(p50_ref_nat_owned, 2),
+            "cpu_generic_unfused_same_config_p50_ms": round(p50_ref_gen, 2),
+            "cpu_quality_r4_native_owned_p50_ms": round(p50_ref_qual_owned, 2),
+            "controlled_compiler_and_fusion_speedup_owned": round(p50_ref_gen / p50_ref_nat_owned, 2),
+            "controlled_compiler_and_fusion_speedup_borrowed": round(p50_ref_gen / p50_ref_nat_borrow, 2),
+            "algorithmic_r4_to_r2_ultra_speedup_on_native": round(p50_ref_qual_owned / p50_ref_nat_owned, 2),
+            "cpu_mean_ms": round(float(np.mean(ref_native_fast_borrow_ms)), 2),
+            "equivalent_cpu_fps": round(1000.0 / p50_ref_nat_borrow, 2),
+            "valid_stereo_pixels": int(np.sum(ref_native_fast["provenance"][:n0] == 1)),
+            "valid_stereo_pixels_quality_r4": int(np.sum(ref_native_q["provenance"][:n0] == 1)),
+            "full_camera_to_depth_cpu_p50_ms": round(p50_full_nat_borrow, 2),
+            "full_camera_to_depth_owned_output_p50_ms": round(p50_full_nat_owned, 2),
+            "full_camera_to_depth_generic_unfused_same_config_p50_ms": round(p50_full_gen, 2),
+            "full_camera_to_depth_controlled_speedup_owned": round(p50_full_gen / p50_full_nat_owned, 2),
+            "full_camera_to_depth_controlled_speedup_borrowed": round(p50_full_gen / p50_full_nat_borrow, 2),
+            "full_camera_to_depth_cpu_mean_ms": round(float(np.mean(full_native_fast_borrow_ms)), 2),
+            "full_camera_to_depth_equivalent_cpu_fps": round(1000.0 / p50_full_nat_borrow, 2),
             "full_camera_to_depth_valid_completed_pixels": int(
-                np.sum(full_res["completed_validity"][:n0] != 0)
+                np.sum(full_native["completed_validity"][:n0] != 0)
             ),
         }
+
+        if label == "640x360_mobile":
+            for nt in (1, 4, 8, 16):
+                for _ in range(4):
+                    native_backend.run_full_camera_to_depth_pipeline(
+                        raw_yuyv=yuyv,
+                        target_maps=t_maps,
+                        coarse_maps=c_maps,
+                        eye_width=w,
+                        source_height=h,
+                        stride_bytes=4 * w,
+                        width=w,
+                        height=h,
+                        coarse_width=cw,
+                        coarse_height=ch,
+                        fx=520.0,
+                        baseline=0.12,
+                        principal_offset=0.0,
+                        disparities=disp,
+                        num_threads=nt,
+                        borrow_workspace=False,
+                    )
+                w_samples = []
+                c_samples = []
+                for _ in range(25):
+                    tw0 = time.perf_counter()
+                    tc0 = time.process_time()
+                    native_backend.run_full_camera_to_depth_pipeline(
+                        raw_yuyv=yuyv,
+                        target_maps=t_maps,
+                        coarse_maps=c_maps,
+                        eye_width=w,
+                        source_height=h,
+                        stride_bytes=4 * w,
+                        width=w,
+                        height=h,
+                        coarse_width=cw,
+                        coarse_height=ch,
+                        fx=520.0,
+                        baseline=0.12,
+                        principal_offset=0.0,
+                        disparities=disp,
+                        num_threads=nt,
+                        borrow_workspace=False,
+                    )
+                    c_samples.append((time.process_time() - tc0) * 1000.0)
+                    w_samples.append((time.perf_counter() - tw0) * 1000.0)
+                w_p50 = sorted(w_samples)[len(w_samples) // 2]
+                c_p50 = sorted(c_samples)[len(c_samples) // 2]
+                fps = 1000.0 / w_p50
+                out["thread_scaling_640x360"][f"threads_{nt}"] = {
+                    "num_threads": nt,
+                    "wall_p50_ms": round(float(w_p50), 2),
+                    "cpu_process_time_p50_ms": round(float(c_p50), 2),
+                    "equivalent_fps": round(float(fps), 2),
+                    "fps_per_thread": round(float(fps / nt), 2),
+                }
+
     return out
 
 

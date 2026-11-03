@@ -103,9 +103,15 @@ def test_v11_qualification_and_coarse_replacement_contracts() -> None:
     assert gate["synthetic_5_scene_good_2px_delta_pp_vs_A0"] >= -0.50
     assert gate["synthetic_5_scene_bad_2px_delta_pp_vs_A0"] <= 0.25
 
-    cpu_640 = data["v11_3_complete_camera_to_depth_slang_cpu_backend"]["resolutions"]["640x360_mobile"]
+    cpu_sec = data["v11_3_complete_camera_to_depth_slang_cpu_backend"]
+    assert cpu_sec["samples_per_configuration"] >= 100
+    assert cpu_sec["interleaved_blocks"] >= 3
+    cpu_640 = cpu_sec["resolutions"]["640x360_mobile"]
+    assert cpu_640["controlled_same_config_bit_exact_parity"] is True
     assert cpu_640["full_camera_to_depth_cpu_p50_ms"] <= 10.0
     assert cpu_640["full_camera_to_depth_valid_completed_pixels"] > 180000
+    assert "thread_scaling_640x360" in cpu_sec
+    assert "git_head_commit_timestamp" in data["provenance"]
 
 
 def test_slang_cpu_full_camera_to_depth_pipeline_end_to_end() -> None:
