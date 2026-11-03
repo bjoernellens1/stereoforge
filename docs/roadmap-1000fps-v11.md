@@ -100,6 +100,6 @@ Implemented in `python/stereoforge/shaders/daxa/stereo_hierarchical.slang` (`coa
 
 ### 3. v11.3 Complete Camera-to-Depth Slang-to-C++ CPU Pipeline
 
-Extended `python/stereoforge/slang_cpu_backend.py` (`SlangCpuRefinementBackend.run_full_camera_to_depth_pipeline`) to compile and execute all **14 production shader entrypoints** across `preprocess.slang`, `stereo_hierarchical.slang`, `depth.slang`, and `refinement.slang` via `slangc -target cpp -DSF_CPU_TARGET=1` and OpenMP:
-- **`640×360` (`mobile-balanced`) full YUYV-to-completed-depth CPU latency:** `30.35 ms` `p50` (`32.95 FPS`).
-- **`1280×720` (`full`) full YUYV-to-completed-depth CPU latency:** `118.85 ms` `p50` (`8.41 FPS`).
+Extended `python/stereoforge/slang_cpu_backend.py` (`SlangCpuRefinementBackend.run_full_camera_to_depth_pipeline`) to compile and execute all **14 production shader entrypoints** across `preprocess.slang`, `stereo_hierarchical.slang`, `depth.slang`, and `refinement.slang` via `slangc -target cpp -DSF_CPU_TARGET=1` and `g++ -O3 -march=native -mtune=native -funroll-loops -fno-semantic-interposition` (hardware `POPCNT`, `AVX2`/`AVX-512`, `always_inline`/`flatten` group loops with `#pragma GCC ivdep`, 16-core fused single-OpenMP-region execution, and preallocated host workspaces):
+- **`640×360` (`mobile-balanced`):** **`3.99 ms` `p50` (`250.58 FPS`)** refinement-only; **`5.94 ms` `p50` (`168.21 FPS`)** full YUYV-to-completed-depth pipeline.
+- **`1280×720` (`full`):** **`15.55 ms` `p50` (`64.29 FPS`)** refinement-only; **`24.79 ms` `p50` (`40.34 FPS`)** full YUYV-to-completed-depth pipeline.

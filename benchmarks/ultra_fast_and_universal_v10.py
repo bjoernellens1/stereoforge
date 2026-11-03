@@ -292,26 +292,29 @@ def benchmark_portable_slang_cpu_backend() -> Dict[str, Any]:
         c_val = np.ones(2 * cw * ch, dtype=np.uint32)
 
         # Warmup
-        backend.run_pipeline(
-            luma=luma,
-            support=support,
-            coarse_disparity=c_disp,
-            coarse_confidence=c_conf,
-            coarse_validity=c_val,
-            width=w,
-            height=h,
-            coarse_width=cw,
-            coarse_height=ch,
-            fx=520.0,
-            baseline=0.12,
-            principal_offset=0.0,
-            disparities=disp,
-            ultra_fast=True,
-            planar_recovery=True,
-        )
+        for _ in range(3):
+            backend.run_pipeline(
+                luma=luma,
+                support=support,
+                coarse_disparity=c_disp,
+                coarse_confidence=c_conf,
+                coarse_validity=c_val,
+                width=w,
+                height=h,
+                coarse_width=cw,
+                coarse_height=ch,
+                fx=520.0,
+                baseline=0.12,
+                principal_offset=0.0,
+                radius=2,
+                disparities=disp,
+                fast_mode=True,
+                ultra_fast=True,
+                planar_recovery=True,
+            )
         samples_ms = []
         res = None
-        for _ in range(5):
+        for _ in range(9):
             t0 = time.perf_counter()
             res = backend.run_pipeline(
                 luma=luma,
@@ -326,7 +329,9 @@ def benchmark_portable_slang_cpu_backend() -> Dict[str, Any]:
                 fx=520.0,
                 baseline=0.12,
                 principal_offset=0.0,
+                radius=2,
                 disparities=disp,
+                fast_mode=True,
                 ultra_fast=True,
                 planar_recovery=True,
             )
@@ -344,25 +349,26 @@ def benchmark_portable_slang_cpu_backend() -> Dict[str, Any]:
         mx_c = np.tile((np.arange(cw, dtype=np.float32) + 0.5) * 4.0 - 0.5, (ch, 1))
         my_c = np.tile(((np.arange(ch, dtype=np.float32) + 0.5) * 4.0 - 0.5)[:, None], (1, cw))
 
-        backend.run_full_camera_to_depth_pipeline(
-            raw_yuyv=yuyv,
-            target_maps=(mx_t, my_t, mx_t, my_t),
-            coarse_maps=(mx_c, my_c, mx_c, my_c),
-            eye_width=w,
-            source_height=h,
-            stride_bytes=4 * w,
-            width=w,
-            height=h,
-            coarse_width=cw,
-            coarse_height=ch,
-            fx=520.0,
-            baseline=0.12,
-            principal_offset=0.0,
-            disparities=disp,
-        )
+        for _ in range(3):
+            backend.run_full_camera_to_depth_pipeline(
+                raw_yuyv=yuyv,
+                target_maps=(mx_t, my_t, mx_t, my_t),
+                coarse_maps=(mx_c, my_c, mx_c, my_c),
+                eye_width=w,
+                source_height=h,
+                stride_bytes=4 * w,
+                width=w,
+                height=h,
+                coarse_width=cw,
+                coarse_height=ch,
+                fx=520.0,
+                baseline=0.12,
+                principal_offset=0.0,
+                disparities=disp,
+            )
         full_samples_ms = []
         full_res = None
-        for _ in range(5):
+        for _ in range(9):
             t0 = time.perf_counter()
             full_res = backend.run_full_camera_to_depth_pipeline(
                 raw_yuyv=yuyv,

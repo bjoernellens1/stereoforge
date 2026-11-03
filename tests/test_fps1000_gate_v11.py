@@ -104,7 +104,7 @@ def test_v11_qualification_and_coarse_replacement_contracts() -> None:
     assert gate["synthetic_5_scene_bad_2px_delta_pp_vs_A0"] <= 0.25
 
     cpu_640 = data["v11_3_complete_camera_to_depth_slang_cpu_backend"]["resolutions"]["640x360_mobile"]
-    assert cpu_640["full_camera_to_depth_cpu_p50_ms"] <= 35.0
+    assert cpu_640["full_camera_to_depth_cpu_p50_ms"] <= 10.0
     assert cpu_640["full_camera_to_depth_valid_completed_pixels"] > 180000
 
 

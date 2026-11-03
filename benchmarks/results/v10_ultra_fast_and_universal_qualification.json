@@ -2,7 +2,7 @@
   "schema": "stereoforge.v10.ultra_fast_and_universal_qualification.v1",
   "generated_at_utc": "2026-11-03T19:59:27Z",
   "provenance": {
-    "git_head_at_generation": "4ea34d59cd5d29eb69e4a55a911125575fe72f46",
+    "git_head_at_generation": "35b542932b9efdfd771a4230871bce3f51dda1ee",
     "binaries_sha256": {
       "daxa_depth_benchmark": "5d28fc989b4bd3b4983a3f1fcd5a1e383d12260efcf849c399210182b7e4129f",
       "daxa_refinement_benchmark": "1a1f730fca8b2ad48e8942c18364cb21f396166e66ef23028bd7c1407ee85b93",
@@ -204,6 +204,35 @@
           "full_camera_to_depth_cpu_p50_ms": 89.59,
           "full_camera_to_depth_cpu_mean_ms": 88.74,
           "full_camera_to_depth_equivalent_cpu_fps": 11.16,
+          "full_camera_to_depth_valid_completed_pixels": 893353
+        }
+      }
+    },
+    "cpu_performance_benchmarks": {
+      "library_path": "/tmp/stereoforge_slang_cpu_cache/libstereoforge_slang_cpu_8a779465d1083ed9.so",
+      "resolutions": {
+        "640x360_mobile": {
+          "width": 640,
+          "height": 360,
+          "cpu_p50_ms": 3.99,
+          "cpu_mean_ms": 4.28,
+          "equivalent_cpu_fps": 250.58,
+          "valid_stereo_pixels": 216139,
+          "full_camera_to_depth_cpu_p50_ms": 5.94,
+          "full_camera_to_depth_cpu_mean_ms": 6.1,
+          "full_camera_to_depth_equivalent_cpu_fps": 168.21,
+          "full_camera_to_depth_valid_completed_pixels": 216142
+        },
+        "1280x720_full": {
+          "width": 1280,
+          "height": 720,
+          "cpu_p50_ms": 15.55,
+          "cpu_mean_ms": 17.48,
+          "equivalent_cpu_fps": 64.29,
+          "valid_stereo_pixels": 893350,
+          "full_camera_to_depth_cpu_p50_ms": 24.79,
+          "full_camera_to_depth_cpu_mean_ms": 24.82,
+          "full_camera_to_depth_equivalent_cpu_fps": 40.34,
           "full_camera_to_depth_valid_completed_pixels": 893353
         }
       }
