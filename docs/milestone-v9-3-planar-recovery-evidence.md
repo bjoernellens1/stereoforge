@@ -37,11 +37,11 @@ Evaluated across `N = 5` interleaved trials (`120` measured frames + `20` warmup
 
 | Dual-Preprocess + 4× Refinement Pipeline (`1280×720`, `5 × 120` Interleaved Frames) | Median Trial GPU Span `p50 / p95 / p99` (`FPS`) | 5-Trial `p95` Mean ± Std (`All 5 <= 4.167 ms`) | Stage-Sum GPU `p50 / p95` | Host Wall `p50 / p95` | `dual_preprocess` GPU | `coarse` GPU | `refinement_metric` GPU | `refinement_planar` GPU `p50` | 30-Plane Bit-Exact | Vulkan Validation Errors |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :---: | ---: |
-| `dual4x_selective_repair_only` (`--planar-recovery 0`) | **`3.043 / 3.080 / 3.104 ms` (`328.7 FPS`)** | `3.071 ± 0.015 ms` (**`5/5 true`**) | `2.992 / 3.012 ms` | `3.282 / 3.384 ms` | `0.343 ms` | `1.155 ms` | `0.370 ms` | `0.000 ms` | `true` | `0` |
-| **`dual4x_selective_repair_plus_planar` (`--planar-recovery 1`, default `a=10, 3×3 affine`)** | **`3.622 / 3.658 / 3.706 ms` (`276.1 FPS`)** | **`3.649 ± 0.012 ms` (`5/5 true`)** | **`3.573 / 3.597 ms`** | **`3.878 / 4.014 ms`** | **`0.308 ms`** | **`1.178 ms`** | **`0.621 ms`** | **`0.362 ms` (`2.38×` faster vs. `0.861 ms`)** | **`true`** | **`0`** |
+| `dual4x_selective_repair_only` (`--planar-recovery 0`) | **`3.048 / 3.084 / 3.141 ms` (`328.0 FPS`)** | `3.086 ± 0.018 ms` (**`5/5 true`**) | `3.000 / 3.022 ms` | `3.295 / 3.373 ms` | `0.334 ms` | `1.174 ms` | `0.382 ms` | `0.000 ms` | `true` | `0` |
+| **`dual4x_selective_repair_plus_planar` (`--planar-recovery 1`, default `a=10, 3×3 affine`)** | **`3.636 / 3.689 / 3.750 ms` (`275.0 FPS`)** | **`3.689 ± 0.012 ms` (`5/5 true`)** | **`3.567 / 3.594 ms`** | **`3.889 / 3.969 ms`** | **`0.316 ms`** | **`1.181 ms`** | **`0.618 ms`** | **`0.361 ms` (`2.38×` faster vs. `0.861 ms`)** | **`true`** | **`0`** |
 
-- **5-Trial Interleaved `gpu_combined_queue_span_ms.p95` Distribution (`dual4x_selective_repair_plus_planar`):** `[3.6310, 3.6595, 3.6379, 3.6599, 3.6584] ms` (`mean = 3.6493 ms`, `std = 0.0124 ms`, **`508 µs` safety margin below `4.167 ms`**, with even `p99 = 3.706 ms` and `host_wall.p95 = 4.014 ms` passing `<= 4.167 ms` across all 5 trials).
-- **5-Trial Interleaved `gpu_planar_recovery_ms.p50` Distribution:** `[0.3597, 0.3559, 0.3611, 0.3617, 0.3622] ms` (down from `0.861 ms` via coarse-first workgroup early-out, shared-memory tile caching, and one-time zero initialization of `AgeNs` / `CompletedAgeNs`).
+- **5-Trial Interleaved `gpu_combined_queue_span_ms.p95` Distribution (`dual4x_selective_repair_plus_planar`):** `[3.6990, 3.6692, 3.7042, 3.6888, 3.6818] ms` (`mean = 3.6886 ms`, `std = 0.0124 ms`, **`478 µs` safety margin below `4.167 ms`**, with even `p99 = 3.750 ms` and `host_wall.p95 = 3.969 ms` passing `<= 4.167 ms` across all 5 trials).
+- **5-Trial Interleaved `gpu_planar_recovery_ms.p50` Distribution:** `[0.3610, 0.3608, 0.3628, 0.3611, 0.3633] ms` (down from `0.861 ms` via coarse-first workgroup early-out, shared-memory tile caching, and one-time zero initialization of `AgeNs` / `CompletedAgeNs`).
 
 ---
 
@@ -100,6 +100,6 @@ Concurrent publisher (`--planar-recovery 1 --verify-payload-checksum --thread-cp
 
 | ROS 2 4-Topic Delivery Run (`180` Measured Frames @ `60 Hz`, `KeepLast(16)`) | Capture / Publish / Receive FPS | Published (`depth / comp_depth / comp_prov / rgb`) | Received (`depth / comp_depth / comp_prov / rgb`) | Synchronized 4-Topic Quads | 64-Bit FNV-1a Checksum Matches (`4 × 180`) | Queue / Slot Drops | Inferred Planar Gain (`p50 / p95 px`) | Host-Ingress to Subscriber E2E `p50 / p95` |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| **`live_physical_zed2_camera_60hz_180f` (`--source camera`)** | **`60.0 / 59.3 / 59.6 FPS`** | **`180 / 180 / 180 / 180`** | **`180 / 180 / 180 / 180` (`100%`)** | **`180 / 180`** | **`720 / 720` (`0` mismatches)** | **`0 / 0`** | **`+10,718 / +11,450 px`** | **`6.934 / 17.116 ms`** |
-| `deterministic_replay_180f` (`--source replay`) | `60.0 / 98.4 / 98.4 FPS` | `180 / 180 / 180 / 180` | `180 / 180 / 180 / 180` (`100%`) | `180 / 180` | `720 / 720` (`0` mismatches) | `0 / 0` | `+24,425 / +24,804 px` | — (replay) |
+| **`live_physical_zed2_camera_60hz_180f` (`--source camera`)** | **`60.0 / 59.3 / 59.6 FPS`** | **`180 / 180 / 180 / 180`** | **`180 / 180 / 180 / 180` (`100%`)** | **`180 / 180`** | **`720 / 720` (`0` mismatches)** | **`0 / 0`** | **`+10,941 / +11,599 px`** | **`7.098 / 17.317 ms`** |
+| `deterministic_replay_180f` (`--source replay`) | `60.0 / 127.0 / 128.8 FPS` | `180 / 180 / 180 / 180` | `180 / 180 / 180 / 180` (`100%`) | `180 / 180` | `720 / 720` (`0` mismatches) | `0 / 0` | `+23,848 / +24,041 px` | — (replay) |
 
