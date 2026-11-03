@@ -149,9 +149,23 @@ def test_v93_qualification_artifact_contract():
     assert doc["provenance_enum_contract"]["PLANAR_INFERRED"] == 6
     assert doc["provenance_enum_contract"]["REPROJECTED"] == 2
     assert doc["provenance_enum_contract"]["planar_never_collides_with_reprojected"] is True
-    assert doc["gpu_240fps_qualification"]["dual4x_selective_repair_plus_planar"]["meets_240fps_4_167ms_gpu_p50"] is True
-    assert doc["gpu_240fps_qualification"]["dual4x_selective_repair_plus_planar"]["meets_240fps_4_167ms_gpu_p95"] is True
-    assert doc["gpu_240fps_qualification"]["dual4x_selective_repair_plus_planar"]["validation_errors_after_teardown"] == 0
+    gpu_plan = doc["gpu_240fps_qualification"]["dual4x_selective_repair_plus_planar"]
+    assert gpu_plan["meets_240fps_4_167ms_gpu_p50"] is True
+    assert gpu_plan["meets_240fps_4_167ms_gpu_p95"] is True
+    assert gpu_plan["meets_240fps_4_167ms_gpu_p99"] is True
+    assert gpu_plan["interleaved_trials_count"] == 5
+    assert gpu_plan["interleaved_trial_distributions"]["all_trials_meet_240fps_gpu_p95"] is True
+    assert gpu_plan["gpu_planar_recovery_ms"]["p50"] <= 0.45
+    assert gpu_plan["validation_errors_after_teardown"] == 0
     assert doc["canonical_5scene_720p_per_scene_inferred_cohorts"]["occlusion_boundaries"]["independent_4x_planar_inferred_prov6"]["inferred_pixels"] == 0
     assert doc["canonical_5scene_720p_per_scene_inferred_cohorts"]["low_texture_surface"]["independent_4x_planar_inferred_prov6"]["bad_1px_pct"] == 0.0
+    desk_def = doc["desk_scene_gpu_ablation"]["v93_planar_a10_affine3x3_default"]
+    assert desk_def["measured_plane_bit_exact_with_nonplanar"] is True
+    assert "independent_zncc_reference_planes" in desk_def
+    assert "consistency_to_measured_planes" in desk_def
+    for pkey in ("upright_apriltag_target", "charuco_board_inrange", "horizontal_desk_plane_clean"):
+        assert desk_def["independent_zncc_reference_planes"][pkey]["reference_kind"] == "independent_multiscale_zncc_epipolar_ransac_plane"
+        assert desk_def["consistency_to_measured_planes"][pkey]["reference_kind"] == "self_consistency_to_measured_stereo_ransac_plane"
+        assert desk_def["independent_zncc_reference_planes"][pkey]["inferred_prov6"]["pixels"] > 0
+        assert desk_def["consistency_to_measured_planes"][pkey]["inferred_prov6"]["pixels"] > 0
 

@@ -16,8 +16,14 @@ inline nlohmann::json ros_delivery_event_json(const RosDeliveryTraceRecord& r,
     using nlohmann::json;
     if(role!="publisher" && role!="subscriber")throw std::invalid_argument("invalid trace role");
     if((role=="publisher")!=(r.kind==RosDeliveryTraceKind::Published))throw std::invalid_argument("trace role/kind mismatch");
-    if(r.output!=RosDeliveryOutput::Depth && r.output!=RosDeliveryOutput::Rgb)throw std::invalid_argument("invalid trace output");
-    const char* output=r.output==RosDeliveryOutput::Depth?"depth":"rgb";
+    const char* output=nullptr;
+    switch(r.output){
+        case RosDeliveryOutput::Depth: output="depth"; break;
+        case RosDeliveryOutput::Rgb: output="rgb"; break;
+        case RosDeliveryOutput::CompletedDepth: output="completed_depth"; break;
+        case RosDeliveryOutput::CompletedProvenance: output="completed_provenance"; break;
+        default: throw std::invalid_argument("invalid trace output");
+    }
     json e={{"schema","stereoforge.ros_delivery_event.v1"},{"kind",role=="publisher"?"published":"received"},
             {"run_id",run_id},{"role",role},{"at_ns",r.at_ns},{"output",output},{"mapped_capture_ns",r.mapped_capture_ns}};
     if(role=="publisher") {

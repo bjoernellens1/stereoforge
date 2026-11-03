@@ -1,5 +1,7 @@
 """Launch the native StereoForge ROS 2 image publisher."""
 
+import os
+import sys
 from pathlib import Path
 
 from launch import LaunchDescription
@@ -25,6 +27,7 @@ _OPTIONAL_VALUE_ARGUMENTS = (
     ("selective_repair", "--selective-repair"),
     ("planar_recovery", "--planar-recovery"),
     ("completed_depth_topic", "--completed-depth-topic"),
+    ("completed_provenance_topic", "--completed-provenance-topic"),
     ("device_id", "--device-id"),
     ("device_serial", "--device-serial"),
     ("depth_topic", "--depth-topic"),
@@ -40,7 +43,28 @@ def _as_bool(value):
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def ensure_zed2_awake_and_prepare_trace(repo_root: Path, source: str, trace_path_str: str) -> None:
+    """Wake ZED 2 from USB autosuspend if source=camera, and remove stale /tmp trace files."""
+    trace_path = Path(trace_path_str)
+    try:
+        if trace_path.exists() and trace_path.resolve().is_relative_to(Path("/tmp")):
+            trace_path.unlink()
+    except OSError:
+        pass
+
+    if source == "camera":
+        if str(repo_root) not in sys.path:
+            sys.path.insert(0, str(repo_root))
+        try:
+            from benchmarks.live_and_e2e_qualification_v9 import ensure_zed2_camera_active
+
+            ensure_zed2_camera_active(force_reset=False)
+        except Exception:
+            pass
+
+
 def _launch_publisher(context):
+    repo_root = Path(__file__).resolve().parents[2]
     values = {
         name: LaunchConfiguration(name).perform(context)
         for name in (
@@ -60,6 +84,19 @@ def _launch_publisher(context):
             "zenoh_session_config",
         )
     }
+    if values["pipeline"] != "full-sgm" and not values["coarse_manifest"]:
+        default_coarse = (
+            repo_root
+            / "artifacts"
+            / "depth-video"
+            / "v8-review-milestone"
+            / "fixtures"
+            / "zed2_320x180"
+            / "manifest.json"
+        )
+        if default_coarse.exists():
+            values["coarse_manifest"] = str(default_coarse)
+
     required = ("manifest", "clock_map", "frame_id", "run_id", "trace")
     missing = [name for name in required if not values[name]]
     if not values["source"] or values["source"] not in {"camera", "replay"}:
@@ -70,6 +107,8 @@ def _launch_publisher(context):
         raise RuntimeError(
             "stereoforge_publisher requires launch arguments: " + ", ".join(missing)
         )
+
+    ensure_zed2_awake_and_prepare_trace(repo_root, values["source"], values["trace"])
 
     command = [
         values["publisher_executable"],
@@ -96,7 +135,12 @@ def _launch_publisher(context):
     if _as_bool(values["thread_cpu_timing"]):
         command.append("--thread-cpu-timing")
 
-    environment = {"RMW_IMPLEMENTATION": values["rmw_implementation"]}
+    environment = {
+        "RMW_IMPLEMENTATION": values["rmw_implementation"],
+        "VK_DRIVER_FILES": "/usr/share/vulkan/icd.d/radeon_icd.x86_64.json",
+        "LIBGL_DRIVERS_PATH": "/usr/lib64/dri",
+        "LD_PRELOAD": "/usr/lib64/libdrm.so.2:/usr/lib64/libdrm_amdgpu.so.1",
+    }
     if values["zenoh_router_config"]:
         environment["ZENOH_ROUTER_CONFIG_URI"] = values["zenoh_router_config"]
     if values["zenoh_session_config"]:
@@ -111,11 +155,18 @@ def _launch_publisher(context):
 
 
 def generate_launch_description():
+    repo_root = Path(__file__).resolve().parents[2]
     default_publisher = str(
-        Path(__file__).resolve().parents[2]
+        repo_root
         / "build"
         / "ros-daxa-native"
         / "stereoforge_ros2_depth_publisher"
+    )
+    default_manifest = str(
+        repo_root / "configs" / "cameras" / "zed2" / "fixtures" / "SN26041639-fixture" / "manifest.json"
+    )
+    default_clock_map = str(
+        repo_root / "configs" / "cameras" / "zed2" / "clock_maps" / "SN26041639-clock-map.json"
     )
     arguments = [
         DeclareLaunchArgument(
@@ -136,22 +187,27 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             "manifest",
+            default_value=default_manifest if Path(default_manifest).exists() else "",
             description="Required calibration manifest path.",
         ),
         DeclareLaunchArgument(
             "clock_map",
+            default_value=default_clock_map if Path(default_clock_map).exists() else "",
             description="Required capture-to-ROS clock mapping path.",
         ),
         DeclareLaunchArgument(
             "frame_id",
+            default_value="stereoforge_camera",
             description="Required ROS image frame ID.",
         ),
         DeclareLaunchArgument(
             "run_id",
+            default_value="live-zed2",
             description="Required unique delivery run ID.",
         ),
         DeclareLaunchArgument(
             "trace",
+            default_value="/tmp/stereoforge-trace.json",
             description="Required new JSON delivery trace path.",
         ),
         DeclareLaunchArgument(
@@ -171,7 +227,7 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             "mode",
-            default_value="depth",
+            default_value="depth-rgb",
             choices=["depth", "rgb", "depth-rgb"],
         ),
         DeclareLaunchArgument("duration_seconds", default_value="600"),
@@ -186,7 +242,7 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             "pipeline",
-            default_value="full-sgm",
+            default_value="experimental-dual-refinement",
             choices=["full-sgm", "experimental-refinement", "experimental-dual-refinement"],
         ),
         DeclareLaunchArgument(
@@ -196,28 +252,32 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             "descriptor_mode",
-            default_value="",
+            default_value="ortho-hybrid",
             choices=["", "census", "ortho-hybrid"],
         ),
-        DeclareLaunchArgument("fast_mode", default_value=""),
+        DeclareLaunchArgument("fast_mode", default_value="1"),
         DeclareLaunchArgument(
             "coarse_schedule",
-            default_value="",
+            default_value="shared-census-sequential",
             choices=["", "sequential", "paired-per-path", "layered-per-path", "shared-census-sequential"],
         ),
         DeclareLaunchArgument(
             "coarse_right_reference_mode",
-            default_value="",
+            default_value="left-aggregated-selection",
             choices=["", "independent-sgm", "left-aggregated-selection"],
         ),
-        DeclareLaunchArgument("refinement_subpixel", default_value=""),
-        DeclareLaunchArgument("selective_repair", default_value=""),
-        DeclareLaunchArgument("planar_recovery", default_value=""),
+        DeclareLaunchArgument("refinement_subpixel", default_value="1"),
+        DeclareLaunchArgument("selective_repair", default_value="1"),
+        DeclareLaunchArgument("planar_recovery", default_value="1"),
         DeclareLaunchArgument(
             "completed_depth_topic", default_value="/stereoforge/depth_completed"
         ),
+        DeclareLaunchArgument(
+            "completed_provenance_topic",
+            default_value="/stereoforge/depth_completed_provenance",
+        ),
         DeclareLaunchArgument("device_id", default_value="-1"),
-        DeclareLaunchArgument("device_serial", default_value=""),
+        DeclareLaunchArgument("device_serial", default_value="26041639"),
         DeclareLaunchArgument("depth_topic", default_value="/stereoforge/depth"),
         DeclareLaunchArgument(
             "rgb_topic", default_value="/stereoforge/rectified_rgb"

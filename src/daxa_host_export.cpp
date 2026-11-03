@@ -31,10 +31,10 @@ struct DaxaHostExport::Impl {
     void require_thread()const{require(thread==std::this_thread::get_id(),"host export submission requires owner thread");}
     Impl(std::shared_ptr<DaxaFoundation> c,std::shared_ptr<const DaxaRectification> m,DaxaHostExportConfig cfg):context(std::move(c)),maps(std::move(m)),config(cfg){
         require(context&&context->device.get()&&maps,"host export requires context/calibration");
-        require(cfg.slots>=2&&cfg.slots<=3&&(cfg.depth||cfg.rgb),"host export requires 2..3 slots and requested output");
+        require(cfg.slots>=2&&cfg.slots<=3&&(cfg.depth||cfg.rgb||cfg.provenance),"host export requires 2..3 slots and requested output");
         require(maps->width&&maps->height&&maps->width<=8192&&maps->height<=8192,"invalid host export grid");
         plane_bytes=size_t(maps->width)*maps->height*4;
-        selected.bytes_per_slot=plane_bytes*(unsigned(cfg.depth)+unsigned(cfg.rgb));
+        selected.bytes_per_slot=plane_bytes*(unsigned(cfg.depth)+unsigned(cfg.rgb)+unsigned(cfg.provenance));
         auto& d=context->device;daxa::BufferInfo info{.size=selected.bytes_per_slot,.name="persistent selective host export"};
         auto requirements=d.buffer_memory_requirements(info);VkPhysicalDeviceMemoryProperties properties{};
         vkGetPhysicalDeviceMemoryProperties(daxa_dvc_get_vk_physical_device(d.get()),&properties);
@@ -61,15 +61,17 @@ struct DaxaHostExport::Impl {
         for(unsigned i=0;i<config.slots;++i)if(detail::available_slot(slots[i].use_count(),slots[i]->copy_ticket,boundary))return slots[i];
         throw std::runtime_error("host export ring exhausted: retained destination or pending copy");
     }
-    template<class Input>void submit(Slot& s,const Input& input,daxa::BufferId depth,daxa::BufferId rgb,uint64_t ticket){
+    template<class Input>void submit(Slot& s,const Input& input,daxa::BufferId depth,daxa::BufferId rgb,daxa::BufferId prov,uint64_t ticket){
         require(s.generation!=std::numeric_limits<uint64_t>::max(),"host export generation overflow");
         auto& d=context->device;auto before=d.latest_queue_submit_index(daxa::QUEUE_MAIN);
         s.producer=input;s.source=input.source();s.producer_ticket=ticket;++s.generation;s.copy_ticket=0;
         try{
             auto recorder=d.create_command_recorder({.name="selective native host export"});
             recorder.pipeline_barrier({.src_access=daxa::AccessConsts::COMPUTE_SHADER_WRITE|daxa::AccessConsts::TRANSFER_WRITE,.dst_access=daxa::AccessConsts::TRANSFER_READ});
-            if(config.depth)recorder.copy_buffer_to_buffer({.src_buffer=depth,.dst_buffer=s.buffer,.src_offset=0,.dst_offset=0,.size=plane_bytes});
-            if(config.rgb)recorder.copy_buffer_to_buffer({.src_buffer=rgb,.dst_buffer=s.buffer,.src_offset=0,.dst_offset=config.depth?plane_bytes:0,.size=plane_bytes});
+            size_t offset=0;
+            if(config.depth){recorder.copy_buffer_to_buffer({.src_buffer=depth,.dst_buffer=s.buffer,.src_offset=0,.dst_offset=offset,.size=plane_bytes});offset+=plane_bytes;}
+            if(config.rgb){recorder.copy_buffer_to_buffer({.src_buffer=rgb,.dst_buffer=s.buffer,.src_offset=0,.dst_offset=offset,.size=plane_bytes});offset+=plane_bytes;}
+            if(config.provenance){recorder.copy_buffer_to_buffer({.src_buffer=prov,.dst_buffer=s.buffer,.src_offset=0,.dst_offset=offset,.size=plane_bytes});offset+=plane_bytes;}
             recorder.pipeline_barrier({.src_access=daxa::AccessConsts::TRANSFER_WRITE,.dst_access=daxa::AccessConsts::HOST_READ});
             auto command=recorder.complete_current_commands();
             s.copy_ticket=d.submit_commands({.command_lists={&command,1}});
@@ -93,7 +95,7 @@ DaxaHostExport::DaxaHostExport(std::shared_ptr<DaxaFoundation> c,const DaxaObser
     impl_=std::make_shared<Impl>(std::move(c),std::move(maps),cfg);
 }
 DaxaHostExport::DaxaHostExport(std::shared_ptr<DaxaFoundation> c,const DaxaFrame& prototype,DaxaHostExportConfig cfg){
-    require(!cfg.depth&&cfg.rgb,"DaxaFrame host export requires RGB only");require(bool(prototype),"empty host export prototype");
+    require(!cfg.depth&&!cfg.provenance&&cfg.rgb,"DaxaFrame host export requires RGB only");require(bool(prototype),"empty host export prototype");
     require(c&&prototype.context_id()==reinterpret_cast<uintptr_t>(c->device.get()),"foreign host export prototype context");
     auto maps=prototype.calibration();auto rgb=prototype.plane(DaxaPreprocessPlane::RectifiedLeft);require(maps&&rgb.width()==maps->width&&rgb.height()==maps->height,"prototype RGB grid mismatch");
     impl_=std::make_shared<Impl>(std::move(c),std::move(maps),cfg);
@@ -101,14 +103,15 @@ DaxaHostExport::DaxaHostExport(std::shared_ptr<DaxaFoundation> c,const DaxaFrame
 DaxaHostExport::Frame DaxaHostExport::enqueue(const DaxaObservationFrame& input){
     require(bool(impl_),"moved-from host exporter");auto& e=*impl_;e.require_thread();auto& slot=e.available();
     e.validate(input.context_id(),input.calibration(),input.width(),input.height());
-    daxa::BufferId depth{},rgb{};if(e.config.depth){require(input.size_bytes(DaxaObservationPlane::Depth)>=e.plane_bytes,"short depth source");depth=input.buffer(DaxaObservationPlane::Depth);}
+    daxa::BufferId depth{},rgb{},prov{};if(e.config.depth){require(input.size_bytes(DaxaObservationPlane::Depth)>=e.plane_bytes,"short depth source");depth=input.buffer(DaxaObservationPlane::Depth);}
     if(e.config.rgb){auto view=input.image(DaxaObservationImage::RectifiedLeft);require(view.width()==e.maps->width&&view.height()==e.maps->height,"RGB grid mismatch");rgb=view.buffer();}
-    e.submit(*slot,input,depth,rgb,input.submit_ticket());return Frame(impl_,slot);
+    if(e.config.provenance){require(input.size_bytes(DaxaObservationPlane::Provenance)>=e.plane_bytes,"short provenance source");prov=input.buffer(DaxaObservationPlane::Provenance);}
+    e.submit(*slot,input,depth,rgb,prov,input.submit_ticket());return Frame(impl_,slot);
 }
 DaxaHostExport::Frame DaxaHostExport::enqueue(const DaxaFrame& input){
-    require(bool(impl_),"moved-from host exporter");auto& e=*impl_;e.require_thread();require(!e.config.depth,"DaxaFrame cannot export depth");auto& slot=e.available();
+    require(bool(impl_),"moved-from host exporter");auto& e=*impl_;e.require_thread();require(!e.config.depth&&!e.config.provenance,"DaxaFrame cannot export depth/provenance");auto& slot=e.available();
     auto view=input.plane(DaxaPreprocessPlane::RectifiedLeft);e.validate(input.context_id(),input.calibration(),view.width(),view.height());
-    e.submit(*slot,input,{},view.buffer(),input.submit_ticket());return Frame(impl_,slot);
+    e.submit(*slot,input,{},view.buffer(),{},input.submit_ticket());return Frame(impl_,slot);
 }
 size_t DaxaHostExport::collect(){require(bool(impl_),"moved-from host exporter");auto& e=*impl_;e.require_thread();auto boundary=e.context->device.oldest_pending_submit_index();size_t count=0;
     for(unsigned i=0;i<e.config.slots;++i){auto& s=*e.slots[i];if(s.producer.index()&&detail::completed_submission(s.copy_ticket,boundary)){s.producer=std::monostate{};++count;}}return count;
@@ -124,6 +127,7 @@ bool DaxaHostExport::Frame::ready()const{validate();return detail::completed_sub
 void DaxaHostExport::Frame::wait()const{validate();owner_->context->device.wait_on_submit({.queue=daxa::QUEUE_MAIN,.queue_submit_index=slot_->copy_ticket,.timeout=30'000'000'000ull});}
 std::span<const std::byte> DaxaHostExport::Frame::depth_bytes()const{require(ready(),"host export copy incomplete");return owner_->config.depth?std::span<const std::byte>(slot_->mapped,owner_->plane_bytes):std::span<const std::byte>{};}
 std::span<const std::byte> DaxaHostExport::Frame::rgba_bytes()const{require(ready(),"host export copy incomplete");return owner_->config.rgb?std::span<const std::byte>(slot_->mapped+(owner_->config.depth?owner_->plane_bytes:0),owner_->plane_bytes):std::span<const std::byte>{};}
+std::span<const std::byte> DaxaHostExport::Frame::provenance_bytes()const{require(ready(),"host export copy incomplete");size_t offset=owner_->plane_bytes*(unsigned(owner_->config.depth)+unsigned(owner_->config.rgb));return owner_->config.provenance?std::span<const std::byte>(slot_->mapped+offset,owner_->plane_bytes):std::span<const std::byte>{};}
 uint32_t DaxaHostExport::Frame::width()const{validate();return owner_->maps->width;}uint32_t DaxaHostExport::Frame::height()const{validate();return owner_->maps->height;}
 uint64_t DaxaHostExport::Frame::producer_ticket()const{validate();return slot_->producer_ticket;}uint64_t DaxaHostExport::Frame::copy_ticket()const{validate();return slot_->copy_ticket;}
 CaptureLease DaxaHostExport::Frame::source()const{validate();return slot_->source;}std::shared_ptr<const DaxaRectification> DaxaHostExport::Frame::calibration()const{validate();return owner_->maps;}

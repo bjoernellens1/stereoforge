@@ -12,7 +12,7 @@
 namespace stereoforge {
 enum class RosThreadCpuStatus : std::uint8_t { Disabled, Available, ClockReadFailed, Nonmonotonic };
 enum class RosDeliveryTraceKind : std::uint8_t { Published, Received };
-enum class RosDeliveryOutput : std::uint8_t { Depth, Rgb };
+enum class RosDeliveryOutput : std::uint8_t { Depth, Rgb, CompletedDepth, CompletedProvenance };
 enum class RosDeliveryFreshness : std::uint8_t { MeasuredSingleSource, Historical, Unknown };
 struct RosDeliveryTraceRecord {
     RosDeliveryTraceKind kind=RosDeliveryTraceKind::Published;

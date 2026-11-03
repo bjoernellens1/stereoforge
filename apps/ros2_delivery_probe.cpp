@@ -30,10 +30,10 @@ template<class Clock> std::uint64_t ns_now(){
     if(n<=0)throw std::runtime_error("clock unavailable");return static_cast<std::uint64_t>(n);
 }
 struct Options {
-    std::string mode="depth",depth_topic="/stereoforge/depth",rgb_topic="/stereoforge/rectified_rgb";
+    std::string mode="depth",depth_topic="/stereoforge/depth",rgb_topic="/stereoforge/rectified_rgb",completed_depth_topic="/stereoforge/depth_completed",completed_provenance_topic="/stereoforge/depth_completed_provenance";
     std::string frame_id,run_id,trace,reliability="best_effort";
     std::uint32_t width=1280,height=720,fps=60;
-    unsigned max_frames=100000,qos_depth=1;double duration=600;
+    unsigned max_frames=100000,qos_depth=1;double duration=600;bool expect_completed=false;
 };
 unsigned integer(const std::string& value,unsigned lo,unsigned hi){
     size_t used=0;auto n=std::stoull(value,&used);if(used!=value.size()||n<lo||n>hi)throw std::invalid_argument("integer option outside bounds");return static_cast<unsigned>(n);
@@ -41,9 +41,11 @@ unsigned integer(const std::string& value,unsigned lo,unsigned hi){
 Options parse(int argc,char** argv){
     Options o;
     for(int i=1;i<argc;++i){std::string a=argv[i];
-        if(a=="--help"){std::cout<<"--run-id ID --frame-id ID --trace FILE [--mode depth|rgb|depth-rgb] [--width N --height N --fps N --duration-seconds N --max-frames N --depth-topic TOPIC --rgb-topic TOPIC --reliability best_effort|reliable --qos-depth N]\n";std::exit(0);}
+        if(a=="--help"){std::cout<<"--run-id ID --frame-id ID --trace FILE [--mode depth|rgb|depth-rgb] [--expect-completed 0|1] [--completed-depth-topic TOPIC --completed-provenance-topic TOPIC] [--width N --height N --fps N --duration-seconds N --max-frames N --depth-topic TOPIC --rgb-topic TOPIC --reliability best_effort|reliable --qos-depth N]\n";std::exit(0);}
         if(i+1>=argc)throw std::invalid_argument("missing option value");std::string v=argv[++i];
         if(a=="--mode")o.mode=v;else if(a=="--depth-topic")o.depth_topic=v;else if(a=="--rgb-topic")o.rgb_topic=v;
+        else if(a=="--completed-depth-topic")o.completed_depth_topic=v;else if(a=="--completed-provenance-topic")o.completed_provenance_topic=v;
+        else if(a=="--expect-completed")o.expect_completed=(integer(v,0,1)==1);
         else if(a=="--frame-id")o.frame_id=v;else if(a=="--run-id")o.run_id=v;else if(a=="--trace")o.trace=v;
         else if(a=="--reliability")o.reliability=v;else if(a=="--width")o.width=integer(v,1,8192);
         else if(a=="--height")o.height=integer(v,1,8192);else if(a=="--fps")o.fps=integer(v,1,120);
@@ -54,9 +56,13 @@ Options parse(int argc,char** argv){
     }
     auto blank=[](const std::string& s){return s.empty()||std::all_of(s.begin(),s.end(),[](unsigned char c){return std::isspace(c)!=0;});};
     if((o.mode!="depth"&&o.mode!="rgb"&&o.mode!="depth-rgb")||
+       (o.expect_completed&&o.mode=="rgb")||
        (o.reliability!="best_effort"&&o.reliability!="reliable")||o.run_id.empty()||o.run_id.size()>4096||o.trace.empty()||
        blank(o.run_id)||blank(o.frame_id)||o.frame_id.size()>4096||
-       o.depth_topic.empty()||o.rgb_topic.empty()||o.depth_topic.front()!='/'||o.rgb_topic.front()!='/'||
+       o.depth_topic.empty()||o.rgb_topic.empty()||o.completed_depth_topic.empty()||o.completed_provenance_topic.empty()||
+       o.depth_topic.front()!='/'||o.rgb_topic.front()!='/'||o.completed_depth_topic.front()!='/'||o.completed_provenance_topic.front()!='/'||
+       o.completed_depth_topic==o.depth_topic||o.completed_depth_topic==o.rgb_topic||o.completed_provenance_topic==o.depth_topic||
+       o.completed_provenance_topic==o.rgb_topic||o.completed_provenance_topic==o.completed_depth_topic||
        (o.mode=="depth-rgb"&&o.depth_topic==o.rgb_topic))throw std::invalid_argument("invalid probe configuration");
     make_ros_depth_contract(o.width,o.height,o.frame_id);
     return o;
@@ -87,13 +93,17 @@ struct OutputFile {
                           {"kind","startup_or_output_failure"},{"message",safe}}).dump()+"\n");
     }
 };
-json descriptor(const std::string& topic,unsigned w,unsigned h,const std::string& encoding,const std::string& frame){
-    return {{"topic",topic},{"width",w},{"height",h},{"step",w*4},{"encoding",encoding},{"frame_id",frame}};
+json descriptor(const std::string& topic,unsigned w,unsigned h,const std::string& encoding,const std::string& frame,unsigned elem_bytes=4){
+    return {{"topic",topic},{"width",w},{"height",h},{"step",w*elem_bytes},{"encoding",encoding},{"frame_id",frame}};
 }
 void run(const Options& o, OutputFile& file){
-    const bool depth=o.mode!="rgb",rgb=o.mode!="depth";
+    const bool depth=o.mode!="rgb",rgb=o.mode!="depth",comp=depth&&o.expect_completed;
     json outputs=json::object();
     if(depth)outputs["depth"]=descriptor(o.depth_topic,o.width,o.height,"32FC1",o.frame_id);
+    if(comp){
+        outputs["completed_depth"]=descriptor(o.completed_depth_topic,o.width,o.height,"32FC1",o.frame_id);
+        outputs["completed_provenance"]=descriptor(o.completed_provenance_topic,o.width,o.height,"mono8",o.frame_id,1);
+    }
     if(rgb)outputs["rgb"]=descriptor(o.rgb_topic,o.width,o.height,"rgba8",o.frame_id);
     json qos={{"history","keep_last"},{"depth",o.qos_depth},{"reliability",o.reliability},{"durability","volatile"}};
     json config={{"clock_id",clock_id()},{"nominal_hz",o.fps},{"outputs",outputs},{"qos",qos}};
@@ -103,21 +113,29 @@ void run(const Options& o, OutputFile& file){
     if(sim)throw std::invalid_argument("simulated time is unsupported");
     auto qos_profile=rclcpp::QoS(rclcpp::KeepLast(o.qos_depth)).durability_volatile();
     if(o.reliability=="reliable")qos_profile.reliable();else qos_profile.best_effort();
-    const size_t capacity=static_cast<size_t>(o.max_frames)*(unsigned(depth)+unsigned(rgb))+2;
+    const size_t capacity=static_cast<size_t>(o.max_frames)*(unsigned(depth)+unsigned(rgb)+(comp?2u:0u))+2;
     RosDeliveryTrace trace(capacity);
-    std::array<std::uint64_t,2> counts{};bool bad_message=false,trace_full=false;
+    std::array<std::uint64_t,4> counts{};bool bad_message=false,trace_full=false;
     auto receive=[&](RosDeliveryOutput which,sensor_msgs::msg::Image::ConstSharedPtr image){
         auto at=ns_now<steady>();auto arrival=ns_now<system_clock>();
-        auto index=which==RosDeliveryOutput::Depth?0u:1u;const char* encoding=index==0?"32FC1":"rgba8";
+        auto index=which==RosDeliveryOutput::Depth?0u:which==RosDeliveryOutput::Rgb?1u:which==RosDeliveryOutput::CompletedDepth?2u:3u;
+        const char* encoding=(which==RosDeliveryOutput::Depth||which==RosDeliveryOutput::CompletedDepth)?"32FC1":which==RosDeliveryOutput::CompletedProvenance?"mono8":"rgba8";
+        const unsigned elem_bytes=which==RosDeliveryOutput::CompletedProvenance?1u:4u;
         const auto& stamp=image->header.stamp;
-        if(image->width!=o.width||image->height!=o.height||image->step!=o.width*4||image->encoding!=encoding||
-           image->is_bigendian!=0||image->header.frame_id!=o.frame_id||image->data.size()!=size_t(o.width)*o.height*4||
+        if(image->width!=o.width||image->height!=o.height||image->step!=o.width*elem_bytes||image->encoding!=encoding||
+           image->is_bigendian!=0||image->header.frame_id!=o.frame_id||image->data.size()!=size_t(o.width)*o.height*elem_bytes||
            stamp.sec<0||stamp.nanosec>=1'000'000'000u||(stamp.sec==0&&stamp.nanosec==0)) {bad_message=true;return;}
         const size_t npix=size_t(o.width)*o.height;
         std::uint32_t valid_px=0;
-        if(which==RosDeliveryOutput::Depth){
+        if(which==RosDeliveryOutput::Depth||which==RosDeliveryOutput::CompletedDepth){
             const auto* fp=reinterpret_cast<const float*>(image->data.data());
             for(size_t i=0;i<npix;++i)if(std::isfinite(fp[i])&&fp[i]>0.0f)++valid_px;
+        } else if(which==RosDeliveryOutput::CompletedProvenance){
+            for(size_t i=0;i<npix;++i){
+                std::uint8_t v=image->data[i];
+                if(v!=0u&&v!=1u&&v!=6u){bad_message=true;return;}
+                if(v==1u||v==6u)++valid_px;
+            }
         } else {
             const auto* up=reinterpret_cast<const std::uint32_t*>(image->data.data());
             for(size_t i=0;i<npix;++i)if((up[i]&0x00FFFFFFu)!=0u)++valid_px;
@@ -129,17 +147,22 @@ void run(const Options& o, OutputFile& file){
         r.payload_fnv1a64=fnv1a64_words(image->data.data(),image->data.size());r.valid_pixels=valid_px;
         if(!trace.append(r)){trace_full=true;return;}++counts[index];
     };
-    rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr ds,rs;
+    rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr ds,rs,cds,cps;
     if(depth)ds=node->create_subscription<sensor_msgs::msg::Image>(o.depth_topic,qos_profile,[&](sensor_msgs::msg::Image::ConstSharedPtr msg){receive(RosDeliveryOutput::Depth,std::move(msg));});
+    if(comp){
+        cds=node->create_subscription<sensor_msgs::msg::Image>(o.completed_depth_topic,qos_profile,[&](sensor_msgs::msg::Image::ConstSharedPtr msg){receive(RosDeliveryOutput::CompletedDepth,std::move(msg));});
+        cps=node->create_subscription<sensor_msgs::msg::Image>(o.completed_provenance_topic,qos_profile,[&](sensor_msgs::msg::Image::ConstSharedPtr msg){receive(RosDeliveryOutput::CompletedProvenance,std::move(msg));});
+    }
     if(rgb)rs=node->create_subscription<sensor_msgs::msg::Image>(o.rgb_topic,qos_profile,[&](sensor_msgs::msg::Image::ConstSharedPtr msg){receive(RosDeliveryOutput::Rgb,std::move(msg));});
     rclcpp::executors::SingleThreadedExecutor executor;executor.add_node(node);
     auto start=ns_now<steady>();auto deadline=start+static_cast<std::uint64_t>(o.duration*1e9);
     while(rclcpp::ok()&&!bad_message&&!trace_full&&ns_now<steady>()<deadline&&
-          !((!depth||counts[0]>=o.max_frames)&&(!rgb||counts[1]>=o.max_frames)))executor.spin_once(std::chrono::milliseconds(10));
+          !((!depth||counts[0]>=o.max_frames)&&(!rgb||counts[1]>=o.max_frames)&&(!comp||(counts[2]>=o.max_frames&&counts[3]>=o.max_frames))))executor.spin_once(std::chrono::milliseconds(10));
     auto end=ns_now<steady>();
     std::string reason=bad_message?"error":trace_full?"trace_full":!rclcpp::ok()?"shutdown":"limit";
     json counters={{"read",0},{"admitted",0},{"ring_drops",0},{"identity_rejects",0},{"published_depth",0},{"published_rgb",0},
                    {"received_depth",counts[0]},{"received_rgb",counts[1]},{"timeouts",0}};
+    if(comp){counters["published_completed_depth"]=0;counters["published_completed_provenance"]=0;counters["received_completed_depth"]=counts[2];counters["received_completed_provenance"]=counts[3];}
     json first={{"schema","stereoforge.ros_delivery_event.v1"},{"kind","start"},{"run_id",o.run_id},{"role","subscriber"},{"at_ns",start},{"config",config}};
     json last={{"schema","stereoforge.ros_delivery_event.v1"},{"kind","stop"},{"run_id",o.run_id},{"role","subscriber"},{"at_ns",end},
         {"window_end_ns",end},{"reason",reason},{"counters",counters},{"capture_counters",nullptr},{"queued",0},{"pending",0},

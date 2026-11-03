@@ -78,8 +78,12 @@ static void gpu_4x_ortho_hybrid_and_repair(){
             auto obs_meas=out_plan.observations(),obs_comp=out_plan.completed_observations();
             check(obs_meas.buffer(DaxaObservationPlane::Depth)==out_plan.buffer(DaxaRefinementPlane::Depth));
             check(obs_comp.buffer(DaxaObservationPlane::Depth)!=obs_meas.buffer(DaxaObservationPlane::Depth));
+            for(auto pl:{DaxaObservationPlane::Depth,DaxaObservationPlane::Confidence,DaxaObservationPlane::Validity,DaxaObservationPlane::Provenance,DaxaObservationPlane::SourceIds,DaxaObservationPlane::AgeNs}){
+                check(obs_comp.size_bytes(pl)==obs_meas.size_bytes(pl));
+                check(context->device.info(obs_comp.buffer(pl)).value().size>=obs_comp.size_bytes(pl));
+            }
             auto rb_base=ref_base.readback(out_base),rb_rep=ref_rep.readback(out_rep),rb_plan=ref_plan.readback(out_plan);
-            check(rb_rep.disparity.size()==2*1280*720);
+            check(rb_rep.disparity.size()==2*1280*720&&rb_plan.completed_depth.size()==2*1280*720&&rb_plan.completed_provenance.size()==2*1280*720);
             // [P0] Measured planes (0..8) must remain 100% identical between selective_repair and planar_recovery!
             check(std::memcmp(rb_rep.disparity.data(),rb_plan.disparity.data(),rb_rep.disparity.size()*sizeof(float))==0);
             check(std::memcmp(rb_rep.confidence.data(),rb_plan.confidence.data(),rb_rep.confidence.size()*sizeof(float))==0);
@@ -89,6 +93,24 @@ static void gpu_4x_ortho_hybrid_and_repair(){
             check(rb_rep.metric_validity==rb_plan.metric_validity);
             check(rb_rep.provenance==rb_plan.provenance);
             check(rb_rep.source_ids==rb_plan.source_ids&&rb_rep.age_ns==rb_plan.age_ns);
+            // [P0-A] Right-eye layer (1280*720 .. 2*1280*720-1) of completed_* must preserve right-eye measured observations bit-for-bit!
+            const size_t n1=1280*720;
+            check(std::memcmp(rb_rep.depth.data()+n1,rb_plan.completed_depth.data()+n1,n1*sizeof(float))==0);
+            check(std::memcmp(rb_rep.metric_confidence.data()+n1,rb_plan.completed_confidence.data()+n1,n1*sizeof(float))==0);
+            check(std::memcmp(rb_rep.metric_validity.data()+n1,rb_plan.completed_validity.data()+n1,n1*sizeof(uint32_t))==0);
+            check(std::memcmp(rb_rep.provenance.data()+n1,rb_plan.completed_provenance.data()+n1,n1*sizeof(uint32_t))==0);
+            check(std::memcmp(rb_rep.source_ids.data()+n1,rb_plan.completed_source_ids.data()+n1,n1*sizeof(int64_t))==0);
+            check(std::memcmp(rb_rep.age_ns.data()+n1,rb_plan.completed_age_ns.data()+n1,n1*sizeof(int64_t))==0);
+            check(std::memcmp(rb_rep.disparity.data()+n1,rb_plan.completed_disparity.data()+n1,n1*sizeof(float))==0);
+            {
+                GeometryConfig vc720{1280,720,1280,720};
+                VirtualView vv720;vv720.intrinsics={1040.f,1040.f,639.5f,359.5f};vv720.source_to_virtual_right[3]=.12f;vv720.mode=ViewMode::Preview;
+                DaxaView comp_view(vc720,vv720,context,obs_comp,2);
+                auto comp_proj=comp_view.project(obs_comp);
+                comp_proj.wait();
+                comp_proj={};
+                comp_view.collect();
+            }
             unsigned valid_textured=0,valid_flat_plateau=0,inferred_gap=0,inferred_step_bridge=0;
             for(unsigned y=40;y<360;++y)for(unsigned x=40;x<1240;++x)if(rb_rep.validity[y*1280+x])++valid_textured;
             for(unsigned y=440;y<680;++y)for(unsigned x=100;x<1180;++x)if(rb_rep.metric_validity[y*1280+x]||rb_plan.completed_validity[y*1280+x])++valid_flat_plateau;

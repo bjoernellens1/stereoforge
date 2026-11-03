@@ -487,6 +487,10 @@ def _fit_3d_plane_ransac(
     intr: dict[str, float],
     thresh_mm: float = 3.5,
 ) -> tuple[np.ndarray, float, np.ndarray]:
+    """Fit a 3D plane via RANSAC + ordinary least squares in projective disparity space (x, y, d),
+    converting the affine disparity plane d(x, y) = a*x + b*y + c analytically to the 3D unit normal
+    (n_x, n_y, n_z) and offset d_off. Because (x, y) are exact pixel coordinates and measurement noise
+    is strictly in d, projective-disparity RANSAC avoids errors-in-variables eigenvector flips on narrow strips."""
     h, w = disp.shape
     yy, xx = np.indices((h, w), dtype=np.float64)
     fx, fy, cx, cy, baseline_m, cx_offset = (
@@ -500,38 +504,41 @@ def _fit_3d_plane_ransac(
     fxb = fx * baseline_m * 1000.0
     valid = mask & np.isfinite(disp) & (disp > 0.5)
     vy, vx = np.nonzero(valid)
-    d_vals = disp[vy, vx].astype(np.float64)
-    z_mm = fxb / np.maximum(d_vals - cx_offset, 0.5)
-    x_mm = (vx.astype(np.float64) - cx) * z_mm / fx
-    y_mm = (vy.astype(np.float64) - cy) * z_mm / fy
-    pts = np.column_stack([x_mm, y_mm, z_mm])
+    dv = disp[vy, vx].astype(np.float64)
+    xv, yv = vx.astype(np.float64), vy.astype(np.float64)
+    A = np.column_stack([xv, yv, np.ones_like(xv)])
+
+    # Convert millimeter threshold at median depth to disparity threshold (clamped to [0.45, 1.25] px)
+    med_d = float(np.median(dv)) if len(dv) > 0 else 64.0
+    med_z_mm = fxb / max(med_d - cx_offset, 1.0)
+    thresh_px = float(np.clip(thresh_mm * max(med_d - cx_offset, 1.0) / max(med_z_mm, 1.0), 0.45, 1.25))
 
     rng = np.random.default_rng(42)
-    best_inliers = np.zeros(len(pts), dtype=bool)
-    for _ in range(300):
-        idx = rng.choice(len(pts), size=3, replace=False)
-        p0, p1, p2 = pts[idx]
-        nrm = np.cross(p1 - p0, p2 - p0)
-        norm_len = float(np.linalg.norm(nrm))
-        if norm_len < 1e-9:
-            continue
-        nrm /= norm_len
-        inl = np.abs((pts - p0) @ nrm) <= thresh_mm
-        if inl.sum() > best_inliers.sum():
-            best_inliers = inl
+    best_inliers = np.zeros(len(dv), dtype=bool)
+    if len(dv) >= 3:
+        for _ in range(300):
+            idx = rng.choice(len(dv), size=3, replace=False)
+            A3 = A[idx]
+            if abs(float(np.linalg.det(A3))) < 1e-3:
+                continue
+            abc = np.linalg.solve(A3, dv[idx])
+            inl = np.abs(A @ abc - dv) <= thresh_px
+            if inl.sum() > best_inliers.sum():
+                best_inliers = inl
 
-    pts_in = pts[best_inliers]
-    centroid = pts_in.mean(axis=0)
-    _, _, vh = np.linalg.svd(pts_in - centroid, full_matrices=False)
-    normal = vh[-1]
+    if int(best_inliers.sum()) < 3:
+        best_inliers = np.ones(len(dv), dtype=bool)
+
+    abc, _, _, _ = np.linalg.lstsq(A[best_inliers], dv[best_inliers], rcond=None)
+    a, b, c = float(abc[0]), float(abc[1]), float(abc[2])
+    d_gt_map = (a * xx + b * yy + c).astype(np.float32)
+    nt = np.array([a * fx, b * fy, (c - cx_offset) + a * cx + b * cy], dtype=np.float64)
+    n_len = max(float(np.linalg.norm(nt)), 1e-12)
+    normal = -nt / n_len
+    d_off = fxb / n_len
     if normal[2] > 0:
         normal = -normal
-    d_off = -float(np.dot(normal, centroid))
-    d_gt_map = (
-        cx_offset
-        - (fxb / d_off)
-        * (normal[0] * (xx - cx) / fx + normal[1] * (yy - cy) / fy + normal[2])
-    ).astype(np.float32)
+        d_off = -d_off
     return normal, d_off, d_gt_map
 
 
@@ -579,11 +586,8 @@ def _eval_plane_cohort(
     Y = (vy.astype(np.float64) - cy) * z_meas_mm / fy
     pts = np.column_stack([X, Y, z_meas_mm])
     orth_res_mm = np.abs(pts @ n_gt + d_off_gt)
-    centroid = pts.mean(axis=0)
-    _, _, vh = np.linalg.svd(pts - centroid, full_matrices=False)
-    normal = vh[-1]
-    if normal[2] > 0:
-        normal = -normal
+    # Fit cohort normal using RANSAC inliers so isolated boundary outliers do not skew normal angle error
+    normal, _, _ = _fit_3d_plane_ransac(disp, valid, intr, thresh_mm=3.5)
     cos_ang = np.clip(np.abs(np.dot(normal, n_gt)), 0.0, 1.0)
     return {
         "pixels": n_px,
@@ -620,12 +624,17 @@ def run_v93_qualification_suite(work_dir: Any, desk_env_dir: Any | None = None) 
     env = gpu_env()
     h, w = 720, 1280
 
-    # 1. Run 240 FPS Hardware GPU Qualification (planar_recovery=0 vs planar_recovery=1)
-    gpu_perf: dict[str, Any] = {}
-    for label, planar_flag in (("dual4x_selective_repair_only", "0"), ("dual4x_selective_repair_plus_planar", "1")):
-        out_p = work / f"perf_{label}.json"
-        best_doc = None
-        for trial in range(2):
+    # 1. Run 240 FPS Hardware GPU Qualification across 5 interleaved trials (planar_recovery=0 vs planar_recovery=1)
+    num_interleaved_trials = 5
+    trial_docs: dict[str, list[dict[str, Any]]] = {
+        "dual4x_selective_repair_only": [],
+        "dual4x_selective_repair_plus_planar": [],
+    }
+    for trial in range(num_interleaved_trials):
+        for label, planar_flag in (
+            ("dual4x_selective_repair_only", "0"),
+            ("dual4x_selective_repair_plus_planar", "1"),
+        ):
             tmp_p = work / f"perf_{label}_t{trial}.json"
             tmp_p.unlink(missing_ok=True)
             subprocess.run(
@@ -654,25 +663,48 @@ def run_v93_qualification_suite(work_dir: Any, desk_env_dir: Any | None = None) 
                 env=env,
                 check=True,
             )
-            doc_t = json.loads(tmp_p.read_text())
+            trial_docs[label].append(json.loads(tmp_p.read_text()))
             tmp_p.unlink(missing_ok=True)
-            if best_doc is None or float(doc_t["gpu_combined_queue_span_ms"]["p95"]) < float(
-                best_doc["gpu_combined_queue_span_ms"]["p95"]
-            ):
-                best_doc = doc_t
-        assert best_doc is not None
-        out_p.write_text(json.dumps(best_doc, indent=2) + "\n")
-        doc = best_doc
+
+    gpu_perf: dict[str, Any] = {}
+    for label, docs in trial_docs.items():
+        # Select the median trial by gpu_combined_queue_span_ms.p95 (no best-of cherry-picking)
+        docs_sorted = sorted(docs, key=lambda d: float(d["gpu_combined_queue_span_ms"]["p95"]))
+        median_doc = docs_sorted[len(docs_sorted) // 2]
+        out_p = work / f"perf_{label}.json"
+        out_p.write_text(json.dumps(median_doc, indent=2) + "\n")
+        doc = median_doc
+        p50_trials = [round(float(d["gpu_combined_queue_span_ms"]["p50"]), 4) for d in docs]
+        p95_trials = [round(float(d["gpu_combined_queue_span_ms"]["p95"]), 4) for d in docs]
+        p99_trials = [round(float(d["gpu_combined_queue_span_ms"]["p99"]), 4) for d in docs]
+        host_p95_trials = [round(float(d["host_wall_ms"]["p95"]), 4) for d in docs]
+        planar_p50_trials = [
+            round(float(d.get("gpu_planar_recovery_ms", {}).get("p50", 0.0)), 4) for d in docs
+        ]
         gpu_perf[label] = {
+            "interleaved_trials_count": num_interleaved_trials,
+            "selection_policy": "median_by_gpu_combined_p95_across_5_interleaved_trials",
             "gpu_combined_queue_span_ms": doc["gpu_combined_queue_span_ms"],
             "gpu_stage_sum_ms": doc["gpu_stage_sum_ms"],
             "host_wall_ms": doc["host_wall_ms"],
+            "gpu_planar_recovery_ms": doc.get("gpu_planar_recovery_ms"),
             "gpu_stage_timings_ms": doc["gpu_stage_timings_ms"],
+            "interleaved_trial_distributions": {
+                "gpu_combined_p50_ms": p50_trials,
+                "gpu_combined_p95_ms": p95_trials,
+                "gpu_combined_p99_ms": p99_trials,
+                "host_wall_p95_ms": host_p95_trials,
+                "gpu_planar_p50_ms": planar_p50_trials,
+                "gpu_combined_p95_mean_ms": round(float(np.mean(p95_trials)), 4),
+                "gpu_combined_p95_std_ms": round(float(np.std(p95_trials)), 4),
+                "all_trials_meet_240fps_gpu_p95": all(x <= 4.167 for x in p95_trials),
+            },
             "measured_valid_pixels": doc.get("measured_valid_pixels"),
             "completed_valid_pixels": doc.get("completed_valid_pixels"),
             "inferred_planar_pixels": doc.get("inferred_planar_pixels"),
             "meets_240fps_4_167ms_gpu_p50": float(doc["gpu_combined_queue_span_ms"]["p50"]) <= 4.167,
             "meets_240fps_4_167ms_gpu_p95": float(doc["gpu_combined_queue_span_ms"]["p95"]) <= 4.167,
+            "meets_240fps_4_167ms_gpu_p99": float(doc["gpu_combined_queue_span_ms"]["p99"]) <= 4.167,
             "dual_vs_separate_preprocess_30_planes_exact": doc["dual_vs_separate_preprocess_30_planes_exact"],
             "validation_errors_after_teardown": doc["validation_errors_after_teardown"],
         }
@@ -693,15 +725,14 @@ def run_v93_qualification_suite(work_dir: Any, desk_env_dir: Any | None = None) 
             "cx_offset": 0.0,
         }
         tag_poly = np.array([[785, 404], [831, 404], [831, 450], [785, 450]], dtype=np.int32)
-        char_inrange_poly = np.array([[730, 452], [893, 452], [899, 469], [727, 469]], dtype=np.int32)
         tag_mask = np.zeros((h, w), dtype=np.uint8)
         cv2.fillPoly(tag_mask, [tag_poly], 1)
         tag_mask_b = tag_mask.astype(bool)
-        char_mask = np.zeros((h, w), dtype=np.uint8)
-        cv2.fillPoly(char_mask, [char_inrange_poly], 1)
-        char_mask_b = char_mask.astype(bool)
+        # In-range ChArUco board & horizontal tabletop before d=127 hardware disparity limit at y=464
+        char_mask_b = np.zeros((h, w), dtype=bool)
+        char_mask_b[450:463, 730:895] = True
         desk_clean_mask = np.zeros((h, w), dtype=bool)
-        desk_clean_mask[380:455, 520:880] = True
+        desk_clean_mask[445:463, 600:925] = True
         desk_clean_mask &= ~tag_mask_b
         desk_broad_mask = np.zeros((h, w), dtype=bool)
         desk_broad_mask[380:520, 480:920] = True
@@ -723,7 +754,8 @@ def run_v93_qualification_suite(work_dir: Any, desk_env_dir: Any | None = None) 
         luma_r_desk = None
         zncc_d_desk = None
         zncc_v_desk = None
-        planes_gt: dict[str, tuple[np.ndarray, float, np.ndarray, np.ndarray]] = {}
+        planes_measured_consistency: dict[str, tuple[np.ndarray, float, np.ndarray, np.ndarray]] = {}
+        planes_independent_zncc: dict[str, tuple[np.ndarray, float, np.ndarray, np.ndarray, int]] = {}
 
         for cfg_name, rep_f, plan_f, min_a, c_aff, ray_g, clr_g in ablation_specs:
             pref = work / f"desk_{cfg_name}"
@@ -761,9 +793,9 @@ def run_v93_qualification_suite(work_dir: Any, desk_env_dir: Any | None = None) 
             prov_meas = np.fromfile(p_str + ".provenance.u32", dtype="<u4").reshape(2, h, w)[0]
 
             if (Path(p_str + ".completed_disparity.f32")).exists():
-                d_comp = np.fromfile(p_str + ".completed_disparity.f32", dtype="<f4").reshape(h, w)
-                v_comp = np.fromfile(p_str + ".completed_validity.u32", dtype="<u4").reshape(h, w) != 0
-                prov_comp = np.fromfile(p_str + ".completed_provenance.u32", dtype="<u4").reshape(h, w)
+                d_comp = np.fromfile(p_str + ".completed_disparity.f32", dtype="<f4").reshape(-1, h, w)[0]
+                v_comp = np.fromfile(p_str + ".completed_validity.u32", dtype="<u4").reshape(-1, h, w)[0] != 0
+                prov_comp = np.fromfile(p_str + ".completed_provenance.u32", dtype="<u4").reshape(-1, h, w)[0]
             else:
                 d_comp = d_meas
                 v_comp = v_meas
@@ -775,14 +807,19 @@ def run_v93_qualification_suite(work_dir: Any, desk_env_dir: Any | None = None) 
                 luma_pair = np.fromfile(p_str + ".luma.u32", dtype="<u4").reshape(2, h, w)
                 luma_l_desk = luma_pair[0]
                 luma_r_desk = luma_pair[1]
-                zncc_d_desk, zncc_v_desk = build_independent_zncc_epipolar_reference(luma_l_desk, luma_r_desk)
+                zncc_d_desk, zncc_v_desk = build_independent_zncc_epipolar_reference(
+                    luma_l_desk, luma_r_desk, max_disp=128
+                )
                 for pname, rmask, th_mm in (
                     ("upright_apriltag_target", tag_mask_b, 2.5),
                     ("charuco_board_inrange", char_mask_b, 2.5),
                     ("horizontal_desk_plane_clean", desk_clean_mask, 3.5),
                 ):
-                    n_gt, d_off_gt, d_gt_map = _fit_3d_plane_ransac(d_meas, rmask & v_meas, zed_intr, thresh_mm=th_mm)
-                    planes_gt[pname] = (n_gt, d_off_gt, d_gt_map, rmask)
+                    n_m, d_off_m, d_map_m = _fit_3d_plane_ransac(d_meas, rmask & v_meas, zed_intr, thresh_mm=th_mm)
+                    planes_measured_consistency[pname] = (n_m, d_off_m, d_map_m, rmask)
+                    z_mask = rmask & zncc_v_desk
+                    n_z, d_off_z, d_map_z = _fit_3d_plane_ransac(zncc_d_desk, z_mask, zed_intr, thresh_mm=th_mm)
+                    planes_independent_zncc[pname] = (n_z, d_off_z, d_map_z, rmask, int(z_mask.sum()))
 
                 # Run D-Y vs D-UV vs D-YUV vs D-UV-Shuffled causal tie-break ablation on desk scene
                 rgb_l = np.fromfile(p_str + ".rectified_left.u32", dtype="<u4").reshape(h, w)
@@ -832,13 +869,25 @@ def run_v93_qualification_suite(work_dir: Any, desk_env_dir: Any | None = None) 
                 else None
             )
 
-            plane_evals = {}
-            for pname, (n_gt, d_off_gt, d_gt_map, rmask) in planes_gt.items():
+            plane_evals_zncc = {}
+            for pname, (n_z, d_off_z, d_map_z, rmask, z_sup) in planes_independent_zncc.items():
                 roi_px = int(rmask.sum())
-                plane_evals[pname] = {
-                    "measured_prov1": _eval_plane_cohort(d_comp, rmask & (prov_comp == 1), roi_px, d_gt_map, n_gt, d_off_gt, zed_intr),
-                    "inferred_prov6": _eval_plane_cohort(d_comp, rmask & (prov_comp == 6), roi_px, d_gt_map, n_gt, d_off_gt, zed_intr),
-                    "completed_total": _eval_plane_cohort(d_comp, rmask & v_comp, roi_px, d_gt_map, n_gt, d_off_gt, zed_intr),
+                plane_evals_zncc[pname] = {
+                    "reference_kind": "independent_multiscale_zncc_epipolar_ransac_plane",
+                    "independent_zncc_support_pixels": z_sup,
+                    "measured_prov1": _eval_plane_cohort(d_comp, rmask & (prov_comp == 1), roi_px, d_map_z, n_z, d_off_z, zed_intr),
+                    "inferred_prov6": _eval_plane_cohort(d_comp, rmask & (prov_comp == 6), roi_px, d_map_z, n_z, d_off_z, zed_intr),
+                    "completed_total": _eval_plane_cohort(d_comp, rmask & v_comp, roi_px, d_map_z, n_z, d_off_z, zed_intr),
+                }
+
+            plane_evals_consistency = {}
+            for pname, (n_m, d_off_m, d_map_m, rmask) in planes_measured_consistency.items():
+                roi_px = int(rmask.sum())
+                plane_evals_consistency[pname] = {
+                    "reference_kind": "self_consistency_to_measured_stereo_ransac_plane",
+                    "measured_prov1": _eval_plane_cohort(d_comp, rmask & (prov_comp == 1), roi_px, d_map_m, n_m, d_off_m, zed_intr),
+                    "inferred_prov6": _eval_plane_cohort(d_comp, rmask & (prov_comp == 6), roi_px, d_map_m, n_m, d_off_m, zed_intr),
+                    "completed_total": _eval_plane_cohort(d_comp, rmask & v_comp, roi_px, d_map_m, n_m, d_off_m, zed_intr),
                 }
 
             b_tot = int(desk_broad_mask.sum())
@@ -855,7 +904,9 @@ def run_v93_qualification_suite(work_dir: Any, desk_env_dir: Any | None = None) 
                 "inferred_cohort_epipolar_reproj_mae_dn": inf_reproj_mae,
                 "inferred_cohort_patch_zncc_5x5_mean": inf_zncc5,
                 "inferred_cohort_local_3x3_planar_inlier_pct": inf_plan3_pct,
-                "planes": plane_evals,
+                "planes": plane_evals_zncc,
+                "independent_zncc_reference_planes": plane_evals_zncc,
+                "consistency_to_measured_planes": plane_evals_consistency,
             }
 
     # 3. Canonical 5-Scene 1280x720 Synthetic Ground-Truth Suite (with Planar Recovery cohort evaluation)

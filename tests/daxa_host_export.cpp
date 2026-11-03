@@ -80,7 +80,8 @@ static void gpu_contracts(bool validation){
   check(std::memcmp(frame.rgba_bytes().data(),expected_rgb.data(),bytes)==0,"byte exact rectified-left RGBA");
  };
  compare(a);compare(b);a={};auto reused=output.enqueue(observation);reused.wait();compare(reused);b={};reused={};output.collect();
- {DaxaHostExport only_depth(context,observation,{2,true,false});memory_contract(only_depth,1);auto result=only_depth.enqueue(observation);result.wait();check(result.rgba_bytes().empty(),"disabled RGB omitted");check(result.depth_bytes().size()==size_t(128)*64*4,"depth only extent");}
+ {DaxaHostExport only_depth(context,observation,{2,true,false});memory_contract(only_depth,1);auto result=only_depth.enqueue(observation);result.wait();check(result.rgba_bytes().empty()&&result.provenance_bytes().empty(),"disabled RGB/provenance omitted");check(result.depth_bytes().size()==size_t(128)*64*4,"depth only extent");}
+ {DaxaHostExport depth_prov(context,observation,{2,true,false,true});memory_contract(depth_prov,2);auto result=depth_prov.enqueue(observation);result.wait();check(result.rgba_bytes().empty()&&result.depth_bytes().size()==size_t(128)*64*4&&result.provenance_bytes().size()==size_t(128)*64*4,"depth+provenance extents");check(std::memcmp(result.provenance_bytes().data(),expected.provenance.data(),size_t(128)*64*4)==0,"byte exact provenance plane");}
  DaxaHostExport::Frame retained;{DaxaHostExport temporary(context,observation,{2,true,true});retained=temporary.enqueue(observation);}retained.wait();compare(retained);retained={};
  observation={};depth={};native={};pipeline.drain();input.collect();
  // Static analytic source cycling tests resource ownership and queue visibility.

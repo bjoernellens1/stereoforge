@@ -52,7 +52,7 @@ bool thread_cpu_now(std::uint64_t& value) noexcept {
 struct Options {
     std::string source,manifest,replay,mode="depth",map,frame,run,trace,reliability="best_effort",stereo_variant="packed-specialized",device_serial;
     std::string pipeline_mode="full-sgm",coarse_manifest,descriptor_mode="census",coarse_schedule="sequential",coarse_right_mode="independent-sgm";
-    std::string depth_topic="/stereoforge/depth",rgb_topic="/stereoforge/rectified_rgb",completed_depth_topic="/stereoforge/depth_completed";
+    std::string depth_topic="/stereoforge/depth",rgb_topic="/stereoforge/rectified_rgb",completed_depth_topic="/stereoforge/depth_completed",completed_provenance_topic="/stereoforge/depth_completed_provenance";
     std::string depth_rate="adaptive",rate_report;
     unsigned depth_speckle_min_pixels=0; double depth_speckle_delta_m=0.05; double depth_speckle_delta_px=1.25;
     unsigned min_depth_fps=5,max_depth_fps=60,consumer_min_depth_fps=5,max_depth_age_ms=250,downshift_ms=3000;
@@ -80,7 +80,7 @@ Options parse(int argc,char** argv){
         if(a=="--validation"){o.validation=true;continue;}if(a=="--thread-cpu-timing"){o.thread_cpu_timing=true;continue;}if(a=="--verify-payload-checksum"){o.verify_payload_checksum=true;continue;}if(i+1>=argc)throw std::invalid_argument("missing option value");std::string v=argv[++i];
         if(a=="--source")o.source=v;else if(a=="--manifest")o.manifest=v;else if(a=="--replay")o.replay=v;else if(a=="--mode")o.mode=v;
         else if(a=="--clock-map")o.map=v;else if(a=="--frame-id")o.frame=v;else if(a=="--run-id")o.run=v;else if(a=="--trace")o.trace=v;
-        else if(a=="--depth-topic")o.depth_topic=v;else if(a=="--rgb-topic")o.rgb_topic=v;else if(a=="--completed-depth-topic")o.completed_depth_topic=v;else if(a=="--reliability")o.reliability=v;
+        else if(a=="--depth-topic")o.depth_topic=v;else if(a=="--rgb-topic")o.rgb_topic=v;else if(a=="--completed-depth-topic")o.completed_depth_topic=v;else if(a=="--completed-provenance-topic")o.completed_provenance_topic=v;else if(a=="--reliability")o.reliability=v;
         else if(a=="--qos-depth")o.qos_depth=number(v,1,64);
         else if(a=="--depth-rate")o.depth_rate=v;else if(a=="--rate-report")o.rate_report=v;
         else if(a=="--depth-speckle-min-pixels")o.depth_speckle_min_pixels=number(v,0,10000);
@@ -112,8 +112,8 @@ Options parse(int argc,char** argv){
        blank(o.frame)||blank(o.run)||o.frame.size()>4096||o.run.size()>4096||
        (o.mode!="depth"&&o.mode!="rgb"&&o.mode!="depth-rgb")||(o.pipeline_mode!="full-sgm"&&o.pipeline_mode!="experimental-refinement"&&o.pipeline_mode!="experimental-dual-refinement")||
        ((o.pipeline_mode!="full-sgm")!=!o.coarse_manifest.empty())||(o.pipeline_mode!="full-sgm"&&(o.mode=="rgb"||o.disparities%2!=0))||(o.stereo_variant!="packed-specialized"&&o.stereo_variant!="packed-specialized-overwrite"&&o.stereo_variant!="packed-specialized-overwrite-quad")||(o.reliability!="best_effort"&&o.reliability!="reliable")||
-       o.depth_topic.empty()||o.rgb_topic.empty()||o.completed_depth_topic.empty()||o.depth_topic.front()!='/'||o.rgb_topic.front()!='/'||o.completed_depth_topic.front()!='/'||
-       o.completed_depth_topic==o.depth_topic||o.completed_depth_topic==o.rgb_topic||(o.mode=="depth-rgb"&&o.depth_topic==o.rgb_topic))throw std::invalid_argument("invalid publisher configuration");
+       o.depth_topic.empty()||o.rgb_topic.empty()||o.completed_depth_topic.empty()||o.completed_provenance_topic.empty()||o.depth_topic.front()!='/'||o.rgb_topic.front()!='/'||o.completed_depth_topic.front()!='/'||o.completed_provenance_topic.front()!='/'||
+       o.completed_depth_topic==o.depth_topic||o.completed_depth_topic==o.rgb_topic||o.completed_provenance_topic==o.depth_topic||o.completed_provenance_topic==o.rgb_topic||o.completed_provenance_topic==o.completed_depth_topic||(o.mode=="depth-rgb"&&o.depth_topic==o.rgb_topic))throw std::invalid_argument("invalid publisher configuration");
     if(!o.rate_report.empty()&&o.rate_report==o.trace)throw std::invalid_argument("rate report must differ from ROS delivery trace");
     depth_rate_config(o);
     return o;
@@ -154,11 +154,11 @@ RosCaptureClockMapping mapping_from(const json& j){
     map_ros_capture_stamp(m,m.source_clock,m.valid_from_ns);return m;
 }
 json capture_json(const CaptureMetrics& m){return {{"source_records",m.source_records},{"source_frames",m.source_frames},{"delivered_frames",m.delivered_frames},{"queue_drops",m.queue_drops},{"no_slot_drops",m.no_slot_drops},{"source_frame_gaps",m.source_frame_gaps},{"repeated_frames",m.repeated_frames},{"source_timeouts",m.source_timeouts},{"invalid_frames",m.invalid_frames},{"backpressure_waits",m.backpressure_waits},{"backpressure_wait_ns",m.backpressure_wait_ns},{"queued_frames",m.queued_frames},{"queue_high_watermark",m.queue_high_watermark},{"pool_capacity",m.pool_capacity},{"packed_bytes_per_slot",m.packed_bytes_per_slot},{"running",m.running}};}
-json output_descriptor(const std::string& topic,unsigned w,unsigned h,const char* encoding,const std::string& frame){return {{"topic",topic},{"width",w},{"height",h},{"step",w*4},{"encoding",encoding},{"frame_id",frame}};}
-struct Counters {std::uint64_t read=0,admitted=0,ring_drops=0,identity_rejects=0,published_depth=0,published_rgb=0,timeouts=0;};
-json counters_json(const Counters& c){return {{"read",c.read},{"admitted",c.admitted},{"ring_drops",c.ring_drops},{"identity_rejects",c.identity_rejects},{"published_depth",c.published_depth},{"published_rgb",c.published_rgb},{"received_depth",0},{"received_rgb",0},{"timeouts",c.timeouts}};}
+json output_descriptor(const std::string& topic,unsigned w,unsigned h,const char* encoding,const std::string& frame,unsigned elem_bytes=4){return {{"topic",topic},{"width",w},{"height",h},{"step",w*elem_bytes},{"encoding",encoding},{"frame_id",frame}};}
+struct Counters {std::uint64_t read=0,admitted=0,ring_drops=0,identity_rejects=0,published_depth=0,published_rgb=0,published_completed_depth=0,published_completed_provenance=0,timeouts=0;};
+json counters_json(const Counters& c,bool has_completed=false){json j={{"read",c.read},{"admitted",c.admitted},{"ring_drops",c.ring_drops},{"identity_rejects",c.identity_rejects},{"published_depth",c.published_depth},{"published_rgb",c.published_rgb},{"received_depth",0},{"received_rgb",0},{"timeouts",c.timeouts}};if(has_completed){j["published_completed_depth"]=c.published_completed_depth;j["published_completed_provenance"]=c.published_completed_provenance;j["received_completed_depth"]=0;j["received_completed_provenance"]=0;}return j;}
 struct Pending {DaxaDepthPipeline::Frame depth;DaxaFrame full;DaxaRefinement::Frame refined;DaxaFrame rgb;DaxaHostExport::Frame output,completed_output;CaptureLease capture;RosCaptureStamp stamp;std::uint64_t producer_observed=0,producer_enqueue_begin=0,producer_enqueue_end=0,export_enqueue_end=0;};
-void initialize_image(sensor_msgs::msg::Image& image,unsigned w,unsigned h,const char* encoding,const std::string& frame){image.width=w;image.height=h;image.step=w*4;image.encoding=encoding;image.is_bigendian=0;image.header.frame_id=frame;image.data.resize(size_t(w)*h*4);}
+void initialize_image(sensor_msgs::msg::Image& image,unsigned w,unsigned h,const char* encoding,const std::string& frame,unsigned elem_bytes=4){image.width=w;image.height=h;image.step=w*elem_bytes;image.encoding=encoding;image.is_bigendian=0;image.header.frame_id=frame;image.data.resize(size_t(w)*h*elem_bytes);}
 void run(const Options& o, OutputFile& file){
     if constexpr(std::endian::native!=std::endian::little)throw std::runtime_error("ROS image export requires a little-endian host");
     auto mapping_document=load_map(o.map);auto mapping=mapping_from(mapping_document);
@@ -177,9 +177,12 @@ void run(const Options& o, OutputFile& file){
     auto node=std::make_shared<rclcpp::Node>("stereoforge_depth_publisher",rclcpp::NodeOptions().use_intra_process_comms(false).start_parameter_services(false).start_parameter_event_publisher(false));
     if(node->has_parameter("use_sim_time")&&node->get_parameter("use_sim_time").as_bool())throw std::invalid_argument("simulated time unsupported");
     auto qos_profile=rclcpp::QoS(rclcpp::KeepLast(o.qos_depth)).durability_volatile();if(o.reliability=="reliable")qos_profile.reliable();else qos_profile.best_effort();
-    rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr depth_pub,rgb_pub,completed_depth_pub;
+    rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr depth_pub,rgb_pub,completed_depth_pub,completed_provenance_pub;
     if(depth)depth_pub=node->create_publisher<sensor_msgs::msg::Image>(o.depth_topic,qos_profile);
-    if(depth&&experimental&&o.planar_recovery)completed_depth_pub=node->create_publisher<sensor_msgs::msg::Image>(o.completed_depth_topic,qos_profile);
+    if(depth&&experimental&&o.planar_recovery){
+        completed_depth_pub=node->create_publisher<sensor_msgs::msg::Image>(o.completed_depth_topic,qos_profile);
+        completed_provenance_pub=node->create_publisher<sensor_msgs::msg::Image>(o.completed_provenance_topic,qos_profile);
+    }
     if(rgb)rgb_pub=node->create_publisher<sensor_msgs::msg::Image>(o.rgb_topic,qos_profile);
     if(o.subscriber_wait>0){
         auto deadline=steady::now()+std::chrono::duration_cast<steady::duration>(std::chrono::duration<double>(o.subscriber_wait));
@@ -188,7 +191,7 @@ void run(const Options& o, OutputFile& file){
             std::this_thread::sleep_until(std::min(deadline,steady::now()+std::chrono::milliseconds(10)));
         }
     }
-    sensor_msgs::msg::Image depth_image,rgb_image,completed_depth_image;if(depth)initialize_image(depth_image,maps.width,maps.height,"32FC1",o.frame);if(depth&&experimental&&o.planar_recovery)initialize_image(completed_depth_image,maps.width,maps.height,"32FC1",o.frame);if(rgb)initialize_image(rgb_image,maps.width,maps.height,"rgba8",o.frame);
+    sensor_msgs::msg::Image depth_image,rgb_image,completed_depth_image,completed_provenance_image;if(depth)initialize_image(depth_image,maps.width,maps.height,"32FC1",o.frame);if(depth&&experimental&&o.planar_recovery){initialize_image(completed_depth_image,maps.width,maps.height,"32FC1",o.frame);initialize_image(completed_provenance_image,maps.width,maps.height,"mono8",o.frame,1);}if(rgb)initialize_image(rgb_image,maps.width,maps.height,"rgba8",o.frame);
     CaptureConfig capture_config;capture_config.eye_width=maps.eye_width;capture_config.height=maps.source_height;capture_config.fps=o.fps;capture_config.device_id=o.device_id;
     capture_config.queue_capacity=2;capture_config.pool_capacity=6;capture_config.calibration_identity=maps.original_identity;capture_config.device_serial_override=o.device_serial;
     if(o.source=="replay")capture_config.queue_policy=CaptureQueuePolicy::wait_for_consumer;
@@ -209,11 +212,11 @@ void run(const Options& o, OutputFile& file){
     if(depth){depth_config.validate();DaxaDualPreprocess::Frame pair;DaxaDepthPipeline::Frame prototype;
         if(dual){dual_preprocess=std::make_unique<DaxaDualPreprocess>(maps,coarse_maps,2,context);pair=dual_preprocess->enqueue(first);pipeline=std::make_unique<DaxaDepthPipeline>(depth_config,context,pair.coarse);prototype=pipeline->enqueue_preprocessed(pair.coarse);}
         else{pipeline=std::make_unique<DaxaDepthPipeline>(experimental?coarse_maps:maps,depth_config,context,first);prototype=pipeline->enqueue(first);}
-        if(experimental){DaxaFrame full;if(dual)full=pair.full;else{full_preprocess=std::make_unique<DaxaPreprocess>(maps,2,context);full=full_preprocess->enqueue(first);}refinement=std::make_unique<DaxaRefinement>(context,prototype,full,refinement_config);auto refined=refinement->process(prototype,full);exporter=std::make_unique<DaxaHostExport>(context,refined.observations(),DaxaHostExportConfig{2,true,rgb});if(o.planar_recovery)completed_exporter=std::make_unique<DaxaHostExport>(context,refined.completed_observations(),DaxaHostExportConfig{2,true,false});refined.wait();refined={};full={};refinement->collect();if(!dual)full_preprocess->collect_completed_sources();}
+        if(experimental){DaxaFrame full;if(dual)full=pair.full;else{full_preprocess=std::make_unique<DaxaPreprocess>(maps,2,context);full=full_preprocess->enqueue(first);}refinement=std::make_unique<DaxaRefinement>(context,prototype,full,refinement_config);auto refined=refinement->process(prototype,full);exporter=std::make_unique<DaxaHostExport>(context,refined.observations(),DaxaHostExportConfig{2,true,rgb});if(o.planar_recovery)completed_exporter=std::make_unique<DaxaHostExport>(context,refined.completed_observations(),DaxaHostExportConfig{2,true,false,true});refined.wait();refined={};full={};refinement->collect();if(!dual)full_preprocess->collect_completed_sources();}
         else{exporter=std::make_unique<DaxaHostExport>(context,prototype.observations(),DaxaHostExportConfig{2,true,rgb});prototype.wait();}prototype={};pair={};pipeline->collect();if(dual)dual_preprocess->collect();}
     else{preprocess=std::make_unique<DaxaPreprocess>(maps,2,context);auto prototype=preprocess->enqueue(first);exporter=std::make_unique<DaxaHostExport>(context,prototype,DaxaHostExportConfig{2,false,true});prototype.wait();prototype={};preprocess->collect_completed_sources();}
     first={};
-    RosDeliveryTrace trace(size_t(o.max_frames)*(unsigned(depth)+unsigned(rgb))+2);std::array<Pending,2> pending{};Counters counters{};
+    RosDeliveryTrace trace(size_t(o.max_frames)*(unsigned(depth)+unsigned(rgb)+(completed_exporter?2u:0u))+2);std::array<Pending,2> pending{};Counters counters{};
     std::unique_ptr<DepthSpeckleFilter> depth_speckle;
     if(depth&&o.depth_speckle_min_pixels){
         const auto mc=maps.metric_calibration();
@@ -228,7 +231,7 @@ void run(const Options& o, OutputFile& file){
     std::uint64_t speckle_filter_ns_total=0,speckle_filtered_frames=0;
     DepthRateController rate_controller(depth_rate_config(o));
     YuyvSceneMonitor scene_monitor;
-    json outputs=json::object();if(depth)outputs["depth"]=output_descriptor(o.depth_topic,maps.width,maps.height,"32FC1",o.frame);if(completed_exporter)outputs["completed_depth"]=output_descriptor(o.completed_depth_topic,maps.width,maps.height,"32FC1",o.frame);if(rgb)outputs["rgb"]=output_descriptor(o.rgb_topic,maps.width,maps.height,"rgba8",o.frame);
+    json outputs=json::object();if(depth)outputs["depth"]=output_descriptor(o.depth_topic,maps.width,maps.height,"32FC1",o.frame);if(completed_exporter){outputs["completed_depth"]=output_descriptor(o.completed_depth_topic,maps.width,maps.height,"32FC1",o.frame);outputs["completed_provenance"]=output_descriptor(o.completed_provenance_topic,maps.width,maps.height,"mono8",o.frame,1);}if(rgb)outputs["rgb"]=output_descriptor(o.rgb_topic,maps.width,maps.height,"rgba8",o.frame);
     json qos={{"history","keep_last"},{"depth",o.qos_depth},{"reliability",o.reliability},{"durability","volatile"}};
     auto memory=exporter->memory();auto baseline=capture->metrics();
     auto effective_temporal=stereoforge::native_estimator::instantaneous();
@@ -265,7 +268,7 @@ void run(const Options& o, OutputFile& file){
         {"view_profile",{{"status","unavailable"},{"reason","view is not executed"}}},{"clock_mapping",mapping_document},{"capture_counters",capture_json(baseline)},
         {"memory",{{"producer_requested_bytes",dual?json(nullptr):json(depth?(pipeline->requested_combined_buffer_bytes()+(experimental?maps.requested_bytes(2)+refinement->requested_buffer_bytes():0)):maps.requested_bytes(2))},{"export_requested_bytes",exporter->requested_bytes()},
             {"capture_requested_bytes",(baseline.pool_capacity+1)*baseline.packed_bytes_per_slot},{"trace_capacity",trace.event_capacity()},{"trace_record_bytes",sizeof(RosDeliveryTraceRecord)},
-            {"ros_requested_bytes",depth_image.data.size()+rgb_image.data.size()},{"export_memory_type_index",memory.type_index},{"export_memory_property_flags",memory.property_flags},{"export_host_cached",memory.host_cached},
+            {"ros_requested_bytes",depth_image.data.size()+rgb_image.data.size()+completed_depth_image.data.size()+completed_provenance_image.data.size()},{"export_memory_type_index",memory.type_index},{"export_memory_property_flags",memory.property_flags},{"export_host_cached",memory.host_cached},
             {"storage_accounting_complete",false}}}};
     if(dual)config["memory"]["producer_requested_bytes_reason"]="dual_producer_requested_bytes_unavailable";
     auto valid_source=[&](const CaptureLease& f,RosCaptureStamp& stamp){check_source(f);if(f->frame_id<=last_id||f->camera_timestamp_ns<=last_capture)return false;stamp=checked_stamp(f);fresh.admit(static_cast<std::int64_t>(f->frame_id),f->camera_timestamp_ns,f->camera_clock_domain);last_id=f->frame_id;last_capture=f->camera_timestamp_ns;return true;};
@@ -285,19 +288,28 @@ void run(const Options& o, OutputFile& file){
         auto pending_count=count_pending();auto queued=capture->metrics().queued_frames;
         auto emit=[&](RosDeliveryOutput which,sensor_msgs::msg::Image& image,const rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr& publisher){
             if(trace.records().size()>=trace.event_capacity()-2){RosDeliveryTraceRecord unused{};trace.append(unused);trace_full=true;return;}
-            auto bytes=which==RosDeliveryOutput::Depth?p.output.depth_bytes():p.output.rgba_bytes();
-            if(bytes.size()!=image.data.size())throw std::runtime_error("export extent mismatch");
+            const bool is_comp=(which==RosDeliveryOutput::CompletedDepth||which==RosDeliveryOutput::CompletedProvenance);
+            const auto& exp_frame=is_comp?p.completed_output:p.output;
+            auto bytes=which==RosDeliveryOutput::Depth?p.output.depth_bytes():which==RosDeliveryOutput::Rgb?p.output.rgba_bytes():which==RosDeliveryOutput::CompletedDepth?p.completed_output.depth_bytes():p.completed_output.provenance_bytes();
+            if(which==RosDeliveryOutput::CompletedProvenance){if(bytes.size()!=image.data.size()*4)throw std::runtime_error("export provenance extent mismatch");}
+            else if(bytes.size()!=image.data.size())throw std::runtime_error("export extent mismatch");
             RosDeliveryTraceRecord r{};r.kind=RosDeliveryTraceKind::Published;r.output=which;r.freshness=RosDeliveryFreshness::MeasuredSingleSource;
             r.source_id=static_cast<std::int64_t>(p.capture->frame_id);r.capture_ns=p.capture->camera_timestamp_ns;r.host_ingress_ns=p.capture->host_ingress_timestamp_ns;
             r.mapped_capture_ns=std::uint64_t(p.stamp.sec)*1'000'000'000u+p.stamp.nanosec;r.mapping_error_ns=p.stamp.max_error_ns;
-            r.producer_ticket=p.output.producer_ticket();r.copy_ticket=p.output.copy_ticket();
+            r.producer_ticket=exp_frame.producer_ticket();r.copy_ticket=exp_frame.copy_ticket();
             r.producer_enqueue_begin_ns=p.producer_enqueue_begin;r.producer_enqueue_end_ns=p.producer_enqueue_end;r.export_enqueue_end_ns=p.export_enqueue_end;
             r.producer_complete_observed_ns=p.producer_observed;r.copy_complete_observed_ns=copy_observed;
             r.capture_queue=static_cast<std::uint32_t>(queued);r.pending=pending_count;image.header.stamp.sec=p.stamp.sec;image.header.stamp.nanosec=p.stamp.nanosec;
             bool cpu_ok=true;
             r.copy_begin_ns=now_ns<steady>();
             if(o.thread_cpu_timing)cpu_ok &= thread_cpu_now(r.thread_cpu_copy_begin_ns);
-            std::memcpy(image.data.data(),bytes.data(),bytes.size());
+            if(which==RosDeliveryOutput::CompletedProvenance){
+                const auto* src_u32=reinterpret_cast<const std::uint32_t*>(bytes.data());
+                const size_t npix=image.data.size();
+                for(size_t i=0;i<npix;++i)image.data[i]=static_cast<std::uint8_t>(src_u32[i]&0xffu);
+            } else {
+                std::memcpy(image.data.data(),bytes.data(),bytes.size());
+            }
             if(which==RosDeliveryOutput::Depth&&depth_speckle){
                 const auto filter_begin=now_ns<steady>();
                 const auto rgba_span=rgb?p.output.rgba_bytes():std::span<const std::byte>{};
@@ -322,9 +334,11 @@ void run(const Options& o, OutputFile& file){
                 r.payload_fnv1a64=fnv1a64_words(image.data.data(),image.data.size());
                 const size_t npix=size_t(image.width)*image.height;
                 std::uint32_t valid_px=0;
-                if(which==RosDeliveryOutput::Depth){
+                if(which==RosDeliveryOutput::Depth||which==RosDeliveryOutput::CompletedDepth){
                     const auto* fp=reinterpret_cast<const float*>(image.data.data());
                     for(size_t i=0;i<npix;++i)if(std::isfinite(fp[i])&&fp[i]>0.0f)++valid_px;
+                } else if(which==RosDeliveryOutput::CompletedProvenance){
+                    for(size_t i=0;i<npix;++i)if(image.data[i]==1u||image.data[i]==6u)++valid_px;
                 } else {
                     const auto* up=reinterpret_cast<const std::uint32_t*>(image.data.data());
                     for(size_t i=0;i<npix;++i)if((up[i]&0x00FFFFFFu)!=0u)++valid_px;
@@ -334,10 +348,15 @@ void run(const Options& o, OutputFile& file){
             if(o.thread_cpu_timing)r.thread_cpu_status=!cpu_ok?RosThreadCpuStatus::ClockReadFailed:
                 (r.thread_cpu_copy_begin_ns<=r.thread_cpu_copy_end_ns && r.thread_cpu_copy_end_ns<=r.thread_cpu_publish_begin_ns &&
                  r.thread_cpu_publish_begin_ns<=r.thread_cpu_publish_end_ns?RosThreadCpuStatus::Available:RosThreadCpuStatus::Nonmonotonic);
-            if(!trace.append(r)){trace_full=true;return;}if(which==RosDeliveryOutput::Depth)++counters.published_depth;else ++counters.published_rgb;
+            if(!trace.append(r)){trace_full=true;return;}
+            if(which==RosDeliveryOutput::Depth)++counters.published_depth;
+            else if(which==RosDeliveryOutput::CompletedDepth)++counters.published_completed_depth;
+            else if(which==RosDeliveryOutput::CompletedProvenance)++counters.published_completed_provenance;
+            else ++counters.published_rgb;
         };
         if(depth)emit(RosDeliveryOutput::Depth,depth_image,depth_pub);
-        if(completed_exporter&&completed_depth_pub){auto cbytes=p.completed_output.depth_bytes();if(cbytes.size()!=completed_depth_image.data.size())throw std::runtime_error("completed export extent mismatch");completed_depth_image.header.stamp.sec=p.stamp.sec;completed_depth_image.header.stamp.nanosec=p.stamp.nanosec;std::memcpy(completed_depth_image.data.data(),cbytes.data(),cbytes.size());completed_depth_pub->publish(completed_depth_image);}
+        if(completed_exporter&&completed_depth_pub&&!trace_full)emit(RosDeliveryOutput::CompletedDepth,completed_depth_image,completed_depth_pub);
+        if(completed_exporter&&completed_provenance_pub&&!trace_full)emit(RosDeliveryOutput::CompletedProvenance,completed_provenance_image,completed_provenance_pub);
         if(rgb&&!trace_full)emit(RosDeliveryOutput::Rgb,rgb_image,rgb_pub);
         p.completed_output={};p.output={};p.refined={};p.full={};p.depth={};p.rgb={};p.capture={};if(completed_exporter)completed_exporter->collect();exporter->collect();if(experimental){refinement->collect();if(!dual)full_preprocess->collect_completed_sources();}if(depth)pipeline->collect();else preprocess->collect_completed_sources();if(dual)dual_preprocess->collect();
     };
@@ -379,12 +398,12 @@ void run(const Options& o, OutputFile& file){
     try{capture->stop();for(auto& p:pending)retire(p,true);if(completed_exporter)completed_exporter->drain();exporter->drain();if(depth)pipeline->drain();else preprocess->collect_completed_sources();}
     catch(const std::exception& e){reason="error";failure=e.what();}
     if(trace_full&&reason!="error")reason="trace_full";
-    auto drain_end=now_ns<steady>();for(auto& p:pending){p.output={};p.refined={};p.full={};p.depth={};p.rgb={};p.capture={};}for(auto& p:pending)p.completed_output={};completed_exporter.reset();exporter.reset();refinement.reset();full_preprocess.reset();pipeline.reset();dual_preprocess.reset();preprocess.reset();
+    auto drain_end=now_ns<steady>();for(auto& p:pending){p.output={};p.refined={};p.full={};p.depth={};p.rgb={};p.capture={};}for(auto& p:pending)p.completed_output={};const bool has_completed=(depth&&experimental&&o.planar_recovery);completed_exporter.reset();exporter.reset();refinement.reset();full_preprocess.reset();pipeline.reset();dual_preprocess.reset();preprocess.reset();
     try{context->close();}catch(const std::exception& e){reason="error";failure=e.what();}
     if(context->validation_errors.load()||context->validation_warnings.load()){reason="error";failure="Vulkan validation errors or warnings";}
     json begin={{"schema","stereoforge.ros_delivery_event.v1"},{"kind","start"},{"run_id",o.run},{"role","publisher"},{"at_ns",started},{"config",config}};
     json end={{"schema","stereoforge.ros_delivery_event.v1"},{"kind","stop"},{"run_id",o.run},{"role","publisher"},{"at_ns",drain_end},{"window_end_ns",window_end},
-        {"reason",reason},{"counters",counters_json(window_counters)},{"capture_counters",capture_json(window_capture)},{"queued",window_capture.queued_frames},
+        {"reason",reason},{"counters",counters_json(window_counters,has_completed)},{"capture_counters",capture_json(window_capture)},{"queued",window_capture.queued_frames},
         {"pending",window_pending},{"trace_drops",trace.dropped()},{"drain_ns",drain_end-drain_begin}};
     file.reset();file.put("[");file.put(begin.dump());for(auto const& r:trace.records()){file.put(",");file.put(ros_delivery_event_json(r,o.run,"publisher",config).dump());}file.put(",");file.put(end.dump());file.put("]\n");file.complete=true;
     if(depth){

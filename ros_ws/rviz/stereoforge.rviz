@@ -5,10 +5,13 @@ Panels:
     Property Tree Widget:
       Expanded:
         - /Global Options1
-        - /Rectified RGB1
-        - /Depth (m)1
+        - /ZED 2 Rectified RGB (Natural)1
+        - /ZED 2 Depth Measured (Colorized)1
+        - /ZED 2 Depth Completed v9.3 (Colorized)1
+        - /RealSense D435i RGB1
+        - /RealSense D435i Depth (Colorized)1
       Splitter Ratio: 0.5
-    Tree Height: 337
+    Tree Height: 480
   - Class: rviz_common/Views
     Expanded:
       - /Current View1
@@ -24,10 +27,75 @@ Visualization Manager:
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Best Effort
+        Value: /stereoforge/rectified_rgb_natural
+      Max Value: 1
+      Min Value: 0
+      Name: ZED 2 Rectified RGB (Natural)
+      Normalize Range: false
+      Transport Hint: raw
+    - Class: rviz_default_plugins/Image
+      Enabled: true
+      Image Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /stereoforge/depth_colorized
+      Max Value: 1
+      Min Value: 0
+      Name: ZED 2 Depth Measured (Colorized)
+      Normalize Range: false
+      Transport Hint: raw
+    - Class: rviz_default_plugins/Image
+      Enabled: true
+      Image Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /stereoforge/depth_completed_colorized
+      Max Value: 1
+      Min Value: 0
+      Name: ZED 2 Depth Completed v9.3 (Colorized)
+      Normalize Range: false
+      Transport Hint: raw
+    - Class: rviz_default_plugins/Image
+      Enabled: true
+      Image Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /realsense/rectified_rgb
+      Max Value: 1
+      Min Value: 0
+      Name: RealSense D435i RGB
+      Normalize Range: false
+      Transport Hint: raw
+    - Class: rviz_default_plugins/Image
+      Enabled: true
+      Image Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /realsense/depth_colorized
+      Max Value: 1
+      Min Value: 0
+      Name: RealSense D435i Depth (Colorized)
+      Normalize Range: false
+      Transport Hint: raw
+    - Class: rviz_default_plugins/Image
+      Enabled: true
+      Image Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
         Value: /stereoforge/rectified_rgb
       Max Value: 1
       Min Value: 0
-      Name: Rectified RGB
+      Name: ZED 2 Raw Rectified RGB
       Normalize Range: true
       Transport Hint: raw
     - Class: rviz_default_plugins/Image
@@ -41,7 +109,48 @@ Visualization Manager:
       Max Value: 3.5
       Median window: 5
       Min Value: 0.5
-      Name: Depth (m)
+      Name: ZED 2 Raw Depth Measured (m)
+      Normalize Range: false
+      Transport Hint: raw
+    - Class: rviz_default_plugins/Image
+      Enabled: true
+      Image Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /stereoforge/depth_completed
+      Max Value: 3.5
+      Median window: 5
+      Min Value: 0.5
+      Name: ZED 2 Raw Depth Completed v9.3 (m)
+      Normalize Range: false
+      Transport Hint: raw
+    - Class: rviz_default_plugins/Image
+      Enabled: true
+      Image Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /stereoforge/depth_completed_provenance
+      Max Value: 6
+      Min Value: 0
+      Name: ZED 2 Completed Provenance (0=Inv, 1=Meas, 6=Planar)
+      Normalize Range: false
+      Transport Hint: raw
+    - Class: rviz_default_plugins/Image
+      Enabled: true
+      Image Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /realsense/depth
+      Max Value: 3.5
+      Median window: 5
+      Min Value: 0.5
+      Name: RealSense D435i Raw Depth (m)
       Normalize Range: false
       Transport Hint: raw
   Global Options:
@@ -75,12 +184,12 @@ Visualization Manager:
 Window Geometry:
   Displays:
     collapsed: false
-  Height: 846
+  Height: 1020
   Hide Left Dock: false
   Hide Right Dock: false
   QMainWindow State: ""
   Views:
     collapsed: false
-  Width: 1200
-  X: 100
-  Y: 100
+  Width: 1680
+  X: 60
+  Y: 40

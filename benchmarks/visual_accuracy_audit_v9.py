@@ -419,14 +419,14 @@ def evaluate_known_ground_truth_suite_720p(work_dir: Path) -> dict[str, Any]:
         # Load outputs and evaluate against exact ground truth `gt_disp` on `non_occ`
         d_4i_b, v_4i_b, _, _ = load_refinement_planes(s_dir / "4x_ind_baseline")
         d_4i_r, v_4i_r, _, _ = load_refinement_planes(s_dir / "4x_ind_selective_repair")
-        d_4i_p = np.fromfile(str(s_dir / "4x_ind_planar_recovery") + ".completed_disparity.f32", dtype="<f4").reshape(h, w)
-        v_4i_p = np.fromfile(str(s_dir / "4x_ind_planar_recovery") + ".completed_validity.u32", dtype="<u4").reshape(h, w) != 0
-        prov_4i_p = np.fromfile(str(s_dir / "4x_ind_planar_recovery") + ".completed_provenance.u32", dtype="<u4").reshape(h, w)
+        d_4i_p = np.fromfile(str(s_dir / "4x_ind_planar_recovery") + ".completed_disparity.f32", dtype="<f4").reshape(-1, h, w)[0]
+        v_4i_p = np.fromfile(str(s_dir / "4x_ind_planar_recovery") + ".completed_validity.u32", dtype="<u4").reshape(-1, h, w)[0] != 0
+        prov_4i_p = np.fromfile(str(s_dir / "4x_ind_planar_recovery") + ".completed_provenance.u32", dtype="<u4").reshape(-1, h, w)[0]
         d_4d_b, v_4d_b, _, _ = load_refinement_planes(s_dir / "4x_der_baseline")
         d_4d_r, v_4d_r, _, _ = load_refinement_planes(s_dir / "4x_der_selective_repair")
-        d_4d_p = np.fromfile(str(s_dir / "4x_der_planar_recovery") + ".completed_disparity.f32", dtype="<f4").reshape(h, w)
-        v_4d_p = np.fromfile(str(s_dir / "4x_der_planar_recovery") + ".completed_validity.u32", dtype="<u4").reshape(h, w) != 0
-        prov_4d_p = np.fromfile(str(s_dir / "4x_der_planar_recovery") + ".completed_provenance.u32", dtype="<u4").reshape(h, w)
+        d_4d_p = np.fromfile(str(s_dir / "4x_der_planar_recovery") + ".completed_disparity.f32", dtype="<f4").reshape(-1, h, w)[0]
+        v_4d_p = np.fromfile(str(s_dir / "4x_der_planar_recovery") + ".completed_validity.u32", dtype="<u4").reshape(-1, h, w)[0] != 0
+        prov_4d_p = np.fromfile(str(s_dir / "4x_der_planar_recovery") + ".completed_provenance.u32", dtype="<u4").reshape(-1, h, w)[0]
 
         dl_ocv, dr_ocv, _ = cv_sgbm(ll.astype(np.uint32), rr.astype(np.uint32), disparities=128, block=5, uniqueness=10)
         lv_ocv = valid_map(dl_ocv, disparities=128)

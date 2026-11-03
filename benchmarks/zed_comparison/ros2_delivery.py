@@ -16,6 +16,8 @@ SUMMARY_SCHEMA = 'stereoforge.ros_delivery_summary.v1'
 BASE = {'schema', 'kind', 'run_id', 'role', 'at_ns'}
 COUNTERS = {'read', 'admitted', 'ring_drops', 'identity_rejects', 'published_depth',
             'published_rgb', 'received_depth', 'received_rgb', 'timeouts'}
+COMPLETED_COUNTERS = {'published_completed_depth', 'published_completed_provenance',
+                      'received_completed_depth', 'received_completed_provenance'}
 CAPTURE = {'source_records', 'source_frames', 'delivered_frames', 'queue_drops',
            'no_slot_drops', 'source_frame_gaps', 'repeated_frames', 'source_timeouts',
            'invalid_frames', 'backpressure_waits', 'backpressure_wait_ns', 'queued_frames',
@@ -79,7 +81,7 @@ def _capture(value):
 
 
 def _outputs(value):
-    s._require(type(value) is dict and value and set(value) <= {'depth', 'rgb'}, 'invalid outputs')
+    s._require(type(value) is dict and value and set(value) <= {'depth', 'rgb', 'completed_depth', 'completed_provenance'}, 'invalid outputs')
     topics = set()
     for name, spec in value.items():
         s._keys(spec, {'topic', 'width', 'height', 'step', 'encoding', 'frame_id'}, 'output')
@@ -87,7 +89,9 @@ def _outputs(value):
         s._require(spec['frame_id'] != 'unknown' and spec['topic'] not in topics, 'invalid frame or duplicate topic')
         topics.add(spec['topic'])
         _int(spec['width'], 'width', 1, 8192); _int(spec['height'], 'height', 1, 8192)
-        s._require(spec['step'] == spec['width'] * 4 and spec['encoding'] == ('32FC1' if name == 'depth' else 'rgba8'), 'invalid image layout')
+        expected_step = spec['width'] if name == 'completed_provenance' else spec['width'] * 4
+        expected_enc = 'mono8' if name == 'completed_provenance' else ('32FC1' if name in ('depth', 'completed_depth') else 'rgba8')
+        s._require(spec['step'] == expected_step and spec['encoding'] == expected_enc, 'invalid image layout')
 
 
 def _qos(value):
@@ -163,10 +167,12 @@ def _stop(event, start):
     _int(event['window_end_ns'], 'window_end', start['at_ns'], event['at_ns'])
     _text(event['reason'], 'reason')
     s._require(event['reason'] in ('limit', 'eof', 'shutdown', 'error', 'trace_full'), 'invalid stop reason')
-    s._keys(event['counters'], COUNTERS, 'counters')
-    for key in COUNTERS: _int(event['counters'][key], key)
-    unused = ({'received_depth', 'received_rgb'} if event['role'] == 'publisher' else
-              {'read', 'admitted', 'ring_drops', 'identity_rejects', 'published_depth', 'published_rgb'})
+    has_comp_counters = isinstance(event.get('counters'), dict) and bool(COMPLETED_COUNTERS & event['counters'].keys())
+    expected_counters = COUNTERS | (COMPLETED_COUNTERS if has_comp_counters else set())
+    s._keys(event['counters'], expected_counters, 'counters')
+    for key in expected_counters: _int(event['counters'][key], key)
+    unused = (({'received_depth', 'received_rgb'} | ({'received_completed_depth', 'received_completed_provenance'} if has_comp_counters else set())) if event['role'] == 'publisher' else
+              ({'read', 'admitted', 'ring_drops', 'identity_rejects', 'published_depth', 'published_rgb'} | ({'published_completed_depth', 'published_completed_provenance'} if has_comp_counters else set())))
     s._require(all(event['counters'][key] == 0 for key in unused), 'nonapplicable counters must be zero')
     for key in ('queued', 'pending', 'trace_drops', 'drain_ns'): _int(event[key], key)
     if event['role'] == 'publisher':
@@ -275,9 +281,11 @@ def summarize_delivery(events, *, policy=None):
         for role_rows, name, counter_prefix in ((pub, 'publisher', 'published'), (sub, 'subscriber', 'received')):
             counters = role_rows[-1]['counters']
             in_window = [e for e in role_rows[1:-1] if e['at_ns'] <= role_rows[-1]['window_end_ns']]
-            for output in ('depth', 'rgb'):
+            for output in ('depth', 'rgb', 'completed_depth', 'completed_provenance'):
+                if output in ('completed_depth', 'completed_provenance') and (counter_prefix + '_' + output) not in counters:
+                    continue
                 actual = sum(e['kind'] == counter_prefix and e['output'] == output for e in in_window)
-                if counters[counter_prefix + '_' + output] != actual:
+                if counters.get(counter_prefix + '_' + output, 0) != actual:
                     reasons.append(name + '_counter_mismatch')
             if name == 'publisher':
                 if counters['admitted'] > counters['read'] or counters['ring_drops'] + counters['identity_rejects'] > counters['read']:

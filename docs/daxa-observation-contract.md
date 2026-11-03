@@ -29,13 +29,16 @@ valid-looking RGB alone never establishes depth. Producer contracts establish
 canonical contents: this adapter does not scan or read back every pixel.
 
 For `DaxaRefinement`, `DaxaRefinement::Frame::observations()` always returns
-strictly measured observations (`Provenance` in `{0, 1}`), while
-`DaxaRefinement::Frame::completed_observations()` returns the left-eye completed
+strictly measured two-eye observations (`Provenance` in `{0, 1}`), while
+`DaxaRefinement::Frame::completed_observations()` returns the two-eye completed
 planes (`CompletedDepth`, `CompletedConfidence`, `CompletedValidity`,
-`CompletedProvenance`, `CompletedSourceIds`, `CompletedAgeNs`, `CompletedDisparity`)
-where pixels recovered by `planar_recovery` carry `DaxaProvenance::PlanarInferred = 6`
-(`SF_PROVENANCE_PLANAR_INFERRED = 6u`). Planar-inferred pixels never overwrite the
-measured observation planes (`0..8`) and never reuse `DaxaProvenance::Reprojected = 2`.
+`CompletedProvenance`, `CompletedSourceIds`, `CompletedAgeNs`, `CompletedDisparity`,
+all sized `2 * width * height`) where left-eye (`eye = 0`) pixels recovered by
+`planar_recovery` carry `DaxaProvenance::PlanarInferred = 6`
+(`SF_PROVENANCE_PLANAR_INFERRED = 6u`) and right-eye (`eye = 1`) pixels retain
+their strictly measured observations (`Provenance` in `{0, 1}`). Planar-inferred
+pixels never overwrite the measured observation planes (`0..8`) and never reuse
+`DaxaProvenance::Reprojected = 2`.
 
 Four image descriptors expose tightly packed decoded RGB: `OriginalLeft`,
 `OriginalRight`, `RectifiedLeft` and `RectifiedRight`. Each uses a uint32 per pixel

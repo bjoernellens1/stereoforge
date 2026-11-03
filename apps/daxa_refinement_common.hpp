@@ -11,9 +11,16 @@
 #include <numeric>
 #include <fcntl.h>
 #include <unistd.h>
+#include <cstring>
 namespace refinement_app {
 using namespace stereoforge;using json=nlohmann::json;using Clock=std::chrono::steady_clock;
 inline void check(bool v,const char* m){if(!v)throw std::invalid_argument(m);}
+template<class T> inline void exact_plane(const std::vector<T>& a,const std::vector<T>& b){check(a.size()==b.size()&&(a.empty()||std::memcmp(a.data(),b.data(),a.size()*sizeof(T))==0),"raw reuse differs from direct refinement");}
+inline void exact_readback(const DaxaRefinementReadback& a,const DaxaRefinementReadback& b){
+#define SF_EQ(n) exact_plane(a.n,b.n)
+    SF_EQ(disparity);SF_EQ(confidence);SF_EQ(validity);SF_EQ(depth);SF_EQ(metric_confidence);SF_EQ(metric_validity);SF_EQ(provenance);SF_EQ(source_ids);SF_EQ(age_ns);SF_EQ(prediction);SF_EQ(prediction_validity);SF_EQ(lower);SF_EQ(upper);SF_EQ(reason);SF_EQ(method);SF_EQ(winner);SF_EQ(best_cost);SF_EQ(second_cost);SF_EQ(supported_candidates);SF_EQ(evaluated_candidates);SF_EQ(subpixel_applied);SF_EQ(raw_disparity);SF_EQ(raw_confidence);SF_EQ(raw_validity);SF_EQ(census);SF_EQ(census_validity);SF_EQ(luma);SF_EQ(support);SF_EQ(completed_disparity);SF_EQ(completed_depth);SF_EQ(completed_confidence);SF_EQ(completed_validity);SF_EQ(completed_provenance);SF_EQ(completed_source_ids);SF_EQ(completed_age_ns);for(unsigned eye=0;eye<2;++eye)exact_plane(a.rectified_rgb[eye],b.rectified_rgb[eye]);
+#undef SF_EQ
+}
 inline uint32_t number(std::string const& s){uint32_t out=0;auto [end,error]=std::from_chars(s.data(),s.data()+s.size(),out);check(error==std::errc{}&&end==s.data()+s.size(),"invalid integer option");return out;}
 inline void write(std::filesystem::path const& path,const void* bytes,size_t size){int fd=::open(path.c_str(),O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC,0666);check(fd>=0,"fresh exclusive output required");size_t at=0;while(at<size){auto n=::write(fd,static_cast<char const*>(bytes)+at,size-at);if(n<0&&errno==EINTR)continue;if(n<=0){::close(fd);throw std::runtime_error("output write failed");}at+=size_t(n);}check(::close(fd)==0,"output close failed");}
 // Nearest-rank percentile: ceil(p*N/100)-1, including even-size medians.
