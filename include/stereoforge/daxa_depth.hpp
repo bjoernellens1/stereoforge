@@ -2,7 +2,7 @@
 #include <stereoforge/daxa_preprocess.hpp>
 #include <stereoforge/daxa_observation.hpp>
 namespace stereoforge {
-enum class DaxaDepthStereoSchedule { Sequential,PairedPerPath,LayeredPerPath,SharedCensusSequential };
+enum class DaxaDepthStereoSchedule { Sequential,PairedPerPath,LayeredPerPath,SharedCensusSequential,Hierarchical1to8Selective1to4 };
 struct DaxaDepthConfig {
     StereoConfig stereo;
     float lr_tolerance=1.f;

@@ -86,10 +86,18 @@ def assess_near_field(cohort: dict[str, Any]) -> dict[str, Any]:
 
 def assess_v10(data: dict[str, Any]) -> dict[str, Any]:
     profiles = data["v10_2_ultra_fast_gpu_profiles"]
-    audits = {
-        name: assess_profile(profiles[name])
-        for name in ("quality_with_planar", "ultra_fast_with_planar", "ultra_fast_measured_only")
-    }
+    profile_names = [
+        name
+        for name in (
+            "quality_with_planar",
+            "ultra_fast_with_planar",
+            "ultra_fast_measured_only",
+            "v11_fast_with_planar",
+            "v11_fast_measured_only",
+        )
+        if name in profiles
+    ]
+    audits = {name: assess_profile(profiles[name]) for name in profile_names}
     nearfield = assess_near_field(data["v10_2_near_field_d_coarse_64_evaluation"]["d_coarse_64"])
     competition = data.get("v10_4_duty_cycle_governor", {}).get("competing_workload_coexistence", {})
     key_issue = not bool(competition)

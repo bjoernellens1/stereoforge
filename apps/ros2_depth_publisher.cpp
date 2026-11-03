@@ -51,12 +51,12 @@ bool thread_cpu_now(std::uint64_t& value) noexcept {
 }
 struct Options {
     std::string source,manifest,replay,mode="depth",map,frame,run,trace,reliability="best_effort",stereo_variant="packed-specialized",device_serial;
-    std::string pipeline_mode="full-sgm",coarse_manifest,descriptor_mode="census",coarse_schedule="sequential",coarse_right_mode="independent-sgm";
+    std::string pipeline_mode="full-sgm",coarse_manifest,descriptor_mode="census",coarse_schedule="sequential",coarse_right_mode="independent-sgm",profile="quality";
     std::string depth_topic="/stereoforge/depth",rgb_topic="/stereoforge/rectified_rgb",completed_depth_topic="/stereoforge/depth_completed",completed_provenance_topic="/stereoforge/depth_completed_provenance";
     std::string depth_rate="adaptive",rate_report;
-    unsigned depth_speckle_min_pixels=0; double depth_speckle_delta_m=0.05; double depth_speckle_delta_px=1.25;
+    unsigned depth_speckle_min_pixels=0; double depth_speckle_delta_m=0.05; double depth_speckle_delta_px=1.25; double gpu_duty_budget_pct=0.0;
     unsigned min_depth_fps=5,max_depth_fps=60,consumer_min_depth_fps=5,max_depth_age_ms=250,downshift_ms=3000;
-    unsigned fps=60,disparities=128,warmup=5,max_frames=100000,qos_depth=1;int device_id=-1;double duration=600,subscriber_wait=0;bool validation=false,thread_cpu_timing=false,fast_mode=false,refinement_subpixel=false,selective_repair=false,planar_recovery=false,verify_payload_checksum=false;
+    unsigned fps=60,disparities=128,warmup=5,max_frames=100000,qos_depth=1;int device_id=-1;double duration=600,subscriber_wait=0;bool validation=false,thread_cpu_timing=false,fast_mode=false,ultra_fast=false,refinement_subpixel=false,selective_repair=false,planar_recovery=false,verify_payload_checksum=false;
 };
 unsigned number(const std::string& s,unsigned lo,unsigned hi){size_t n=0;auto v=std::stoull(s,&n);if(n!=s.size()||v<lo||v>hi)throw std::invalid_argument("integer option outside bounds");return static_cast<unsigned>(v);}
 DepthRateConfig depth_rate_config(const Options& o) {
@@ -92,9 +92,15 @@ Options parse(int argc,char** argv){
         else if(a=="--max-depth-age-ms")o.max_depth_age_ms=number(v,1,10'000);
         else if(a=="--downshift-ms")o.downshift_ms=number(v,1,60'000);
         else if(a=="--stereo-variant")o.stereo_variant=v;else if(a=="--pipeline")o.pipeline_mode=v;else if(a=="--coarse-manifest")o.coarse_manifest=v;
+        else if(a=="--profile"){if(v!="quality"&&v!="exact-ultra"&&v!="ultra-fast"&&v!="v11-fast"&&v!="mobile-balanced")throw std::invalid_argument("invalid profile");o.profile=v;
+            if(v=="exact-ultra"){o.descriptor_mode="ortho-hybrid";o.coarse_schedule="shared-census-sequential";o.coarse_right_mode="independent-sgm";o.fast_mode=true;o.ultra_fast=false;o.refinement_subpixel=true;o.selective_repair=true;}
+            else if(v=="ultra-fast"){o.descriptor_mode="ortho-hybrid";o.coarse_schedule="shared-census-sequential";o.coarse_right_mode="left-aggregated-selection";o.fast_mode=true;o.ultra_fast=true;o.refinement_subpixel=true;o.selective_repair=true;}
+            else if(v=="v11-fast"||v=="mobile-balanced"){o.descriptor_mode="ortho-hybrid";o.coarse_schedule="hierarchical-1to8-fallback";o.coarse_right_mode="independent-sgm";o.fast_mode=true;o.ultra_fast=true;o.refinement_subpixel=true;o.selective_repair=true;}}
+        else if(a=="--gpu-duty-budget-pct"){size_t n=0;o.gpu_duty_budget_pct=std::stod(v,&n);if(n!=v.size()||!std::isfinite(o.gpu_duty_budget_pct)||o.gpu_duty_budget_pct<0.0||o.gpu_duty_budget_pct>100.0)throw std::invalid_argument("invalid gpu-duty-budget-pct");}
         else if(a=="--descriptor-mode"){if(v!="census"&&v!="ortho-hybrid")throw std::invalid_argument("invalid descriptor mode");o.descriptor_mode=v;}
         else if(a=="--fast-mode")o.fast_mode=(number(v,0,1)==1);
-        else if(a=="--coarse-schedule"){if(v!="sequential"&&v!="paired-per-path"&&v!="layered-per-path"&&v!="shared-census-sequential")throw std::invalid_argument("invalid coarse schedule");o.coarse_schedule=v;}
+        else if(a=="--ultra-fast")o.ultra_fast=(number(v,0,1)==1);
+        else if(a=="--coarse-schedule"){if(v!="sequential"&&v!="paired-per-path"&&v!="layered-per-path"&&v!="shared-census-sequential"&&v!="hierarchical-1to8-fallback")throw std::invalid_argument("invalid coarse schedule");o.coarse_schedule=v;}
         else if(a=="--coarse-right-reference-mode"){if(v!="independent-sgm"&&v!="left-aggregated-selection")throw std::invalid_argument("invalid coarse right reference mode");o.coarse_right_mode=v;}
         else if(a=="--refinement-subpixel")o.refinement_subpixel=(number(v,0,1)==1);
         else if(a=="--selective-repair")o.selective_repair=(number(v,0,1)==1);
@@ -203,10 +209,10 @@ void run(const Options& o, OutputFile& file){
     std::uint64_t last_id=first->frame_id,last_capture=first->camera_timestamp_ns;
     auto context=std::make_shared<DaxaFoundation>(o.validation);
     std::unique_ptr<DaxaDepthPipeline> pipeline;std::unique_ptr<DaxaPreprocess> preprocess,full_preprocess;std::unique_ptr<DaxaRefinement> refinement;std::unique_ptr<DaxaHostExport> exporter,completed_exporter;std::unique_ptr<DaxaDualPreprocess> dual_preprocess;
-    DaxaRefinementConfig refinement_config;refinement_config.disparities=o.disparities;refinement_config.borrow_full_frame=true;refinement_config.ortho_hybrid=(o.descriptor_mode=="ortho-hybrid");refinement_config.fast_mode=o.fast_mode;refinement_config.subpixel=o.refinement_subpixel?1u:0u;refinement_config.selective_repair=o.selective_repair;refinement_config.planar_recovery=o.planar_recovery;refinement_config.allow_derived_coarse=(o.coarse_right_mode=="left-aggregated-selection");
+    DaxaRefinementConfig refinement_config;refinement_config.disparities=o.disparities;refinement_config.borrow_full_frame=true;refinement_config.ortho_hybrid=(o.descriptor_mode=="ortho-hybrid");refinement_config.fast_mode=o.fast_mode;refinement_config.ultra_fast=o.ultra_fast;refinement_config.radius=o.ultra_fast?2u:4u;refinement_config.subpixel=o.refinement_subpixel?1u:0u;refinement_config.selective_repair=o.selective_repair;refinement_config.planar_recovery=o.planar_recovery;refinement_config.allow_derived_coarse=(o.coarse_right_mode=="left-aggregated-selection");
     uint32_t coarse_scale=(experimental&&maps.width==coarse_maps.width*4)?4u:2u;
     DaxaDepthConfig depth_config{StereoConfig{experimental?coarse_maps.width:maps.width,experimental?coarse_maps.height:maps.height,experimental?o.disparities/coarse_scale:o.disparities,4,8,32,true,o.descriptor_mode=="ortho-hybrid"},1.f,2,32};
-    depth_config.stereo_schedule=o.coarse_schedule=="sequential"?DaxaDepthStereoSchedule::Sequential:o.coarse_schedule=="paired-per-path"?DaxaDepthStereoSchedule::PairedPerPath:o.coarse_schedule=="layered-per-path"?DaxaDepthStereoSchedule::LayeredPerPath:DaxaDepthStereoSchedule::SharedCensusSequential;
+    depth_config.stereo_schedule=o.coarse_schedule=="sequential"?DaxaDepthStereoSchedule::Sequential:o.coarse_schedule=="paired-per-path"?DaxaDepthStereoSchedule::PairedPerPath:o.coarse_schedule=="layered-per-path"?DaxaDepthStereoSchedule::LayeredPerPath:o.coarse_schedule=="hierarchical-1to8-fallback"?DaxaDepthStereoSchedule::Hierarchical1to8Selective1to4:DaxaDepthStereoSchedule::SharedCensusSequential;
     depth_config.right_reference_mode=o.coarse_right_mode=="left-aggregated-selection"?DaxaRightReferenceMode::LeftAggregatedSelection:DaxaRightReferenceMode::IndependentSGM;
     depth_config.stereo_variant=o.stereo_variant=="packed-specialized-overwrite-quad"?DaxaSgmVariant::PackedSpecializedOverwriteQuad:(o.stereo_variant=="packed-specialized-overwrite"?DaxaSgmVariant::PackedSpecializedOverwrite:DaxaSgmVariant::PackedSpecialized);
     if(depth){depth_config.validate();DaxaDualPreprocess::Frame pair;DaxaDepthPipeline::Frame prototype;
@@ -230,6 +236,8 @@ void run(const Options& o, OutputFile& file){
     std::uint64_t speckle_invalidated_total=0,speckle_removed_total=0;
     std::uint64_t speckle_filter_ns_total=0,speckle_filtered_frames=0;
     DepthRateController rate_controller(depth_rate_config(o));
+    std::unique_ptr<DutyCycleBudgetGovernor> duty_governor;
+    if(o.gpu_duty_budget_pct>0.0)duty_governor=std::make_unique<DutyCycleBudgetGovernor>(DutyCycleBudgetConfig{o.gpu_duty_budget_pct/100.0,o.fps,o.min_depth_fps,o.max_depth_fps,0.20});
     YuyvSceneMonitor scene_monitor;
     json outputs=json::object();if(depth)outputs["depth"]=output_descriptor(o.depth_topic,maps.width,maps.height,"32FC1",o.frame);if(completed_exporter){outputs["completed_depth"]=output_descriptor(o.completed_depth_topic,maps.width,maps.height,"32FC1",o.frame);outputs["completed_provenance"]=output_descriptor(o.completed_provenance_topic,maps.width,maps.height,"mono8",o.frame,1);}if(rgb)outputs["rgb"]=output_descriptor(o.rgb_topic,maps.width,maps.height,"rgba8",o.frame);
     json qos={{"history","keep_last"},{"depth",o.qos_depth},{"reliability",o.reliability},{"durability","volatile"}};
@@ -257,7 +265,7 @@ void run(const Options& o, OutputFile& file){
         {"radius",refinement_config.radius},{"min_margin",refinement_config.min_margin},
         {"prior_confidence_floor",refinement_config.prior_confidence_floor},{"max_coarse_span",refinement_config.max_coarse_span},
         {"lr_tolerance",refinement_config.lr_tolerance},{"subpixel",refinement_config.subpixel},
-        {"descriptor_mode",o.descriptor_mode},{"fast_mode",refinement_config.fast_mode},{"selective_repair",refinement_config.selective_repair},{"planar_recovery",refinement_config.planar_recovery},
+        {"descriptor_mode",o.descriptor_mode},{"profile",o.profile},{"gpu_duty_budget_pct",o.gpu_duty_budget_pct},{"fast_mode",refinement_config.fast_mode},{"ultra_fast",refinement_config.ultra_fast},{"selective_repair",refinement_config.selective_repair},{"planar_recovery",refinement_config.planar_recovery},
         {"coarse_schedule",o.coarse_schedule},{"coarse_right_reference_mode",o.coarse_right_mode},
         {"borrow_full_frame",refinement_config.borrow_full_frame},{"refinement_shader_identity",DaxaRefinement::shader_identity()},
         {"refinement_compiler_sha256",DaxaRefinement::compiler_sha256()},
@@ -285,6 +293,9 @@ void run(const Options& o, OutputFile& file){
         if(drain)p.output.wait();else if(!p.output.ready())return;
         if(completed_exporter){if(drain)p.completed_output.wait();else if(!p.completed_output.ready())return;}
         auto copy_observed=now_ns<steady>();if(!p.producer_observed)p.producer_observed=copy_observed;
+        if(duty_governor&&p.producer_enqueue_begin&&p.producer_observed>=p.producer_enqueue_begin){
+            duty_governor->observe_gpu_ms(double(p.producer_observed-p.producer_enqueue_begin)/1e6);
+        }
         auto pending_count=count_pending();auto queued=capture->metrics().queued_frames;
         auto emit=[&](RosDeliveryOutput which,sensor_msgs::msg::Image& image,const rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr& publisher){
             if(trace.records().size()>=trace.event_capacity()-2){RosDeliveryTraceRecord unused{};trace.append(unused);trace_full=true;return;}
@@ -405,6 +416,7 @@ void run(const Options& o, OutputFile& file){
     json end={{"schema","stereoforge.ros_delivery_event.v1"},{"kind","stop"},{"run_id",o.run},{"role","publisher"},{"at_ns",drain_end},{"window_end_ns",window_end},
         {"reason",reason},{"counters",counters_json(window_counters,has_completed)},{"capture_counters",capture_json(window_capture)},{"queued",window_capture.queued_frames},
         {"pending",window_pending},{"trace_drops",trace.dropped()},{"drain_ns",drain_end-drain_begin}};
+    if(duty_governor)end["gpu_duty_governor"]={{"budget_pct",o.gpu_duty_budget_pct},{"ema_gpu_ms",duty_governor->ema_gpu_ms()},{"recommended_fps",duty_governor->recommended_fps()},{"estimated_duty_pct",duty_governor->estimated_duty_fraction()*100.0},{"observations",duty_governor->observations()},{"budget_throttles",duty_governor->budget_throttles()}};
     file.reset();file.put("[");file.put(begin.dump());for(auto const& r:trace.records()){file.put(",");file.put(ros_delivery_event_json(r,o.run,"publisher",config).dump());}file.put(",");file.put(end.dump());file.put("]\n");file.complete=true;
     if(depth){
         std::cerr<<"Depth speckle frames="<<speckle_filtered_frames

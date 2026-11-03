@@ -103,9 +103,12 @@ def _benchmark_profile(
         data = json.loads(out_json.read_text(encoding="utf-8"))
         gpu_p50_ms = float(data["gpu_combined_queue_span_ms"]["p50"])
         gpu_p95_ms = float(data["gpu_combined_queue_span_ms"]["p95"])
+        gpu_p99_ms = float(data["gpu_combined_queue_span_ms"]["p99"])
         host_p50_ms = float(data["host_wall_ms"]["p50"])
         host_p95_ms = float(data["host_wall_ms"]["p95"])
+        host_p99_ms = float(data["host_wall_ms"]["p99"])
         stages = data["gpu_stage_timings_ms"]
+        stage_dists = data.get("gpu_stage_distributions_ms", {})
         return {
             "profile": profile,
             "planar_recovery": bool(planar_recovery),
@@ -114,13 +117,16 @@ def _benchmark_profile(
             "wall_s": round(wall_s, 4),
             "gpu_combined_p50_ms": round(gpu_p50_ms, 4),
             "gpu_combined_p95_ms": round(gpu_p95_ms, 4),
+            "gpu_combined_p99_ms": round(gpu_p99_ms, 4),
             "gpu_combined_mean_ms": round(float(data["gpu_combined_queue_span_ms"]["mean"]), 4),
             "host_wall_p50_ms": round(host_p50_ms, 4),
             "host_wall_p95_ms": round(host_p95_ms, 4),
+            "host_wall_p99_ms": round(host_p99_ms, 4),
             "equivalent_gpu_fps_p50": round(1000.0 / gpu_p50_ms, 1),
             "serialized_gpu_time_fraction_30hz_pct": round(gpu_p50_ms / 33.333333 * 100.0, 2),
             "serialized_gpu_time_fraction_60hz_pct": round(gpu_p50_ms / 16.666667 * 100.0, 2),
             "stage_timings_ms": {k: round(float(v), 4) for k, v in stages.items()},
+            "stage_distributions_ms": stage_dists,
             "measured_valid_pixels": int(data["measured_valid_pixels"]),
             "completed_valid_pixels": int(data["completed_valid_pixels"]),
             "inferred_planar_pixels": int(data["inferred_planar_pixels"]),
@@ -148,7 +154,7 @@ def evaluate_near_field_d_coarse_64() -> Dict[str, Any]:
                     "--target-manifest",
                     str(DEFAULT_MANIFEST),
                     "--variant",
-                    "raw_borrow",
+                    "coarse_refine",
                     "--profile",
                     "ultra-fast",
                     "--coarse-disparities",
@@ -216,14 +222,25 @@ def evaluate_near_field_d_coarse_64() -> Dict[str, Any]:
                 "_comp_valid_roi": comp_valid_roi,
             }
 
-        # Independent ZNCC epipolar check on near-field y >= 463 with max_disp = 192
+        # Independent ZNCC epipolar check on near-field y >= 463 with max_disp = 256 (matching D_coarse = 64)
         zncc_res = build_independent_zncc_epipolar_reference(
-            luma_l, luma_r, max_disp=192
+            luma_l, luma_r, max_disp=256
         )
         zncc_disp, zncc_valid = zncc_res[0], zncc_res[1]
         roi = np.zeros_like(zncc_valid, dtype=bool)
         roi[463:700, 220:1180] = True
         zncc_nf = roi & zncc_valid & (zncc_disp > 127.5)
+
+        # Also fit a 3D desk plane on mid-field (y in [340, 463), x in [300, 1100), d <= 127.5)
+        # from the D_coarse=32 baseline and check continuation residual on D_coarse=64 near-field
+        yy_g, xx_g = np.indices(zncc_valid.shape, dtype=np.float32)
+        mid_roi = (yy_g >= 340) & (yy_g < 463) & (xx_g >= 300) & (xx_g < 1100)
+        d32_comp = results_by_d["d_coarse_32"]["_comp_disp"]
+        mid_valid = mid_roi & np.isfinite(d32_comp) & (d32_comp > 60.0) & (d32_comp <= 127.0)
+        plane_abc = None
+        if int(np.sum(mid_valid)) >= 200:
+            A_mat = np.column_stack([xx_g[mid_valid], yy_g[mid_valid], np.ones(int(np.sum(mid_valid)), dtype=np.float32)])
+            plane_abc, _, _, _ = np.linalg.lstsq(A_mat, d32_comp[mid_valid], rcond=None)
 
         for key in ("d_coarse_32", "d_coarse_64"):
             comp_disp = results_by_d[key].pop("_comp_disp")
@@ -240,6 +257,16 @@ def evaluate_near_field_d_coarse_64() -> Dict[str, Any]:
                 results_by_d[key]["vs_zncc_d_gt_127_5_overlap_pixels"] = 0
                 results_by_d[key]["vs_zncc_d_gt_127_5_mae_px"] = None
                 results_by_d[key]["vs_zncc_d_gt_127_5_bad_2px_pct"] = None
+
+            nf_high = comp_valid_roi & (comp_disp > 127.5)
+            if plane_abc is not None and np.any(nf_high):
+                pred_plane = plane_abc[0] * xx_g[nf_high] + plane_abc[1] * yy_g[nf_high] + plane_abc[2]
+                res_plane = np.abs(comp_disp[nf_high] - pred_plane)
+                results_by_d[key]["vs_desk_plane_continuation_pixels"] = int(np.sum(nf_high))
+                results_by_d[key]["vs_desk_plane_continuation_mae_px"] = round(float(np.mean(res_plane)), 3)
+            else:
+                results_by_d[key]["vs_desk_plane_continuation_pixels"] = 0
+                results_by_d[key]["vs_desk_plane_continuation_mae_px"] = None
 
         return results_by_d
 
@@ -306,6 +333,56 @@ def benchmark_portable_slang_cpu_backend() -> Dict[str, Any]:
             samples_ms.append((time.perf_counter() - t0) * 1000.0)
         samples_ms.sort()
         n0 = w * h
+
+        # Also benchmark the complete camera-to-depth Slang CPU pipeline (preprocess + coarse + depth + refinement)
+        yuyv = np.empty((h, 2 * w, 2), dtype=np.uint8)
+        yuyv[:, :w, 0] = left_luma.astype(np.uint8)
+        yuyv[:, w:, 0] = right_luma.astype(np.uint8)
+        yuyv[:, :, 1] = 128
+        mx_t = np.tile(np.arange(w, dtype=np.float32), (h, 1))
+        my_t = np.tile(np.arange(h, dtype=np.float32)[:, None], (1, w))
+        mx_c = np.tile((np.arange(cw, dtype=np.float32) + 0.5) * 4.0 - 0.5, (ch, 1))
+        my_c = np.tile(((np.arange(ch, dtype=np.float32) + 0.5) * 4.0 - 0.5)[:, None], (1, cw))
+
+        backend.run_full_camera_to_depth_pipeline(
+            raw_yuyv=yuyv,
+            target_maps=(mx_t, my_t, mx_t, my_t),
+            coarse_maps=(mx_c, my_c, mx_c, my_c),
+            eye_width=w,
+            source_height=h,
+            stride_bytes=4 * w,
+            width=w,
+            height=h,
+            coarse_width=cw,
+            coarse_height=ch,
+            fx=520.0,
+            baseline=0.12,
+            principal_offset=0.0,
+            disparities=disp,
+        )
+        full_samples_ms = []
+        full_res = None
+        for _ in range(5):
+            t0 = time.perf_counter()
+            full_res = backend.run_full_camera_to_depth_pipeline(
+                raw_yuyv=yuyv,
+                target_maps=(mx_t, my_t, mx_t, my_t),
+                coarse_maps=(mx_c, my_c, mx_c, my_c),
+                eye_width=w,
+                source_height=h,
+                stride_bytes=4 * w,
+                width=w,
+                height=h,
+                coarse_width=cw,
+                coarse_height=ch,
+                fx=520.0,
+                baseline=0.12,
+                principal_offset=0.0,
+                disparities=disp,
+            )
+            full_samples_ms.append((time.perf_counter() - t0) * 1000.0)
+        full_samples_ms.sort()
+
         out["resolutions"][label] = {
             "width": w,
             "height": h,
@@ -313,6 +390,14 @@ def benchmark_portable_slang_cpu_backend() -> Dict[str, Any]:
             "cpu_mean_ms": round(float(np.mean(samples_ms)), 2),
             "equivalent_cpu_fps": round(1000.0 / float(samples_ms[len(samples_ms) // 2]), 2),
             "valid_stereo_pixels": int(np.sum(res["provenance"][:n0] == 1)),
+            "full_camera_to_depth_cpu_p50_ms": round(float(full_samples_ms[len(full_samples_ms) // 2]), 2),
+            "full_camera_to_depth_cpu_mean_ms": round(float(np.mean(full_samples_ms)), 2),
+            "full_camera_to_depth_equivalent_cpu_fps": round(
+                1000.0 / float(full_samples_ms[len(full_samples_ms) // 2]), 2
+            ),
+            "full_camera_to_depth_valid_completed_pixels": int(
+                np.sum(full_res["completed_validity"][:n0] != 0)
+            ),
         }
     return out
 
@@ -345,18 +430,20 @@ def evaluate_duty_cycle_governor() -> Dict[str, Any]:
 
 
 def main() -> int:
-    print("[v10] Running quality vs ultra-fast GPU benchmarks...")
+    print("[v10/v11] Running quality vs ultra-fast vs v11-fast GPU benchmarks...")
     qual_planar = _benchmark_profile("quality", planar_recovery=1, extra_args=["--fast-mode", "1", "--selective-repair", "1", "--subpixel", "1", "--descriptor-mode", "ortho-hybrid", "--coarse-schedule", "layered-per-path"])
     ultra_planar = _benchmark_profile("ultra-fast", planar_recovery=1)
     ultra_measured = _benchmark_profile("ultra-fast", planar_recovery=0)
+    v11_planar = _benchmark_profile("v11-fast", planar_recovery=1)
+    v11_measured = _benchmark_profile("v11-fast", planar_recovery=0)
 
-    print("[v10] Evaluating near-field D_coarse=64 vs D_coarse=32 on y >= 463...")
+    print("[v10/v11] Evaluating near-field D_coarse=64 vs D_coarse=32 on y >= 463...")
     near_field_d64 = evaluate_near_field_d_coarse_64()
 
-    print("[v10] Benchmarking portable Slang-to-C++ CPU backend...")
+    print("[v10/v11] Benchmarking portable Slang-to-C++ CPU backend (refinement + full camera-to-depth)...")
     cpu_backend_perf = benchmark_portable_slang_cpu_backend()
 
-    print("[v10] Measuring competing-workload slowdown under ultra-fast profile...")
+    print("[v10/v11] Measuring competing-workload slowdown under ultra-fast profile...")
     baseline_v10_0 = (
         json.loads(BASELINE_V10_0_JSON.read_text(encoding="utf-8"))
         if BASELINE_V10_0_JSON.exists()
@@ -371,7 +458,7 @@ def main() -> int:
         .get("E_frame_mj", {})
         .get("idle_gpu_power_w", 14.93)
     )
-    for prof in (qual_planar, ultra_planar, ultra_measured):
+    for prof in (qual_planar, ultra_planar, ultra_measured, v11_planar, v11_measured):
         active_w = float(prof["power_w"]["mean_w"])
         net_w = max(0.0, active_w - idle_w)
         t_s = float(prof["gpu_combined_p50_ms"]) / 1000.0
@@ -387,6 +474,12 @@ def main() -> int:
     speedup_measured = round(
         qual_planar["gpu_combined_p50_ms"] / ultra_measured["gpu_combined_p50_ms"], 3
     )
+    speedup_v11_planar = round(
+        qual_planar["gpu_combined_p50_ms"] / v11_planar["gpu_combined_p50_ms"], 3
+    )
+    speedup_v11_measured = round(
+        qual_planar["gpu_combined_p50_ms"] / v11_measured["gpu_combined_p50_ms"], 3
+    )
 
     report = {
         "schema": "stereoforge.v10.ultra_fast_and_universal_qualification.v1",
@@ -395,7 +488,22 @@ def main() -> int:
         "v10_0_roofline_and_energy_baseline": baseline_v10_0,
         "v10_1_portable_slang_cpu_backend": {
             "compiler": "slangc -target cpp -DSF_CPU_TARGET=1 + g++ -O3 -fopenmp",
-            "entrypoints_compiled": ["rectify", "census", "match", "lr", "metric", "planar"],
+            "entrypoints_compiled": [
+                "decode_yuyv",
+                "rectify_gray",
+                "coarse_prep_1to8_1to4",
+                "coarse_match_1to8",
+                "coarse_lr_risk_1to8",
+                "coarse_selective_fallback_1to4",
+                "lr_consistency",
+                "metric_observation",
+                "rectify",
+                "census",
+                "match",
+                "lr",
+                "metric",
+                "planar",
+            ],
             "zero_cuda_rocm_vulkan_dependency": True,
             "bit_exact_parity_with_vulkan": {
                 "census_and_validity_bit_exact_pct": 100.0,
@@ -408,8 +516,12 @@ def main() -> int:
             "quality_with_planar": qual_planar,
             "ultra_fast_with_planar": ultra_planar,
             "ultra_fast_measured_only": ultra_measured,
+            "v11_fast_with_planar": v11_planar,
+            "v11_fast_measured_only": v11_measured,
             "speedup_ultra_fast_planar_vs_quality_planar": speedup_planar,
             "speedup_ultra_fast_measured_vs_quality_planar": speedup_measured,
+            "speedup_v11_fast_planar_vs_quality_planar": speedup_v11_planar,
+            "speedup_v11_fast_measured_vs_quality_planar": speedup_v11_measured,
             "metric_stage_reduction_ms": round(
                 qual_planar["stage_timings_ms"]["refinement_metric_ms"]
                 - ultra_planar["stage_timings_ms"]["refinement_metric_ms"],
@@ -423,6 +535,11 @@ def main() -> int:
             "planar_stage_reduction_ms": round(
                 qual_planar["stage_timings_ms"]["refinement_planar_recovery_ms"]
                 - ultra_planar["stage_timings_ms"]["refinement_planar_recovery_ms"],
+                4,
+            ),
+            "coarse_stage_reduction_v11_ms": round(
+                qual_planar["stage_timings_ms"]["coarse_total_ms"]
+                - v11_planar["stage_timings_ms"]["coarse_total_ms"],
                 4,
             ),
         },

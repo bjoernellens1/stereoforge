@@ -112,7 +112,7 @@ public:
 private:
     DaxaStereo(StereoConfig,const DaxaFrame&,DaxaSgmVariant,unsigned,std::optional<MetricCalibration>,std::shared_ptr<DaxaFoundation>,uint32_t,DaxaStereoReference,bool shared_census,const DaxaStereo* descriptor_owner,DaxaRightReferenceMode mode=DaxaRightReferenceMode::IndependentSGM);
     // Depth-only combined scheduling. Setup owns no Frame/producer marker.
-    void setup_pair(DaxaStereo& right,bool layered=false,bool shared_census=false);
+    void setup_pair(DaxaStereo& right,bool layered=false,bool shared_census=false,bool hierarchical_1to8_fallback=false);
     unsigned pair_slot_at(uint64_t oldest)const; // Both aligned slots available, before upstream upload.
     std::array<Frame,2> process_pair_at(const DaxaFrame&,uint64_t oldest,unsigned slot);
     DaxaStereoTiming pair_timings(const Frame& left,const Frame& right)const;
