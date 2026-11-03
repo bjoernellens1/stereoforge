@@ -77,15 +77,15 @@ For D_coarse=64, require substantive high-disparity reference overlap (provision
 
 Reference: `benchmarks/results/v11_0_qualification_and_coarse_replacement.json` and `benchmarks/results/v10_ultra_fast_and_universal_qualification.json`.
 
-### 1. v11.0 Qualification Resolution (`A0..A7` One-Parameter-Family Ablation + Near-Field `D_coarse=64`)
+### 1. v11.0 Qualification Resolution (`A0..A7` Staged Ablation + Near-Field `D_coarse=64`)
 
 - **Bit-exact write-skip verification (`A1` vs `A2`):** `exact-ultra` (skipping the 14 diagnostic planes while preserving 5-tap right-eye matching, `r=4`, and `independent-sgm`) is **100% bit-exact** on left-eye measured and completed disparity/validity against `A1`.
-- **8-step ablation (`A0..A7`) across the 5-scene 720p synthetic GT suite, `narrow_gap_bars` counterexample, and ZED 2 capture:**
+- **8-step ablation (`A0..A7`) across the 5-scene 720p synthetic GT suite, `narrow_gap_bars` counterexample, and one recorded ZED 2 frame:** A5 to A6 changes coarse schedule, right-reference policy, and full-res ultra-fast setting together, not one parameter family.
   - `A0` (`quality`, `layered-per-path` SGM, `r=4`): `98.90%` unconditional `good_2px`, `0.24%` `bad_2px`, `3.852 ms` GPU `p50` (`1.236 ms` coarse stage).
-  - `A5` (`v10 ultra-fast`): `98.97%` unconditional `good_2px`, `0.06%` `bad_2px`, `3.102 ms` GPU `p50` (`1.148 ms` coarse stage).
-  - `A6` (`v11 hierarchical-1to8-fallback` with exact 5-tap right-eye matching): `99.07%` unconditional `good_2px`, `0.15%` `bad_2px`, `2.238 ms` GPU `p50`.
+  - `A5` (`v10 ultra-fast`): `98.30%` unconditional `good_2px`, `0.26%` `bad_2px`, `3.102 ms` GPU `p50` (`1.148 ms` coarse stage).
+  - `A6` (`v11 hierarchical-1to8-fallback` with symmetric 5-tap refinement): `99.34%` unconditional `good_2px`, `0.14%` `bad_2px`, `2.759 ms` planar GPU `p50`.
   - `A7` (`v11-fast`, `hierarchical-1to8-fallback`): **`99.12%` unconditional `good_2px` (`+0.22 pp` vs `A0`), `0.13%` `bad_2px` (`-0.11 pp` vs `A0`), `1` false-bridged narrow-gap pixel (vs `3` on `A0`)**.
-- **Near-field `D_coarse=64` geometric qualification (`assess_near_field`):** Evaluated against an independent 256-px epipolar ZNCC reference (`11×11` window, forward-backward LR `<= 1.0 px`), yielding **`143` high-disparity (`d > 127.5 px`) overlap pixels with `3.50%` `bad_2px_pct` (`PASS_PRELIMINARY`)**.
+- **Near-field `D_coarse=64` geometric qualification (`assess_near_field`):** Evaluated against an independent 256-px epipolar ZNCC reference (`11×11` window, forward-backward LR `<= 1.0 px`), yielding **`143` high-disparity (`d > 127.5 px`) overlap pixels with `3.50%` `bad_2px_pct` (`PASS_PRELIMINARY` under the provisional count gate). This imported v10 evaluator does not qualify A7 near-field accuracy; 143 overlaps cover only 0.57% of the 25,064 reported high-disparity completed pixels**.
 
 ### 2. v11.1 Coarse SGM Replacement (`hierarchical-1to8-fallback`, `<= 0.250 ms` Gate Passed)
 
@@ -94,12 +94,45 @@ Implemented in `python/stereoforge/shaders/daxa/stereo_hierarchical.slang` (`coa
 | Metric (1280×720, AMD Radeon 8060S) | v9.4 `A0` Independent SGM | v10 `A5` Shared-Census SGM | v11 `A7` Hierarchical `1/8`+`1/4` | v11 Budget |
 | --- | ---: | ---: | ---: | ---: |
 | **Coarse stage total GPU `p50`** | `1.2362 ms` | `1.1475 ms` | **`0.2035 ms` (`6.07×` / `5.64×` speedup)** | `<= 0.2500 ms` (**PASS**) |
-| **Coarse stage total GPU `p95`** | `1.2429 ms` | `1.1539 ms` | **`0.2240 ms`** | `<= 0.2500 ms` (**PASS**) |
-| **Full pipeline + planar GPU `p50` (`p95`)** | `3.8523 ms` (`3.880 ms`) | `3.1016 ms` (`3.116 ms`) | **`2.1524 ms` (`2.186 ms`, `464.6 FPS` equiv)** | `1.0000 ms` (T2 target) |
-| **Full pipeline measured-only GPU `p50` (`p95`)** | `3.5067 ms` (`3.524 ms`) | `2.5734 ms` (`2.589 ms`) | **`1.6444 ms` (`1.687 ms`, `608.1 FPS` equiv)** | `1.0000 ms` (T1 target) |
+| **Coarse stage total GPU `p95`** | `1.2733 ms` | `1.1593 ms` | **`0.2240 ms`** | `<= 0.2500 ms` (**PASS**) |
+| **Full pipeline + planar GPU `p50` (`p95`)** | `3.8523 ms` (`4.050 ms`) | `3.1016 ms` (`3.125 ms`) | **`2.1524 ms` (`2.280 ms`, `464.6 FPS` equiv)** | `1.0000 ms` (T2 target) |
+| **Full pipeline measured-only GPU `p50` (`p95`)** | `3.3143 ms` (`3.338 ms`) | `2.5896 ms` (`2.615 ms`) | **`1.6444 ms` (`1.687 ms`, `608.1 FPS` equiv)** | `1.0000 ms` (T1 target) |
 
 ### 3. v11.3 Complete Camera-to-Depth Slang-to-C++ CPU Pipeline
 
 Extended `python/stereoforge/slang_cpu_backend.py` (`SlangCpuRefinementBackend.run_full_camera_to_depth_pipeline`) to compile and execute all **14 production shader entrypoints** across `preprocess.slang`, `stereo_hierarchical.slang`, `depth.slang`, and `refinement.slang` via `slangc -target cpp -DSF_CPU_TARGET=1` and OpenMP:
 - **`640×360` (`mobile-balanced`) full YUYV-to-completed-depth CPU latency:** `30.35 ms` `p50` (`32.95 FPS`).
 - **`1280×720` (`full`) full YUYV-to-completed-depth CPU latency:** `118.85 ms` `p50` (`8.41 FPS`).
+
+### 4. Read-only v11.2 real-camera promotion screen (proposed, not sealed)
+
+`PYTHONPATH=. python benchmarks/audit_v11_real_quality.py` reads the preserved
+v11 JSON and reports a separate **HOLD** on real-scene quality without modifying
+the 0.250 ms coarse-speed result. A7 retains only 215,959/921,600 measured
+pixels vs 240,890 for A0; completed coverage drops from 267,848 to 238,435.
+A7 versus independent ZNCC changes bad-2px on differing supported cohorts:
+3.23% (24,240 overlap) at A0, 5.22% (23,687 overlap) at A7; newly
+admitted A7 pixels show 20.42% bad-2px on 3,261 reference-overlap pixels.
+These are conditional ZNCC diagnostics, **not physical ground truth**.
+
+The quoted independent desk plane in the v11 benchmark is fitted to A0 measured
+disparities preselected in agreement with ZNCC; it is **A0-anchored**, not a
+physically independent geometry reference.
+
+The A0..A7 real-scene quality dump uses **one** retained ZED 2 record
+(`frames=1`); the timing path runs 180 measured/120 warmup repetitions of a
+retained frame, sequentially by configuration, not randomized ABBA.
+Do not label these as a 5-frame quality sweep or interleaved benchmark.
+
+The imported v10 D64 near-field evaluator has 143 overlapping pixels, with
+approximately five above 2-pixel error (3.50%). Approximate 95% Wilson interval
+is **1.5–7.9%**, encompassing the 5% provisional threshold.
+
+The hierarchical coarse shader reads the ortho-hybrid flag but uses
+`sgm_census` for its 1/4 descriptors and passes `false` to `compute_census8`
+for its 1/8 descriptors. Test this separately as a new descriptor-family
+ablation; do not label current hierarchical outputs ortho-hybrid.
+
+Screen thresholds were chosen after seeing v11 data. They are post-hoc
+**development diagnostics**, not sealed acceptance gates. Freeze appropriate
+gates on new development sequences before held-out evaluation.
