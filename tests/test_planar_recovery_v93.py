@@ -157,6 +157,16 @@ def test_v93_qualification_artifact_contract():
     assert gpu_plan["interleaved_trial_distributions"]["all_trials_meet_240fps_gpu_p95"] is True
     assert gpu_plan["gpu_planar_recovery_ms"]["p50"] <= 0.45
     assert gpu_plan["validation_errors_after_teardown"] == 0
+    overhead = gpu_plan["planar_feature_overhead_accounting_ms"]
+    assert overhead["planar_kernel_ms"] > 0.0
+    assert overhead["metric_completed_buffer_init_delta_ms"] > 0.0
+    assert overhead["total_planar_stage_overhead_ms"] > overhead["planar_kernel_ms"]
+    assert "qualification_claims_and_scientific_findings" in doc
+    claims = doc["qualification_claims_and_scientific_findings"]
+    assert "offline_gpu_processing_throughput" in claims
+    assert "sustained_live_60hz_4topic_delivery_rate" in claims
+    assert "end_to_end_latency_distinction" in claims
+    assert "horizontal_tabletop_sparsity_limitation" in claims
     assert doc["canonical_5scene_720p_per_scene_inferred_cohorts"]["occlusion_boundaries"]["independent_4x_planar_inferred_prov6"]["inferred_pixels"] == 0
     assert doc["canonical_5scene_720p_per_scene_inferred_cohorts"]["low_texture_surface"]["independent_4x_planar_inferred_prov6"]["bad_1px_pct"] == 0.0
     desk_def = doc["desk_scene_gpu_ablation"]["v93_planar_a10_affine3x3_default"]
@@ -169,24 +179,33 @@ def test_v93_qualification_artifact_contract():
         assert desk_def["independent_zncc_reference_planes"][pkey]["inferred_prov6"]["pixels"] > 0
         assert desk_def["consistency_to_measured_planes"][pkey]["inferred_prov6"]["pixels"] > 0
     ros_qual = doc["ros2_4topic_completed_delivery_qualification"]
-    for rkey in ("deterministic_replay_180f", "live_physical_zed2_camera_60hz_180f"):
+    for rkey, expected_frames in (
+        ("deterministic_replay_180f", 180),
+        ("live_physical_zed2_camera_60hz_180f", 180),
+        ("live_physical_zed2_camera_60hz_600f_endurance", 600),
+        ("live_physical_zed2_camera_60hz_180f_gpu_contention", 180),
+    ):
         assert rkey in ros_qual
         run = ros_qual[rkey]
-        assert run["published_depth_frames"] == 180
-        assert run["published_completed_depth_frames"] == 180
-        assert run["published_completed_provenance_frames"] == 180
-        assert run["published_rgb_frames"] == 180
-        assert run["received_depth_frames"] == 180
-        assert run["received_completed_depth_frames"] == 180
-        assert run["received_completed_provenance_frames"] == 180
-        assert run["received_rgb_frames"] == 180
-        assert run["synchronized_4topic_quads"] == 180
+        assert run["published_depth_frames"] == expected_frames
+        assert run["published_completed_depth_frames"] == expected_frames
+        assert run["published_completed_provenance_frames"] == expected_frames
+        assert run["published_rgb_frames"] == expected_frames
+        assert run["received_depth_frames"] == expected_frames
+        assert run["received_completed_depth_frames"] == expected_frames
+        assert run["received_completed_provenance_frames"] == expected_frames
+        assert run["received_rgb_frames"] == expected_frames
+        assert run["synchronized_4topic_quads"] == expected_frames
         assert run["inferred_planar_pixels_per_frame"]["p50"] > 0
         fa = run["frame_accounting"]
-        assert fa["verified_payload_checksum_matches_depth"] == 180
-        assert fa["verified_payload_checksum_matches_completed_depth"] == 180
-        assert fa["verified_payload_checksum_matches_completed_provenance"] == 180
-        assert fa["verified_payload_checksum_matches_rgb"] == 180
+        assert fa["verified_payload_checksum_matches_depth"] == expected_frames
+        assert fa["verified_payload_checksum_matches_completed_depth"] == expected_frames
+        assert fa["verified_payload_checksum_matches_completed_provenance"] == expected_frames
+        assert fa["verified_payload_checksum_matches_rgb"] == expected_frames
         assert fa["invalid_subscriber_payloads"] == 0
+    cont = ros_qual["live_physical_zed2_camera_60hz_180f_gpu_contention"]
+    assert cont["concurrent_gpu_contention_load"] is True
+    assert cont["concurrent_gpu_contention_active_at_completion"] is True
+    assert cont["concurrent_gpu_contention_completed_300f_batches"] >= 1
 
 

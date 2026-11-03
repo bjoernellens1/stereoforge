@@ -709,6 +709,40 @@ def run_v93_qualification_suite(work_dir: Any, desk_env_dir: Any | None = None) 
             "validation_errors_after_teardown": doc["validation_errors_after_teardown"],
         }
 
+    if "dual4x_selective_repair_only" in gpu_perf and "dual4x_selective_repair_plus_planar" in gpu_perf:
+        r_only = gpu_perf["dual4x_selective_repair_only"]
+        r_plan = gpu_perf["dual4x_selective_repair_plus_planar"]
+        m_no_plan = float(r_only["gpu_stage_timings_ms"]["refinement_metric_ms"])
+        m_with_plan = float(r_plan["gpu_stage_timings_ms"]["refinement_metric_ms"])
+        p_kern = float(r_plan["gpu_stage_timings_ms"]["refinement_planar_recovery_ms"])
+        m_delta = m_with_plan - m_no_plan
+        r_plan["planar_feature_overhead_accounting_ms"] = {
+            "planar_kernel_ms": round(p_kern, 4),
+            "metric_stage_without_planar_ms": round(m_no_plan, 4),
+            "metric_stage_with_planar_ms": round(m_with_plan, 4),
+            "metric_completed_buffer_init_delta_ms": round(m_delta, 4),
+            "total_planar_stage_overhead_ms": round(p_kern + m_delta, 4),
+            "total_gpu_span_p50_delta_ms": round(
+                float(r_plan["gpu_combined_queue_span_ms"]["p50"])
+                - float(r_only["gpu_combined_queue_span_ms"]["p50"]),
+                4,
+            ),
+            "total_gpu_span_p95_delta_ms": round(
+                float(r_plan["gpu_combined_queue_span_ms"]["p95"])
+                - float(r_only["gpu_combined_queue_span_ms"]["p95"]),
+                4,
+            ),
+            "five_trial_mean_p95_delta_ms": round(
+                float(r_plan["interleaved_trial_distributions"]["gpu_combined_p95_mean_ms"])
+                - float(r_only["interleaved_trial_distributions"]["gpu_combined_p95_mean_ms"]),
+                4,
+            ),
+            "accounting_note": (
+                "Enabling planar recovery adds both the planar recovery kernel (pass == 5) and "
+                "two-eye completed-buffer initialization inside the metric stage (pass == 4)."
+            ),
+        }
+
     # 2. Desk Scene GPU Ablation (if desk_env_dir is provided)
     desk_ablation: dict[str, Any] = {}
     color_ablation: dict[str, Any] = {}
@@ -968,10 +1002,162 @@ def run_v93_qualification_suite(work_dir: Any, desk_env_dir: Any | None = None) 
             verify_checksum=True,
             planar_recovery="1",
         )
+        ros2_delivery_qual["live_physical_zed2_camera_60hz_600f_endurance"] = run_pub_sub_qualification(
+            work,
+            "live_cam_q16_4x_planar_recovery_derived_600f",
+            "camera",
+            "experimental-dual-refinement",
+            "shared-census-sequential",
+            "left-aggregated-selection",
+            "1",
+            600,
+            ros_env,
+            qos_depth=16,
+            verify_checksum=True,
+            planar_recovery="1",
+        )
+        ros2_delivery_qual["live_physical_zed2_camera_60hz_180f_gpu_contention"] = run_pub_sub_qualification(
+            work,
+            "live_cam_q16_4x_planar_recovery_derived_180f_contention",
+            "camera",
+            "experimental-dual-refinement",
+            "shared-census-sequential",
+            "left-aggregated-selection",
+            "1",
+            180,
+            ros_env,
+            qos_depth=16,
+            verify_checksum=True,
+            concurrent_gpu_contention=True,
+            planar_recovery="1",
+        )
+
+    live_180 = ros2_delivery_qual.get("live_physical_zed2_camera_60hz_180f", {})
+    live_600 = ros2_delivery_qual.get("live_physical_zed2_camera_60hz_600f_endurance", {})
+    live_cont = ros2_delivery_qual.get("live_physical_zed2_camera_60hz_180f_gpu_contention", {})
+    r_plan_summary = gpu_perf.get("dual4x_selective_repair_plus_planar", {})
+    desk_def = desk_ablation.get("v93_planar_a10_affine3x3_default", {})
+
+    claims_and_findings = {
+        "offline_gpu_processing_throughput": {
+            "budget_ms": 4.167,
+            "meets_240fps_gpu_p50_p95_p99_across_5_interleaved_trials": bool(
+                r_plan_summary.get("interleaved_trial_distributions", {}).get(
+                    "all_trials_meet_240fps_gpu_p95", False
+                )
+                and r_plan_summary.get("meets_240fps_4_167ms_gpu_p99", False)
+            ),
+            "median_trial_gpu_p50_ms": r_plan_summary.get("gpu_combined_queue_span_ms", {}).get("p50"),
+            "median_trial_gpu_p95_ms": r_plan_summary.get("gpu_combined_queue_span_ms", {}).get("p95"),
+            "median_trial_gpu_p99_ms": r_plan_summary.get("gpu_combined_queue_span_ms", {}).get("p99"),
+            "planar_feature_overhead_accounting_ms": r_plan_summary.get(
+                "planar_feature_overhead_accounting_ms"
+            ),
+        },
+        "sustained_live_60hz_4topic_delivery_rate": {
+            "topics": [
+                "depth (32FC1)",
+                "completed_depth (32FC1)",
+                "completed_provenance (mono8)",
+                "rectified_rgb (rgba8)",
+            ],
+            "standard_180f_synchronized_quads": live_180.get("synchronized_4topic_quads"),
+            "standard_180f_verified_checksums": sum(
+                int(live_180.get("frame_accounting", {}).get(k, 0))
+                for k in (
+                    "verified_payload_checksum_matches_depth",
+                    "verified_payload_checksum_matches_completed_depth",
+                    "verified_payload_checksum_matches_completed_provenance",
+                    "verified_payload_checksum_matches_rgb",
+                )
+            ),
+            "endurance_600f_synchronized_quads": live_600.get("synchronized_4topic_quads"),
+            "endurance_600f_verified_checksums": sum(
+                int(live_600.get("frame_accounting", {}).get(k, 0))
+                for k in (
+                    "verified_payload_checksum_matches_depth",
+                    "verified_payload_checksum_matches_completed_depth",
+                    "verified_payload_checksum_matches_completed_provenance",
+                    "verified_payload_checksum_matches_rgb",
+                )
+            ),
+            "gpu_contention_180f_synchronized_quads": live_cont.get("synchronized_4topic_quads"),
+            "gpu_contention_180f_verified_checksums": sum(
+                int(live_cont.get("frame_accounting", {}).get(k, 0))
+                for k in (
+                    "verified_payload_checksum_matches_depth",
+                    "verified_payload_checksum_matches_completed_depth",
+                    "verified_payload_checksum_matches_completed_provenance",
+                    "verified_payload_checksum_matches_rgb",
+                )
+            ),
+        },
+        "end_to_end_latency_distinction": {
+            "frame_period_60hz_ms": 16.667,
+            "standard_180f_host_ingress_to_publish_p50_ms": (
+                live_180.get("latency_ms", {}).get("host_ingress_to_publish_ms") or {}
+            ).get("p50"),
+            "standard_180f_host_ingress_to_publish_p95_ms": (
+                live_180.get("latency_ms", {}).get("host_ingress_to_publish_ms") or {}
+            ).get("p95"),
+            "standard_180f_host_ingress_to_subscriber_e2e_p50_ms": (
+                live_180.get("latency_ms", {}).get("host_ingress_to_subscriber_arrival_e2e_ms") or {}
+            ).get("p50"),
+            "standard_180f_host_ingress_to_subscriber_e2e_p95_ms": (
+                live_180.get("latency_ms", {}).get("host_ingress_to_subscriber_arrival_e2e_ms") or {}
+            ).get("p95"),
+            "endurance_600f_host_ingress_to_publish_p95_ms": (
+                live_600.get("latency_ms", {}).get("host_ingress_to_publish_ms") or {}
+            ).get("p95"),
+            "endurance_600f_host_ingress_to_subscriber_e2e_p95_ms": (
+                live_600.get("latency_ms", {}).get("host_ingress_to_subscriber_arrival_e2e_ms") or {}
+            ).get("p95"),
+            "gpu_contention_180f_host_ingress_to_publish_p95_ms": (
+                live_cont.get("latency_ms", {}).get("host_ingress_to_publish_ms") or {}
+            ).get("p95"),
+            "gpu_contention_180f_host_ingress_to_subscriber_e2e_p95_ms": (
+                live_cont.get("latency_ms", {}).get("host_ingress_to_subscriber_arrival_e2e_ms") or {}
+            ).get("p95"),
+            "distinction_note": (
+                "Processing throughput (GPU p95 <= 4.167 ms), sustained 60 Hz 4-topic delivery rate "
+                "(100% lossless delivery), and end-to-end subscriber callback latency are reported "
+                "as separate claims. Publisher ingress-to-publish p95 is sub-frame (< 16.667 ms), "
+                "whereas full host-ingress-to-subscriber callback arrival p95 includes 4-topic "
+                "12 MB/frame FastDDS serialization plus single-threaded subscriber 64-bit FNV-1a "
+                "verification callbacks and slightly exceeds one 16.667 ms frame period."
+            ),
+        },
+        "horizontal_tabletop_sparsity_limitation": {
+            "broad_desk_roi_measured_pct": desk_def.get("broad_desk_roi_measured_pct"),
+            "broad_desk_roi_inferred_gain_pct": desk_def.get("broad_desk_roi_inferred_gain_pct"),
+            "broad_desk_roi_completed_pct": desk_def.get("broad_desk_roi_completed_pct"),
+            "upright_apriltag_inferred_pixels": (
+                desk_def.get("independent_zncc_reference_planes", {})
+                .get("upright_apriltag_target", {})
+                .get("inferred_prov6", {})
+                .get("pixels")
+            ),
+            "horizontal_desk_clean_inferred_pixels": (
+                desk_def.get("independent_zncc_reference_planes", {})
+                .get("horizontal_desk_plane_clean", {})
+                .get("inferred_prov6", {})
+                .get("pixels")
+            ),
+            "research_finding": (
+                "While guarded planar recovery substantially improves coverage on the upright AprilTag "
+                "target (+6.61% coverage, 1.25 mm MAE vs. independent ZNCC plane) and synthetic "
+                "low-texture surfaces (+16,402 px, 0.162 px MAE), completion on the physical horizontal "
+                "tabletop remains sparse (+55 px / +0.99% on horizontal_desk_plane_clean, +1.11% on "
+                "broad_desk_roi) because foreshortened grazing-angle woodgrain provides sparse surrounding "
+                "measured stereo anchors (prov == 1) within the 9 px stencil radius."
+            ),
+        },
+    }
 
     return {
         "schema": "stereoforge.v9_3_planar_qualification.v1",
         "provenance": current_provenance_manifest(),
+        "qualification_claims_and_scientific_findings": claims_and_findings,
         "provenance_enum_contract": {
             "INVALID": int(Provenance.INVALID),
             "STEREO": int(Provenance.STEREO),

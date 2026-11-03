@@ -386,6 +386,7 @@ def parse_and_join_ros_delivery_traces(
         for i in range(1, len(depth_pubs))
     ]
     ingress_to_enqueue_ms: list[float] = []
+    ingress_to_publish_ms: list[float] = []
     ingress_to_sub_e2e_ms: list[float] = []
     depth_checksum_matches = 0
     depth_checksum_mismatches = 0
@@ -400,6 +401,7 @@ def parse_and_join_ros_delivery_traces(
             enqueue_to_sub_depth_ms.append((int(se["at_ns"]) - int(pe["producer_enqueue_begin_ns"])) / 1e6)
             if capture_mode == "live_physical_zed2_camera_60hz":
                 ingress_to_enqueue_ms.append((int(pe["producer_enqueue_begin_ns"]) - int(pe["host_ingress_ns"])) / 1e6)
+                ingress_to_publish_ms.append((int(pe["publish_end_ns"]) - int(pe["host_ingress_ns"])) / 1e6)
                 ingress_to_sub_e2e_ms.append((int(se["at_ns"]) - int(pe["host_ingress_ns"])) / 1e6)
             pub_cs = int(pe.get("payload_fnv1a64", 0))
             sub_cs = int(se.get("payload_fnv1a64", 0))
@@ -597,6 +599,7 @@ def parse_and_join_ros_delivery_traces(
             "total_frame_processing_to_publish_ms": percentile_summary(pub_frame_ms),
             "ros2_dds_publish_to_subscriber_arrival_ms": percentile_summary(dds_transport_depth_ms),
             "enqueue_to_subscriber_arrival_e2e_ms": percentile_summary(enqueue_to_sub_depth_ms),
+            "host_ingress_to_publish_ms": percentile_summary(ingress_to_publish_ms),
             "host_ingress_to_subscriber_arrival_e2e_ms": percentile_summary(ingress_to_sub_e2e_ms),
             "thread_cpu_per_depth_frame_ms": percentile_summary(thread_cpu_total_ms),
         },
@@ -720,45 +723,62 @@ def run_pub_sub_qualification(
         pub_cmd.extend(["--coarse-manifest", str(COARSE_4X_MANIFEST)])
 
     bg_gpu_proc = None
+    bg_out = work_dir / f"{run_name}_bg_gpu_load.json"
+    bg_count_file = work_dir / f"{run_name}_bg_gpu_batches.txt"
     if concurrent_gpu_contention:
-        bg_out = work_dir / f"{run_name}_bg_gpu_load.json"
+        bg_out.unlink(missing_ok=True)
+        bg_count_file.unlink(missing_ok=True)
+        loop_cmd = (
+            "n=0; while true; do "
+            f"rm -f '{bg_out}'; "
+            f"'{DUAL_BENCH_BIN}' "
+            f"--coarse-manifest '{COARSE_4X_MANIFEST}' "
+            f"--target-manifest '{DEFAULT_MANIFEST}' "
+            "--variant dual --frames 300 --warmup 10 "
+            "--coarse-disparities 32 --coarse-schedule layered-per-path "
+            "--coarse-right-reference-mode independent-sgm "
+            "--descriptor-mode ortho-hybrid --fast-mode 1 "
+            "--selective-repair 1 --planar-recovery 1 "
+            "--radius 2 --subpixel 1 "
+            f"--output '{bg_out}' >/dev/null 2>&1 || exit 1; "
+            f"n=$((n+1)); echo $n > '{bg_count_file}'; "
+            "done"
+        )
         bg_gpu_proc = subprocess.Popen(
-            [
-                str(DUAL_BENCH_BIN),
-                "--coarse-manifest", str(COARSE_4X_MANIFEST),
-                "--target-manifest", str(DEFAULT_MANIFEST),
-                "--variant", "dual",
-                "--frames", "1200",
-                "--warmup", "10",
-                "--coarse-disparities", "32",
-                "--coarse-schedule", "layered-per-path",
-                "--coarse-right-reference-mode", "independent-sgm",
-                "--descriptor-mode", "ortho-hybrid",
-                "--fast-mode", "1",
-                "--selective-repair", "1",
-                "--radius", "2",
-                "--subpixel", "1",
-                "--output", str(bg_out),
-            ],
+            ["bash", "-c", loop_cmd],
             env=env,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            start_new_session=True,
         )
+        for _ in range(80):
+            if bg_count_file.exists() or bg_gpu_proc.poll() is not None:
+                break
+            time.sleep(0.1)
 
+    bg_active_at_end = False
     sub_proc = subprocess.Popen(sub_cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     try:
         subprocess.run(pub_cmd, env=env, check=True)
+        if bg_gpu_proc is not None:
+            bg_active_at_end = bg_gpu_proc.poll() is None
         time.sleep(0.35)
         if sub_proc.poll() is None:
             sub_proc.send_signal(signal.SIGINT)
         sub_proc.wait(timeout=5)
     finally:
         if bg_gpu_proc is not None and bg_gpu_proc.poll() is None:
-            bg_gpu_proc.terminate()
+            try:
+                os.killpg(bg_gpu_proc.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
             try:
                 bg_gpu_proc.wait(timeout=3)
             except subprocess.TimeoutExpired:
-                bg_gpu_proc.kill()
+                try:
+                    os.killpg(bg_gpu_proc.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
         if sub_proc.poll() is None:
             sub_proc.send_signal(signal.SIGINT)
             try:
@@ -772,6 +792,10 @@ def run_pub_sub_qualification(
 
     res = parse_and_join_ros_delivery_traces(pub_trace, sub_trace, rate_p, cap_mode, warmup_frames=5)
     res["concurrent_gpu_contention_load"] = concurrent_gpu_contention
+    if concurrent_gpu_contention:
+        batches = int(bg_count_file.read_text().strip()) if bg_count_file.exists() else 0
+        res["concurrent_gpu_contention_active_at_completion"] = bg_active_at_end
+        res["concurrent_gpu_contention_completed_300f_batches"] = batches
     return res
 
 
