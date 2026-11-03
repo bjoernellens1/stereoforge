@@ -13,6 +13,7 @@ class Provenance(IntEnum):
     NEURAL = 4
     STEREO_LEFT_AGGREGATED = 5
     PLANAR_INFERRED = 6
+    TEMPORAL_PLANAR_INFERRED = 7
 
 @dataclass(frozen=True)
 class CameraModel:

@@ -3,7 +3,7 @@
 namespace stereoforge {
 class DaxaDepthPipeline;class DaxaTemporal;class DaxaRefinement;
 enum class DaxaObservationPlane:unsigned { Depth,Confidence,Validity,Provenance,SourceIds,AgeNs };
-enum class DaxaProvenance:uint32_t { Invalid=0,Stereo=1,Reprojected=2,Fused=3,Neural=4,StereoLeftAggregated=5,PlanarInferred=6 };
+enum class DaxaProvenance:uint32_t { Invalid=0,Stereo=1,Reprojected=2,Fused=3,Neural=4,StereoLeftAggregated=5,PlanarInferred=6,TemporalPlanarInferred=7 };
 enum class DaxaObservationImage:unsigned { OriginalLeft,OriginalRight,RectifiedLeft,RectifiedRight };
 enum class DaxaObservationAncestryKind { SingleMeasured, BoundedContributors };
 enum class DaxaObservationAncestryPlane:unsigned { ContributorIds,Count,OldestAgeNs,Reuse,OriginMask };
