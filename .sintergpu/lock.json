@@ -1,0 +1,21 @@
+{
+  "artifact": {
+    "name": "sintergpu-0.2.4-source.tar.gz",
+    "sha256": "6bfdaf41dcb1e05270610cfaea0ae72b7984e5976318556381d929d2783876ee",
+    "url": "https://github.com/bjoernellens1/sintergpu/releases/download/v0.2.4/sintergpu-0.2.4-source.tar.gz"
+  },
+  "consumed_modules": [],
+  "integration_state": "registered",
+  "manifest": {
+    "name": "sintergpu-0.2.4-manifest.json",
+    "sha256": "08cd843a255dfc7a66040c6140576310ad3b97be9c554c5cf716c5b03239d9a2",
+    "url": "https://github.com/bjoernellens1/sintergpu/releases/download/v0.2.4/sintergpu-0.2.4-manifest.json"
+  },
+  "migration": "pending",
+  "repository": "bjoernellens1/sintergpu",
+  "schema_version": 1,
+  "shader_tree_sha256": "fa5120ada0dbbad8ea414c4c1053027d5cf9fdfa82f57da6cf2e89c198e9049b",
+  "source_commit": "3f88024f46477a5bb99747948c847abbd9774600",
+  "tag": "v0.2.4",
+  "version": "0.2.4"
+}
