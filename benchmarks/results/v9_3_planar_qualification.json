@@ -3236,7 +3236,7 @@
     },
     "compiled_spv_bundle_sha256": "802b4c529a7e1fe23770b57b200d58fe3b75acd82a7a60acfe4c02ab886bef95",
     "compiled_spv_count": 79,
-    "git_head_at_generation": "b11f8eb765491edcb9c940d9cfc7f2bd640d1704"
+    "git_head_at_generation": "01bc03fa44c72f25d301d46a94dd3c717722b22c"
   },
   "provenance_enum_contract": {
     "FUSED": 3,
