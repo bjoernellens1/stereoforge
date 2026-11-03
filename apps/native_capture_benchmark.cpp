@@ -14,9 +14,19 @@ static uint64_t number(const std::string& s){uint64_t n=0;auto [p,e]=std::from_c
 static std::string json_string(const std::string& s){std::string out="\"";for(unsigned char c:s){if(c=='\"'||c=='\\'){out+='\\';out+=char(c);}else if(c<32)throw std::invalid_argument("invalid report string");else out+=char(c);}return out+'\"';}
 int main(int argc,char** argv){try{
     CaptureConfig config;uint64_t count=60;std::string output,record_dir,replay,source_kind="camera";
-    for(int i=1;i<argc;++i){std::string key=argv[i];if(key=="--help"){std::cout<<"native_capture_benchmark [--frames N] --output FILE [--record-dir DIR] [--replay DIR] [--source camera|synthetic] [--calibration-id ID] [--device-serial ID] [--device-id N]\n";return 0;}if(++i==argc)throw std::invalid_argument("missing option value");std::string value=argv[i];if(key=="--frames")count=number(value);else if(key=="--output")output=value;else if(key=="--record-dir")record_dir=value;else if(key=="--replay")replay=value;else if(key=="--source")source_kind=value;else if(key=="--calibration-id")config.calibration_identity=value;else if(key=="--device-serial")config.device_serial_override=value;else if(key=="--device-id"){auto n=number(value);if(n>INT32_MAX)throw std::invalid_argument("device-id too large");config.device_id=int(n);}else throw std::invalid_argument("unknown option: "+key);}
+    for(int i=1;i<argc;++i){std::string key=argv[i];if(key=="--help"){std::cout<<"native_capture_benchmark [--frames N] --output FILE [--record-dir DIR] [--replay DIR] [--source camera|synthetic] [--calibration-id ID] [--device-serial ID] [--device-id N] [--eye-width N --height N --fps N]\n";return 0;}if(++i==argc)throw std::invalid_argument("missing option value");std::string value=argv[i];if(key=="--frames")count=number(value);else if(key=="--output")output=value;else if(key=="--record-dir")record_dir=value;else if(key=="--replay")replay=value;else if(key=="--source")source_kind=value;else if(key=="--calibration-id")config.calibration_identity=value;else if(key=="--device-serial")config.device_serial_override=value;else if(key=="--device-id"){auto n=number(value);if(n>INT32_MAX)throw std::invalid_argument("device-id too large");config.device_id=int(n);}else if(key=="--eye-width"){auto n=number(value);if(n<2||n>4096||n%2)throw std::invalid_argument("invalid eye width");config.eye_width=static_cast<uint32_t>(n);}else if(key=="--height"){auto n=number(value);if(n<1||n>8192)throw std::invalid_argument("invalid height");config.height=static_cast<uint32_t>(n);}else if(key=="--fps"){auto n=number(value);if(n<1||n>100)throw std::invalid_argument("invalid frame rate");config.fps=static_cast<uint32_t>(n);}else throw std::invalid_argument("unknown option: "+key);}
     if(!count||count>1000000||output.empty())throw std::invalid_argument("positive bounded --frames and --output are required");
     if(source_kind!="camera"&&source_kind!="synthetic")throw std::invalid_argument("unknown source");
+    // Reject unsupported physical camera mode/fps pairs before touching the device
+    // or creating an output. Synthetic fixtures may use other bounded shapes.
+    if(source_kind=="camera"&&replay.empty()){
+        const bool supported =
+            (config.eye_width==2208&&config.height==1242&&config.fps==15)||
+            (config.eye_width==1920&&config.height==1080&&(config.fps==15||config.fps==30))||
+            (config.eye_width==1280&&config.height==720&&(config.fps==15||config.fps==30||config.fps==60))||
+            (config.eye_width==672&&config.height==376&&(config.fps==15||config.fps==30||config.fps==60||config.fps==100));
+        if(!supported)throw std::invalid_argument("unsupported ZED mode/rate; HD1080 supports at most 30 FPS");
+    }
     if(!replay.empty())config.queue_policy=CaptureQueuePolicy::wait_for_consumer;
     if(source_kind=="synthetic"&&!replay.empty())throw std::invalid_argument("synthetic and replay conflict");
     // Require a fresh report destination before any source or recording writes.
