@@ -912,6 +912,63 @@ def run_v93_qualification_suite(work_dir: Any, desk_env_dir: Any | None = None) 
     # 3. Canonical 5-Scene 1280x720 Synthetic Ground-Truth Suite (with Planar Recovery cohort evaluation)
     gt_suite = evaluate_known_ground_truth_suite_720p(work)
 
+    # 4. Sustained 4-Topic ROS 2 Delivery Qualification (depth + completed_depth + completed_provenance + rgb)
+    import os
+    from benchmarks.live_and_e2e_qualification_v9 import (
+        ROOT,
+        build_186frame_zed2_replay,
+        probe_physical_zed2_hardware,
+        run_pub_sub_qualification,
+    )
+
+    ros_env = dict(env)
+    ros_env.update(
+        {
+            "AMENT_PREFIX_PATH": str(ROOT / "ros_ws/.pixi/envs/default"),
+            "RMW_IMPLEMENTATION": "rmw_fastrtps_cpp",
+            "LD_LIBRARY_PATH": str(ROOT / "ros_ws/.pixi/envs/default/lib"),
+        }
+    )
+    replay_186_dir = build_186frame_zed2_replay(
+        DEFAULT_MANIFEST.parent / "capture/capture.sfp",
+        work / "zed2_186frame_replay",
+        total_frames=186,
+    )
+    ros2_delivery_qual: dict[str, Any] = {
+        "deterministic_replay_180f": run_pub_sub_qualification(
+            work,
+            "replay_q16_4x_planar_recovery_derived_180f",
+            "replay",
+            "experimental-dual-refinement",
+            "shared-census-sequential",
+            "left-aggregated-selection",
+            "1",
+            180,
+            ros_env,
+            replay_dir=replay_186_dir,
+            qos_depth=16,
+            verify_checksum=True,
+            planar_recovery="1",
+        ),
+    }
+    hw_probe = probe_physical_zed2_hardware()
+    ros2_delivery_qual["zed2_hardware_probe"] = hw_probe
+    if hw_probe.get("live_camera_ready"):
+        ros2_delivery_qual["live_physical_zed2_camera_60hz_180f"] = run_pub_sub_qualification(
+            work,
+            "live_cam_q16_4x_planar_recovery_derived_180f",
+            "camera",
+            "experimental-dual-refinement",
+            "shared-census-sequential",
+            "left-aggregated-selection",
+            "1",
+            180,
+            ros_env,
+            qos_depth=16,
+            verify_checksum=True,
+            planar_recovery="1",
+        )
+
     return {
         "schema": "stereoforge.v9_3_planar_qualification.v1",
         "provenance": current_provenance_manifest(),
@@ -925,6 +982,7 @@ def run_v93_qualification_suite(work_dir: Any, desk_env_dir: Any | None = None) 
             "planar_never_collides_with_reprojected": int(Provenance.PLANAR_INFERRED) != int(Provenance.REPROJECTED),
         },
         "gpu_240fps_qualification": gpu_perf,
+        "ros2_4topic_completed_delivery_qualification": ros2_delivery_qual,
         "desk_scene_gpu_ablation": desk_ablation,
         "color_tiebreak_causal_ablation": color_ablation,
         "canonical_5scene_720p_gt_suite": gt_suite["aggregate_across_5_scenes"],

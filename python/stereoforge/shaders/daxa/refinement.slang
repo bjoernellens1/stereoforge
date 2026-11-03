@@ -109,11 +109,12 @@ void match(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=
 void lr(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=2*n)return;uint eye=t/n,i=t%n,target=0;float d=fplane(21)[t];bool valid=false;if(uplane(23)[t]!=0&&refinement_target(p.width,i%p.width,d,eye!=0,target)){uint j=(1-eye)*n+(i/p.width)*p.width+target;valid=observation_lr(d,fplane(21)[j],uplane(23)[t],uplane(23)[j],p.lr_tolerance);}if((p.subpixel&4u)==0&&uplane(23)[t]!=0&&!valid)uplane(13)[t]|=REF_LR_FAILED;fplane(0)[t]=valid?d:refinement_invalid();fplane(1)[t]=valid?fplane(22)[t]:0;uplane(2)[t]=uint(valid);}
 void write_completed(uint t,float z,float c,uint v,uint prov,uint2 sid,float d){
     ((float*)p.completed[0])[t]=z;((float*)p.completed[1])[t]=c;((uint*)p.completed[2])[t]=v;((uint*)p.completed[3])[t]=prov;
-    ((uint2*)p.completed[4])[t]=sid;((uint2*)p.completed[5])[t]=uint2(0,0);((float*)p.completed[6])[t]=d;
+    ((uint2*)p.completed[4])[t]=sid;((float*)p.completed[6])[t]=d;
 }
 [shader("compute")][numthreads(64,1,1)]
-void metric(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=2*n)return;uint eye=t/n,i=t%n,target=0;float z=refinement_invalid(),d=fplane(0)[t];bool valid=uplane(2)[t]!=0&&d>0&&(d-p.principal_offset)>0;if(valid&&refinement_target(p.width,i%p.width,d,eye!=0,target)){uint j=(1-eye)*n+(i/p.width)*p.width+target;valid=uplane(25)[t]!=0&&uplane(25)[j]!=0;if(valid){precise float numerator=p.fx*p.baseline;precise float denominator=d-p.principal_offset;z=numerator/denominator;valid=isfinite(z)&&z>0;}}else valid=false;float z_out=valid?z:refinement_invalid(),c_out=valid?fplane(1)[t]:0;uint v_out=uint(valid),prov_out=valid?SF_PROVENANCE_STEREO:0u;uint2 sid=valid?uint2(p.source_low,p.source_high):uint2(0xffffffff,0xffffffff);fplane(3)[t]=z_out;fplane(4)[t]=c_out;uplane(5)[t]=v_out;uplane(6)[t]=prov_out;((uint2*)p.output[7])[t]=sid;((uint2*)p.output[8])[t]=uint2(0,0);if(p.completed[0]!=0)write_completed(t,z_out,c_out,v_out,prov_out,sid,valid?d:refinement_invalid());}
+void metric(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=2*n)return;uint eye=t/n,i=t%n,target=0;float z=refinement_invalid(),d=fplane(0)[t];bool valid=uplane(2)[t]!=0&&d>0&&(d-p.principal_offset)>0;if(valid&&refinement_target(p.width,i%p.width,d,eye!=0,target)){uint j=(1-eye)*n+(i/p.width)*p.width+target;valid=uplane(25)[t]!=0&&uplane(25)[j]!=0;if(valid){precise float numerator=p.fx*p.baseline;precise float denominator=d-p.principal_offset;z=numerator/denominator;valid=isfinite(z)&&z>0;}}else valid=false;float z_out=valid?z:refinement_invalid(),c_out=valid?fplane(1)[t]:0;uint v_out=uint(valid),prov_out=valid?SF_PROVENANCE_STEREO:0u;uint2 sid=valid?uint2(p.source_low,p.source_high):uint2(0xffffffff,0xffffffff);fplane(3)[t]=z_out;fplane(4)[t]=c_out;uplane(5)[t]=v_out;uplane(6)[t]=prov_out;((uint2*)p.output[7])[t]=sid;if(p.completed[0]!=0)write_completed(t,z_out,c_out,v_out,prov_out,sid,valid?d:refinement_invalid());}
 groupshared uint gs_has_candidate;
+groupshared uint gs_has_valid_coarse;
 groupshared float gs_disp[34][34];
 groupshared float gs_luma[34][34];
 groupshared float gs_coarse_d[6][6];
@@ -121,11 +122,10 @@ groupshared float4 gs_coarse_plane[4][4];
 [shader("compute")][numthreads(16,16,1)]
 void planar(uint3 tid:SV_DispatchThreadID,uint3 gid:SV_GroupID,uint3 gtid:SV_GroupThreadID,uint gidx:SV_GroupIndex){
     if(p.completed[0]==0)return;
-    if(gidx==0u)gs_has_candidate=0u;
+    if(gidx==0u){gs_has_candidate=0u;gs_has_valid_coarse=0u;}
     GroupMemoryBarrierWithGroupSync();
     uint x=tid.x,y=tid.y,n=p.width*p.height,t=y*p.width+x;
     bool in_bounds=(x>=12u&&x+12u<p.width&&y>=12u&&y+12u<p.height);
-    // metric pass already initialized completed[0..6] for both eyes (0..2*n-1); only candidate holes in layer 0 need evaluation.
     bool is_cand=in_bounds&&(uplane(5)[t]==0u)&&(uplane(25)[t]!=0u);
     if(is_cand){
         uint qpre=((uplane(2)[(y-9u)*p.width+(x-9u)]|uplane(2)[(y-5u)*p.width+(x-5u)])!=0?1u:0u)
@@ -137,17 +137,6 @@ void planar(uint3 tid:SV_DispatchThreadID,uint3 gid:SV_GroupID,uint3 gtid:SV_Gro
     if(is_cand)InterlockedOr(gs_has_candidate,1u);
     GroupMemoryBarrierWithGroupSync();
     if(gs_has_candidate==0u)return;
-    uint* gray_l=p.borrowed[0]!=0?(uint*)p.borrowed[0]:uplane(27);
-    uint* gray_r=p.borrowed[0]!=0?(uint*)p.borrowed[1]:uplane(27)+n;
-    int base_x=int(gid.x*16u)-9,base_y=int(gid.y*16u)-9;
-    for(uint k=gidx;k<34u*34u;k+=256u){
-        uint hy=k/34u,hx=k%34u;
-        int gx=clamp(base_x+int(hx),0,int(p.width)-1);
-        int gy=clamp(base_y+int(hy),0,int(p.height)-1);
-        uint g_idx=uint(gy)*p.width+uint(gx);
-        gs_luma[hy][hx]=float(gray_l[g_idx]);
-        gs_disp[hy][hx]=(uplane(2)[g_idx]!=0)?fplane(0)[g_idx]:-1.f;
-    }
     bool scale4=(p.width==p.coarse_width*4u);
     bool use_coarse_affine=(p.planar_cfg&256u)!=0;
     precise float step=scale4?.25f:.5f,mult=scale4?4.f:2.f;
@@ -197,6 +186,118 @@ void planar(uint3 tid:SV_DispatchThreadID,uint3 gid:SV_GroupID,uint3 gtid:SV_Gro
             }
             gs_coarse_plane[py][px]=plane;
         }
+        GroupMemoryBarrierWithGroupSync();
+    }
+    uint min_anc=max(p.planar_cfg&0xffu,1u);
+    bool ray_guard=(p.planar_cfg&512u)!=0;
+    bool coarse_lr_guard=(p.planar_cfg&1024u)!=0;
+    precise float cx=(float(x)+.5f)*step-.5f,cy=(float(y)+.5f)*step-.5f;
+    uint cn=p.coarse_width*p.coarse_height;
+    float d_coarse=0.f,ac_full=0.f,bc_full=0.f;
+    if(is_cand){
+        if(scale4&&use_coarse_affine){
+            uint px=gtid.x>>2u,py=gtid.y>>2u;
+            float4 plane=gs_coarse_plane[py][px];
+            if(plane.w<0.f)is_cand=false;
+            else{
+                int rcx=clamp(int(gid.x*4u+px),1,int(p.coarse_width)-2);
+                int rcy=clamp(int(gid.y*4u+py),1,int(p.coarse_height)-2);
+                ac_full=plane.y;bc_full=plane.z;
+                d_coarse=(plane.x+ac_full*(cx-float(rcx))+bc_full*(cy-float(rcy)))*mult;
+            }
+        }else if(use_coarse_affine){
+            int rcx=clamp(int(floor(cx+.5f)),1,int(p.coarse_width)-2);
+            int rcy=clamp(int(floor(cy+.5f)),1,int(p.coarse_height)-2);
+            uint c_cnt=0;
+            float c_mn=3.402823466e38f,c_mx=-3.402823466e38f;
+            float csx=0,csy=0,csxx=0,csyy=0,csxy=0,csd=0,csxd=0,csyd=0,csdd=0;
+            for(int cdy=-1;cdy<=1;++cdy){
+                uint crow=uint(rcy+cdy)*p.coarse_width;
+                float fcdy=float(cdy);
+                for(int cdx=-1;cdx<=1;++cdx){
+                    uint cj=crow+uint(rcx+cdx);
+                    if(((uint*)p.coarse[2])[cj]==0)continue;
+                    float cd=((float*)p.coarse[0])[cj];
+                    if(!isfinite(cd)||cd<=0.f||cd>float(p.disparities-1)*step)continue;
+                    float fcdx=float(cdx);
+                    ++c_cnt;c_mn=min(c_mn,cd);c_mx=max(c_mx,cd);
+                    csx+=fcdx;csy+=fcdy;csxx+=fcdx*fcdx;csyy+=fcdy*fcdy;csxy+=fcdx*fcdy;
+                    csd+=cd;csxd+=fcdx*cd;csyd+=fcdy*cd;csdd+=cd*cd;
+                }
+            }
+            if(c_cnt<5u||(c_mx-c_mn)>p.max_span*1.25f)is_cand=false;
+            else{
+                float fcn=float(c_cnt),inv_cn=1.f/fcn;
+                float cmx=csx*inv_cn,cmy=csy*inv_cn,cmd=csd*inv_cn;
+                float ccxx=csxx-fcn*cmx*cmx,ccyy=csyy-fcn*cmy*cmy,ccxy=csxy-fcn*cmx*cmy;
+                float cdet=ccxx*ccyy-ccxy*ccxy;
+                float ac=0.f,bc=0.f;
+                if(cdet>.25f){
+                    float ccxd=csxd-fcn*cmx*cmd,ccyd=csyd-fcn*cmy*cmd,ccdd=csdd-fcn*cmd*cmd;
+                    ac=(ccyy*ccxd-ccxy*ccyd)/cdet;
+                    bc=(ccxx*ccyd-ccxy*ccxd)/cdet;
+                    float cssr=max(0.f,ccdd-ac*ccxd-bc*ccyd);
+                    if(abs(ac)>.60f||abs(bc)>.85f||sqrt(cssr*inv_cn)>.55f)is_cand=false;
+                }
+                if(is_cand){
+                    d_coarse=(cmd+ac*(cx-float(rcx)-cmx)+bc*(cy-float(rcy)-cmy))*mult;
+                    ac_full=ac;bc_full=bc;
+                }
+            }
+        }else{
+            int ix=int(floor(cx)),iy=int(floor(cy));
+            precise float wx=cx-float(ix),wy=cy-float(iy);
+            precise float weights[4]={(1.f-wx)*(1.f-wy),wx*(1.f-wy),(1.f-wx)*wy,wx*wy};
+            float mn=3.402823466e38f,mx=-3.402823466e38f;
+            precise float predicted=0,w_valid=0;
+            for(uint tap=0;tap<4;++tap){
+                int xx=ix+int(tap&1),yy=iy+int(tap>>1);
+                if(xx<0||yy<0||xx>=int(p.coarse_width)||yy>=int(p.coarse_height))continue;
+                uint j=uint(yy)*p.coarse_width+uint(xx);
+                float d=((float*)p.coarse[0])[j];
+                if(((uint*)p.coarse[2])[j]!=0&&isfinite(d)&&d>=0&&d<=float(p.disparities-1)*step){
+                    precise float w=weights[tap]+.001f;predicted=predicted+d*w;w_valid=w_valid+w;mn=min(mn,d);mx=max(mx,d);
+                }
+            }
+            if(w_valid<.70f||(mx-mn)>p.max_span*1.25f)is_cand=false;
+            else d_coarse=(predicted/w_valid)*mult;
+        }
+        if(is_cand&&(d_coarse<1.5f||d_coarse>=float(p.disparities-1)))is_cand=false;
+        // [P0] Reciprocal right-eye coarse & full-res disparity check before loading full-res halo or stencil traversal.
+        if(is_cand&&coarse_lr_guard){
+            float cx_r=cx-d_coarse*step;
+            int ix_r=int(floor(cx_r+.5f)),iy_r=clamp(int(floor(cy+.5f)),0,int(p.coarse_height)-1);
+            if(ix_r<0||ix_r>=int(p.coarse_width))is_cand=false;
+            else{
+                uint jr_c=cn+uint(iy_r)*p.coarse_width+uint(ix_r);
+                if(((uint*)p.coarse[2])[jr_c]==0)is_cand=false;
+                else{
+                    float dr_c=((float*)p.coarse[0])[jr_c]*mult;
+                    if(!isfinite(dr_c)||abs(dr_c-d_coarse)>p.planar_coarse_lr_tol)is_cand=false;
+                    else{
+                        int rx_c=int(floor(float(x)-d_coarse+.5f));
+                        if(rx_c>=0&&rx_c<int(p.width)){
+                            uint jr_f=n+y*p.width+uint(rx_c);
+                            if(uplane(23)[jr_f]!=0&&abs(fplane(21)[jr_f]-d_coarse)>2.0f)is_cand=false;
+                        }
+                    }
+                }
+            }
+        }
+        if(is_cand)InterlockedOr(gs_has_valid_coarse,1u);
+    }
+    GroupMemoryBarrierWithGroupSync();
+    if(gs_has_valid_coarse==0u)return;
+    uint* gray_l=p.borrowed[0]!=0?(uint*)p.borrowed[0]:uplane(27);
+    uint* gray_r=p.borrowed[0]!=0?(uint*)p.borrowed[1]:uplane(27)+n;
+    int base_x=int(gid.x*16u)-9,base_y=int(gid.y*16u)-9;
+    for(uint k=gidx;k<34u*34u;k+=256u){
+        uint hy=k/34u,hx=k%34u;
+        int gx=clamp(base_x+int(hx),0,int(p.width)-1);
+        int gy=clamp(base_y+int(hy),0,int(p.height)-1);
+        uint g_idx=uint(gy)*p.width+uint(gx);
+        gs_luma[hy][hx]=float(gray_l[g_idx]);
+        gs_disp[hy][hx]=(uplane(2)[g_idx]!=0)?fplane(0)[g_idx]:-1.f;
     }
     GroupMemoryBarrierWithGroupSync();
     if(!is_cand)return;
@@ -204,90 +305,6 @@ void planar(uint3 tid:SV_DispatchThreadID,uint3 gid:SV_GroupID,uint3 gtid:SV_Gro
     float i0=gs_luma[ly][lx];
     float l_xm1=gs_luma[ly][lx-1u],l_xp1=gs_luma[ly][lx+1u],l_ym1=gs_luma[ly-1u][lx],l_yp1=gs_luma[ly+1u][lx];
     if(abs(l_xp1-l_xm1)+abs(l_yp1-l_ym1)>28.f)return;
-    uint min_anc=max(p.planar_cfg&0xffu,1u);
-    bool ray_guard=(p.planar_cfg&512u)!=0;
-    bool coarse_lr_guard=(p.planar_cfg&1024u)!=0;
-    precise float cx=(float(x)+.5f)*step-.5f,cy=(float(y)+.5f)*step-.5f;
-    uint cn=p.coarse_width*p.coarse_height;
-    float d_coarse=0.f,ac_full=0.f,bc_full=0.f;
-    if(scale4&&use_coarse_affine){
-        uint px=gtid.x>>2u,py=gtid.y>>2u;
-        float4 plane=gs_coarse_plane[py][px];
-        if(plane.w<0.f)return;
-        int rcx=clamp(int(gid.x*4u+px),1,int(p.coarse_width)-2);
-        int rcy=clamp(int(gid.y*4u+py),1,int(p.coarse_height)-2);
-        ac_full=plane.y;bc_full=plane.z;
-        d_coarse=(plane.x+ac_full*(cx-float(rcx))+bc_full*(cy-float(rcy)))*mult;
-    }else if(use_coarse_affine){
-        int rcx=clamp(int(floor(cx+.5f)),1,int(p.coarse_width)-2);
-        int rcy=clamp(int(floor(cy+.5f)),1,int(p.coarse_height)-2);
-        uint c_cnt=0;
-        float c_mn=3.402823466e38f,c_mx=-3.402823466e38f;
-        float csx=0,csy=0,csxx=0,csyy=0,csxy=0,csd=0,csxd=0,csyd=0,csdd=0;
-        for(int cdy=-1;cdy<=1;++cdy){
-            uint crow=uint(rcy+cdy)*p.coarse_width;
-            float fcdy=float(cdy);
-            for(int cdx=-1;cdx<=1;++cdx){
-                uint cj=crow+uint(rcx+cdx);
-                if(((uint*)p.coarse[2])[cj]==0)continue;
-                float cd=((float*)p.coarse[0])[cj];
-                if(!isfinite(cd)||cd<=0.f||cd>float(p.disparities-1)*step)continue;
-                float fcdx=float(cdx);
-                ++c_cnt;c_mn=min(c_mn,cd);c_mx=max(c_mx,cd);
-                csx+=fcdx;csy+=fcdy;csxx+=fcdx*fcdx;csyy+=fcdy*fcdy;csxy+=fcdx*fcdy;
-                csd+=cd;csxd+=fcdx*cd;csyd+=fcdy*cd;csdd+=cd*cd;
-            }
-        }
-        if(c_cnt<5u||(c_mx-c_mn)>p.max_span*1.25f)return;
-        float fcn=float(c_cnt),inv_cn=1.f/fcn;
-        float cmx=csx*inv_cn,cmy=csy*inv_cn,cmd=csd*inv_cn;
-        float ccxx=csxx-fcn*cmx*cmx,ccyy=csyy-fcn*cmy*cmy,ccxy=csxy-fcn*cmx*cmy;
-        float cdet=ccxx*ccyy-ccxy*ccxy;
-        float ac=0.f,bc=0.f;
-        if(cdet>.25f){
-            float ccxd=csxd-fcn*cmx*cmd,ccyd=csyd-fcn*cmy*cmd,ccdd=csdd-fcn*cmd*cmd;
-            ac=(ccyy*ccxd-ccxy*ccyd)/cdet;
-            bc=(ccxx*ccyd-ccxy*ccxd)/cdet;
-            if(abs(ac)>.60f||abs(bc)>.85f)return;
-            float cssr=max(0.f,ccdd-ac*ccxd-bc*ccyd);
-            if(sqrt(cssr*inv_cn)>.55f)return;
-        }
-        d_coarse=(cmd+ac*(cx-float(rcx)-cmx)+bc*(cy-float(rcy)-cmy))*mult;
-        ac_full=ac;bc_full=bc;
-    }else{
-        int ix=int(floor(cx)),iy=int(floor(cy));
-        precise float wx=cx-float(ix),wy=cy-float(iy);
-        precise float weights[4]={(1.f-wx)*(1.f-wy),wx*(1.f-wy),(1.f-wx)*wy,wx*wy};
-        float mn=3.402823466e38f,mx=-3.402823466e38f;
-        precise float predicted=0,w_valid=0;
-        for(uint tap=0;tap<4;++tap){
-            int xx=ix+int(tap&1),yy=iy+int(tap>>1);
-            if(xx<0||yy<0||xx>=int(p.coarse_width)||yy>=int(p.coarse_height))continue;
-            uint j=uint(yy)*p.coarse_width+uint(xx);
-            float d=((float*)p.coarse[0])[j];
-            if(((uint*)p.coarse[2])[j]!=0&&isfinite(d)&&d>=0&&d<=float(p.disparities-1)*step){
-                precise float w=weights[tap]+.001f;predicted=predicted+d*w;w_valid=w_valid+w;mn=min(mn,d);mx=max(mx,d);
-            }
-        }
-        if(w_valid<.70f||(mx-mn)>p.max_span*1.25f)return;
-        d_coarse=(predicted/w_valid)*mult;
-    }
-    if(d_coarse<1.5f||d_coarse>=float(p.disparities-1))return;
-    // [P0] Reciprocal right-eye coarse & full-res disparity check before stencil traversal.
-    if(coarse_lr_guard){
-        float cx_r=cx-d_coarse*step;
-        int ix_r=int(floor(cx_r+.5f)),iy_r=clamp(int(floor(cy+.5f)),0,int(p.coarse_height)-1);
-        if(ix_r<0||ix_r>=int(p.coarse_width))return;
-        uint jr_c=cn+uint(iy_r)*p.coarse_width+uint(ix_r);
-        if(((uint*)p.coarse[2])[jr_c]==0)return;
-        float dr_c=((float*)p.coarse[0])[jr_c]*mult;
-        if(!isfinite(dr_c)||abs(dr_c-d_coarse)>p.planar_coarse_lr_tol)return;
-        int rx_c=int(floor(float(x)-d_coarse+.5f));
-        if(rx_c>=0&&rx_c<int(p.width)){
-            uint jr_f=n+y*p.width+uint(rx_c);
-            if(uplane(23)[jr_f]!=0&&abs(fplane(21)[jr_f]-d_coarse)>2.0f)return;
-        }
-    }
     // Single-pass 36-tap quadrant stencil dy,dx in {-9,-5,-2,2,5,9} reading from LDS (gs_disp & gs_luma)
     // with coarse-slope-centered residual u_res = da - dc_a and Huber/Cauchy outlier weighting.
     static const int kOff[6]={-9,-5,-2,2,5,9};

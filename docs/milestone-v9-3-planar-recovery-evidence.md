@@ -37,11 +37,11 @@ Evaluated across `N = 5` interleaved trials (`120` measured frames + `20` warmup
 
 | Dual-Preprocess + 4× Refinement Pipeline (`1280×720`, `5 × 120` Interleaved Frames) | Median Trial GPU Span `p50 / p95 / p99` (`FPS`) | 5-Trial `p95` Mean ± Std (`All 5 <= 4.167 ms`) | Stage-Sum GPU `p50 / p95` | Host Wall `p50 / p95` | `dual_preprocess` GPU | `coarse` GPU | `refinement_metric` GPU | `refinement_planar` GPU `p50` | 30-Plane Bit-Exact | Vulkan Validation Errors |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :---: | ---: |
-| `dual4x_selective_repair_only` (`--planar-recovery 0`) | **`3.092 / 3.209 / 3.269 ms` (`323.4 FPS`)** | `3.205 ± 0.033 ms` (**`5/5 true`**) | `3.046 / 3.163 ms` | `3.364 / 3.536 ms` | `0.332 ms` | `1.151 ms` | `0.444 ms` | `0.000 ms` | `true` | `0` |
-| **`dual4x_selective_repair_plus_planar` (`--planar-recovery 1`, default `a=10, 3×3 affine`)** | **`3.805 / 3.937 / 4.006 ms` (`262.8 FPS`)** | **`3.935 ± 0.031 ms` (`5/5 true`)** | **`3.758 / 3.890 ms`** | **`4.081 / 4.302 ms`** | **`0.313 ms`** | **`1.171 ms`** | **`0.767 ms`** | **`0.386 ms` (`2.23×` faster vs. `0.861 ms`)** | **`true`** | **`0`** |
+| `dual4x_selective_repair_only` (`--planar-recovery 0`) | **`3.043 / 3.080 / 3.104 ms` (`328.7 FPS`)** | `3.071 ± 0.015 ms` (**`5/5 true`**) | `2.992 / 3.012 ms` | `3.282 / 3.384 ms` | `0.343 ms` | `1.155 ms` | `0.370 ms` | `0.000 ms` | `true` | `0` |
+| **`dual4x_selective_repair_plus_planar` (`--planar-recovery 1`, default `a=10, 3×3 affine`)** | **`3.622 / 3.658 / 3.706 ms` (`276.1 FPS`)** | **`3.649 ± 0.012 ms` (`5/5 true`)** | **`3.573 / 3.597 ms`** | **`3.878 / 4.014 ms`** | **`0.308 ms`** | **`1.178 ms`** | **`0.621 ms`** | **`0.362 ms` (`2.38×` faster vs. `0.861 ms`)** | **`true`** | **`0`** |
 
-- **5-Trial Interleaved `gpu_combined_queue_span_ms.p95` Distribution (`dual4x_selective_repair_plus_planar`):** `[3.9484, 3.9368, 3.9194, 3.8879, 3.9803] ms` (`mean = 3.9346 ms`, `std = 0.0306 ms`, **`230 µs` safety margin below `4.167 ms`**).
-- **5-Trial Interleaved `gpu_planar_recovery_ms.p50` Distribution:** `[0.3851, 0.3858, 0.3849, 0.3863, 0.3850] ms` (down from `0.861 ms` prior to shared-memory tile caching and workgroup early-out).
+- **5-Trial Interleaved `gpu_combined_queue_span_ms.p95` Distribution (`dual4x_selective_repair_plus_planar`):** `[3.6310, 3.6595, 3.6379, 3.6599, 3.6584] ms` (`mean = 3.6493 ms`, `std = 0.0124 ms`, **`508 µs` safety margin below `4.167 ms`**, with even `p99 = 3.706 ms` and `host_wall.p95 = 4.014 ms` passing `<= 4.167 ms` across all 5 trials).
+- **5-Trial Interleaved `gpu_planar_recovery_ms.p50` Distribution:** `[0.3597, 0.3559, 0.3611, 0.3617, 0.3622] ms` (down from `0.861 ms` via coarse-first workgroup early-out, shared-memory tile caching, and one-time zero initialization of `AgeNs` / `CompletedAgeNs`).
 
 ---
 
@@ -91,3 +91,15 @@ To test whether selective color tie-breaking (`Variant D`) derives its coverage 
 | **`D_UV_shuffled_control` (spatially permuted right-eye `Cr, Cb`)** | **`1,088` (`+0.118%`)** | **`526`** | **`150`** | **`238`** | **`174`** | **`70.22%`** | **`29.78%`** | **`11.690 DN`** | **`1.476 DN`** |
 
 - **Causal Conclusion:** Because `ortho_thermo32` integer costs (`6 * popcount + |offset|`) frequently produce exact integer ties (`second_cost - best_cost == 0`), **any continuous perturbation breaks the integer tie**: even spatially shuffled right-eye chroma (`D_UV_shuffled_control`) admits `1,088` of the `1,174` pixels (`92.7%` of `D_UV_chroma_only`'s count) with worse epipolar luma error (`11.690 DN` vs. `10.516 DN` for `D_Y_luma_only`), and over `70%` of admitted pixels lie in low-chroma regions (`Q1 + Q3`). Consequently, chroma tie-breaking is **not** folded into production `--selective-repair` or `--planar-recovery`.
+
+---
+
+## 7. `[P1-A]` Sustained 4-Topic Live & Replay ROS 2 Delivery Qualification (`stereoforge_ros2_depth_publisher` + `stereoforge_ros2_delivery_probe`)
+
+Concurrent publisher (`--planar-recovery 1 --verify-payload-checksum --thread-cpu-timing`) and subscriber (`--expect-completed 1`) qualification across all 4 synchronized topics (`/stereoforge/.../depth` `32FC1`, `/stereoforge/.../depth_completed` `32FC1`, `/stereoforge/.../depth_completed_provenance` `mono8`, `/stereoforge/.../rectified_rgb` `rgba8`):
+
+| ROS 2 4-Topic Delivery Run (`180` Measured Frames @ `60 Hz`, `KeepLast(16)`) | Capture / Publish / Receive FPS | Published (`depth / comp_depth / comp_prov / rgb`) | Received (`depth / comp_depth / comp_prov / rgb`) | Synchronized 4-Topic Quads | 64-Bit FNV-1a Checksum Matches (`4 × 180`) | Queue / Slot Drops | Inferred Planar Gain (`p50 / p95 px`) | Host-Ingress to Subscriber E2E `p50 / p95` |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **`live_physical_zed2_camera_60hz_180f` (`--source camera`)** | **`60.0 / 59.3 / 59.6 FPS`** | **`180 / 180 / 180 / 180`** | **`180 / 180 / 180 / 180` (`100%`)** | **`180 / 180`** | **`720 / 720` (`0` mismatches)** | **`0 / 0`** | **`+10,718 / +11,450 px`** | **`6.934 / 17.116 ms`** |
+| `deterministic_replay_180f` (`--source replay`) | `60.0 / 98.4 / 98.4 FPS` | `180 / 180 / 180 / 180` | `180 / 180 / 180 / 180` (`100%`) | `180 / 180` | `720 / 720` (`0` mismatches) | `0 / 0` | `+24,425 / +24,804 px` | — (replay) |
+

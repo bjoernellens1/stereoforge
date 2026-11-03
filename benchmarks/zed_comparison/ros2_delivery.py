@@ -186,6 +186,7 @@ def _stop(event, start):
 
 
 ENQUEUE_TIMING = {'producer_enqueue_begin_ns', 'producer_enqueue_end_ns', 'export_enqueue_end_ns'}
+PAYLOAD_CHECKSUM = {'payload_fnv1a64', 'valid_pixels'}
 
 
 def _frame(event, start):
@@ -195,7 +196,10 @@ def _frame(event, start):
     cpu_enabled = role == 'publisher' and config.get('thread_cpu_timing', False)
     cpu_field = {'thread_cpu_timing'} if role == 'publisher' and 'thread_cpu_timing' in event else set()
     s._require(bool(cpu_field) == cpu_enabled, 'missing or undeclared thread cpu timing')
-    s._keys(event, BASE | (PUBLISHED | timing | cpu_field if role == 'publisher' else RECEIVED), 'frame')
+    payload_fields = PAYLOAD_CHECKSUM & event.keys()
+    for pkey in payload_fields:
+        _int(event[pkey], pkey, 0, (1 << 64) - 1)
+    s._keys(event, BASE | payload_fields | (PUBLISHED | timing | cpu_field if role == 'publisher' else RECEIVED), 'frame')
     if cpu_enabled:
         cpu = event['thread_cpu_timing']
         s._require(type(cpu) is dict and cpu.get('status') in ('available', 'unavailable'), 'invalid thread cpu timing')
@@ -330,13 +334,16 @@ def summarize_delivery(events, *, policy=None):
                     reasons.append('source_identity_not_increasing')
                 previous_id, previous_capture = e['source_id'], e['capture_ns']
                 source_seen.add(e['source_id'])
-            received=[]; stamps=set(); ids=set(); unmatched=0; repeated=0
+            received=[]; stamps=set(); ids=set(); unmatched=0; repeated=0; checksum_mismatches=0
             for e in (x for x in rframes if x['output']==output):
                 stamp=e['mapped_capture_ns']; p=publications.get(stamp)
                 if p is None: unmatched+=1; continue
                 if stamp in stamps or p['source_id'] in ids: repeated+=1; continue
                 stamps.add(stamp); ids.add(p['source_id'])
+                if 'payload_fnv1a64' in e and 'payload_fnv1a64' in p and e['payload_fnv1a64'] != p['payload_fnv1a64']:
+                    checksum_mismatches += 1
                 if p['freshness'] == 'measured_single_source': received.append((e,p))
+            if checksum_mismatches: reasons.append('payload_checksum_mismatch')
             gaps=[(b[0]['at_ns']-a[0]['at_ns'])/1e6 for a,b in zip(received,received[1:])] if same_clock else []
             delays=[(e['at_ns']-p['publish_begin_ns'])/1e6 for e,p in received] if pc['clock_id']==sc['clock_id'] else []
             valid_delays = all(x >= 0 for x in delays)

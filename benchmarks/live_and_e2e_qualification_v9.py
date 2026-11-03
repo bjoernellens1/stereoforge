@@ -315,15 +315,23 @@ def parse_and_join_ros_delivery_traces(
 
     depth_pubs = [e for e in pub_events if e["kind"] == "published" and e.get("output") == "depth"]
     rgb_pubs = [e for e in pub_events if e["kind"] == "published" and e.get("output") == "rgb"]
+    comp_depth_pubs = [e for e in pub_events if e["kind"] == "published" and e.get("output") == "completed_depth"]
+    comp_prov_pubs = [e for e in pub_events if e["kind"] == "published" and e.get("output") == "completed_provenance"]
     depth_subs = [e for e in sub_events if e["kind"] == "received" and e.get("output") == "depth"]
     rgb_subs = [e for e in sub_events if e["kind"] == "received" and e.get("output") == "rgb"]
+    comp_depth_subs = [e for e in sub_events if e["kind"] == "received" and e.get("output") == "completed_depth"]
+    comp_prov_subs = [e for e in sub_events if e["kind"] == "received" and e.get("output") == "completed_provenance"]
 
     sub_depth_by_stamp = {int(e["mapped_capture_ns"]): e for e in depth_subs}
     sub_rgb_by_stamp = {int(e["mapped_capture_ns"]): e for e in rgb_subs}
+    sub_comp_depth_by_stamp = {int(e["mapped_capture_ns"]): e for e in comp_depth_subs}
+    sub_comp_prov_by_stamp = {int(e["mapped_capture_ns"]): e for e in comp_prov_subs}
 
     depth_ids = [int(e["source_id"]) for e in depth_pubs]
     depth_stamps = [int(e["mapped_capture_ns"]) for e in depth_pubs]
     rgb_stamps = [int(e["mapped_capture_ns"]) for e in rgb_pubs]
+    comp_depth_stamps = [int(e["mapped_capture_ns"]) for e in comp_depth_pubs]
+    comp_prov_stamps = [int(e["mapped_capture_ns"]) for e in comp_prov_pubs]
 
     sorted_ids = sorted(depth_ids)
     sequence_gaps = sum(
@@ -331,6 +339,15 @@ def parse_and_join_ros_delivery_traces(
     )
     contiguous_ids = bool(depth_ids) and sequence_gaps == 0
     synchronized_pairs = sum(1 for ds, rs in zip(depth_stamps, rgb_stamps) if ds == rs)
+    synchronized_quads = (
+        sum(
+            1
+            for ds, cds, cps, rs in zip(depth_stamps, comp_depth_stamps, comp_prov_stamps, rgb_stamps)
+            if ds == cds == cps == rs
+        )
+        if comp_depth_pubs
+        else 0
+    )
 
     # Publisher-internal timings
     enqueue_cpu_ms = [
@@ -406,6 +423,45 @@ def parse_and_join_ros_delivery_traces(
                 else:
                     rgb_checksum_mismatches += 1
 
+    matched_comp_depth_count = 0
+    comp_depth_checksum_matches = 0
+    comp_depth_checksum_mismatches = 0
+    for pe in comp_depth_pubs:
+        stamp = int(pe["mapped_capture_ns"])
+        se = sub_comp_depth_by_stamp.get(stamp)
+        if se is not None:
+            matched_comp_depth_count += 1
+            pub_cs = int(pe.get("payload_fnv1a64", 0))
+            sub_cs = int(se.get("payload_fnv1a64", 0))
+            if pub_cs != 0 and sub_cs != 0:
+                if pub_cs == sub_cs and int(pe.get("valid_pixels", 0)) == int(se.get("valid_pixels", 0)) and int(se.get("valid_pixels", 0)) > 0:
+                    comp_depth_checksum_matches += 1
+                else:
+                    comp_depth_checksum_mismatches += 1
+
+    matched_comp_prov_count = 0
+    comp_prov_checksum_matches = 0
+    comp_prov_checksum_mismatches = 0
+    for pe in comp_prov_pubs:
+        stamp = int(pe["mapped_capture_ns"])
+        se = sub_comp_prov_by_stamp.get(stamp)
+        if se is not None:
+            matched_comp_prov_count += 1
+            pub_cs = int(pe.get("payload_fnv1a64", 0))
+            sub_cs = int(se.get("payload_fnv1a64", 0))
+            if pub_cs != 0 and sub_cs != 0:
+                if pub_cs == sub_cs and int(pe.get("valid_pixels", 0)) == int(se.get("valid_pixels", 0)) and int(se.get("valid_pixels", 0)) > 0:
+                    comp_prov_checksum_matches += 1
+                else:
+                    comp_prov_checksum_mismatches += 1
+
+    inferred_planar_gains = [
+        int(cd.get("valid_pixels", 0)) - int(dp.get("valid_pixels", 0))
+        for dp, cd in zip(depth_pubs, comp_depth_pubs)
+        if int(dp.get("mapped_capture_ns", -1)) == int(cd.get("mapped_capture_ns", -2))
+        and int(cd.get("valid_pixels", 0)) > 0
+    ]
+
     if len(depth_pubs) >= 2:
         pub_span_s = (int(depth_pubs[-1]["publish_end_ns"]) - int(depth_pubs[0]["publish_end_ns"])) / 1e9
         achieved_pub_fps = round((len(depth_pubs) - 1) / max(pub_span_s, 1e-6), 2)
@@ -445,10 +501,16 @@ def parse_and_join_ros_delivery_traces(
         "achieved_publish_cadence_fps": achieved_pub_fps,
         "subscriber_receive_cadence_fps": subscriber_rx_fps,
         "published_depth_frames": published_depth_count,
+        "published_completed_depth_frames": len(comp_depth_pubs),
+        "published_completed_provenance_frames": len(comp_prov_pubs),
         "published_rgb_frames": len(rgb_pubs),
         "received_depth_frames": len(depth_subs),
+        "received_completed_depth_frames": len(comp_depth_subs),
+        "received_completed_provenance_frames": len(comp_prov_subs),
         "received_rgb_frames": len(rgb_subs),
         "matched_pub_sub_depth_pairs": len(dds_transport_depth_ms),
+        "matched_pub_sub_completed_depth_pairs": matched_comp_depth_count,
+        "matched_pub_sub_completed_provenance_pairs": matched_comp_prov_count,
         "matched_pub_sub_rgb_pairs": matched_rgb_count,
         "first_source_id": min(depth_ids) if depth_ids else None,
         "last_source_id": max(depth_ids) if depth_ids else None,
@@ -456,7 +518,9 @@ def parse_and_join_ros_delivery_traces(
         "source_ids_contiguous_no_gaps": contiguous_ids,
         "sequence_gaps": sequence_gaps,
         "synchronized_depth_rgb_pairs": synchronized_pairs,
+        "synchronized_4topic_quads": synchronized_quads,
         "stamp_mismatch_count": published_depth_count - synchronized_pairs,
+        "inferred_planar_pixels_per_frame": percentile_summary([float(x) for x in inferred_planar_gains]) if inferred_planar_gains else None,
         "frame_accounting": {
             "prototype_frames_consumed": 1,
             "warmup_frames_withheld": warmup_frames,
@@ -472,18 +536,42 @@ def parse_and_join_ros_delivery_traces(
             "frames_published_in_loop": int(counters.get("published_depth", 0)),
             "in_flight_slot_drained_and_published_at_stop": drained_at_stop,
             "frames_published_depth_total": published_depth_count,
+            "frames_published_completed_depth_total": len(comp_depth_pubs),
+            "frames_published_completed_provenance_total": len(comp_prov_pubs),
             "frames_published_rgb_total": len(rgb_pubs),
             "frames_received_by_subscriber_depth": int(sub_counters.get("received_depth", len(depth_subs))),
+            "frames_received_by_subscriber_completed_depth": int(sub_counters.get("received_completed_depth", len(comp_depth_subs))),
+            "frames_received_by_subscriber_completed_provenance": int(sub_counters.get("received_completed_provenance", len(comp_prov_subs))),
             "frames_received_by_subscriber_rgb": int(sub_counters.get("received_rgb", len(rgb_subs))),
             "subscriber_delivery_ratio_depth": round(len(dds_transport_depth_ms) / max(published_depth_count, 1), 4),
+            "subscriber_delivery_ratio_completed_depth": (
+                round(matched_comp_depth_count / max(len(comp_depth_pubs), 1), 4)
+                if comp_depth_pubs
+                else None
+            ),
+            "subscriber_delivery_ratio_completed_provenance": (
+                round(matched_comp_prov_count / max(len(comp_prov_pubs), 1), 4)
+                if comp_prov_pubs
+                else None
+            ),
             "subscriber_delivery_ratio_rgb": round(matched_rgb_count / max(len(rgb_pubs), 1), 4),
             "verified_payload_checksum_matches_depth": depth_checksum_matches,
             "verified_payload_checksum_mismatches_depth": depth_checksum_mismatches,
+            "verified_payload_checksum_matches_completed_depth": comp_depth_checksum_matches,
+            "verified_payload_checksum_mismatches_completed_depth": comp_depth_checksum_mismatches,
+            "verified_payload_checksum_matches_completed_provenance": comp_prov_checksum_matches,
+            "verified_payload_checksum_mismatches_completed_provenance": comp_prov_checksum_mismatches,
             "verified_payload_checksum_matches_rgb": rgb_checksum_matches,
             "verified_payload_checksum_mismatches_rgb": rgb_checksum_mismatches,
             "invalid_subscriber_payloads": (
                 0
-                if (sub_stop.get("reason") != "error" and depth_checksum_mismatches == 0 and rgb_checksum_mismatches == 0)
+                if (
+                    sub_stop.get("reason") != "error"
+                    and depth_checksum_mismatches == 0
+                    and comp_depth_checksum_mismatches == 0
+                    and comp_prov_checksum_mismatches == 0
+                    and rgb_checksum_mismatches == 0
+                )
                 else 1
             ),
             "qos_depth": int(pub_start["config"].get("qos", {}).get("depth", pub_start["config"].get("qos_depth", 16))),
@@ -534,6 +622,7 @@ def run_pub_sub_qualification(
     qos_depth: int = 16,
     verify_checksum: bool = True,
     concurrent_gpu_contention: bool = False,
+    planar_recovery: str = "0",
 ) -> dict[str, Any]:
     """Execute concurrent stereoforge_ros2_delivery_probe + stereoforge_ros2_depth_publisher
     on dedicated ROS 2 topics and join their traces."""
@@ -562,8 +651,10 @@ def run_pub_sub_qualification(
 
     depth_topic = f"/stereoforge/{run_name}/depth"
     rgb_topic = f"/stereoforge/{run_name}/rectified_rgb"
+    comp_depth_topic = f"/stereoforge/{run_name}/depth_completed"
+    comp_prov_topic = f"/stereoforge/{run_name}/depth_completed_provenance"
     frame_id = "zed2_left_camera_optical_frame"
-    run_id = f"v9_2_{run_name}"
+    run_id = f"v9_3_{run_name}"
     duration_s = max(25, int(max_f / 60 * 2.5) + 15)
 
     sub_cmd = [
@@ -573,6 +664,9 @@ def run_pub_sub_qualification(
         "--mode", "depth-rgb",
         "--depth-topic", depth_topic,
         "--rgb-topic", rgb_topic,
+        "--completed-depth-topic", comp_depth_topic,
+        "--completed-provenance-topic", comp_prov_topic,
+        "--expect-completed", planar_recovery,
         "--width", "1280",
         "--height", "720",
         "--fps", "60",
@@ -593,6 +687,8 @@ def run_pub_sub_qualification(
         "--mode", "depth-rgb",
         "--depth-topic", depth_topic,
         "--rgb-topic", rgb_topic,
+        "--completed-depth-topic", comp_depth_topic,
+        "--completed-provenance-topic", comp_prov_topic,
         "--reliability", "reliable",
         "--qos-depth", str(qos_depth),
         "--subscriber-wait-seconds", "5",
@@ -605,6 +701,7 @@ def run_pub_sub_qualification(
         "--fast-mode", "1",
         "--refinement-subpixel", "1",
         "--selective-repair", repair,
+        "--planar-recovery", planar_recovery,
         "--coarse-schedule", sched,
         "--coarse-right-reference-mode", rmode,
         "--validation",

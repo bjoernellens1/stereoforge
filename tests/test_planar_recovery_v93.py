@@ -168,4 +168,25 @@ def test_v93_qualification_artifact_contract():
         assert desk_def["consistency_to_measured_planes"][pkey]["reference_kind"] == "self_consistency_to_measured_stereo_ransac_plane"
         assert desk_def["independent_zncc_reference_planes"][pkey]["inferred_prov6"]["pixels"] > 0
         assert desk_def["consistency_to_measured_planes"][pkey]["inferred_prov6"]["pixels"] > 0
+    ros_qual = doc["ros2_4topic_completed_delivery_qualification"]
+    for rkey in ("deterministic_replay_180f", "live_physical_zed2_camera_60hz_180f"):
+        assert rkey in ros_qual
+        run = ros_qual[rkey]
+        assert run["published_depth_frames"] == 180
+        assert run["published_completed_depth_frames"] == 180
+        assert run["published_completed_provenance_frames"] == 180
+        assert run["published_rgb_frames"] == 180
+        assert run["received_depth_frames"] == 180
+        assert run["received_completed_depth_frames"] == 180
+        assert run["received_completed_provenance_frames"] == 180
+        assert run["received_rgb_frames"] == 180
+        assert run["synchronized_4topic_quads"] == 180
+        assert run["inferred_planar_pixels_per_frame"]["p50"] > 0
+        fa = run["frame_accounting"]
+        assert fa["verified_payload_checksum_matches_depth"] == 180
+        assert fa["verified_payload_checksum_matches_completed_depth"] == 180
+        assert fa["verified_payload_checksum_matches_completed_provenance"] == 180
+        assert fa["verified_payload_checksum_matches_rgb"] == 180
+        assert fa["invalid_subscriber_payloads"] == 0
+
 
