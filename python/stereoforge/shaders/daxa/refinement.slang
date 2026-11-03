@@ -18,8 +18,73 @@ struct Push{uint64_t parameters;};[[vk::push_constant]] Push pc;
 uint* uplane(uint plane){return (uint*)p.output[plane];}float* fplane(uint plane){return (float*)p.output[plane];}
 [shader("compute")][numthreads(64,1,1)]
 void rectify(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=2*n)return;uint eye=t/n,i=t%n;float* mx=(float*)p.maps[eye*2];float* my=(float*)p.maps[eye*2+1];int qx=preprocess_quantize(mx[i]),qy=preprocess_quantize(my[i]);int x=qx>>5,y=qy>>5;uint fx=uint(qx)&31,fy=uint(qy)&31;uint weights[4]={(32-fx)*(32-fy),fx*(32-fy),(32-fx)*fy,fx*fy};uint3 channels=0;bool full_support=true;uint* original=(uint*)p.original[eye];[unroll]for(uint tap=0;tap<4;++tap){int xx=x+int(tap&1),yy=y+int(tap>>1);bool inside=xx>=0&&yy>=0&&xx<int(p.source_width)&&yy<int(p.source_height);if(weights[tap]!=0&&!inside)full_support=false;if(inside){uint rgb=original[uint(yy)*p.source_width+uint(xx)];channels+=uint3(rgb&255,(rgb>>8)&255,(rgb>>16)&255)*weights[tap];}}channels=(channels+512)>>10;uint color=channels.x|(channels.y<<8)|(channels.z<<16)|0xff000000u;uplane(eye==0?26:29)[i]=color;uplane(27)[t]=preprocess_gray(color);uplane(28)[t]=full_support?1:0;}
+#if !defined(SF_CPU_TARGET)
+groupshared uint gs_census_supp[68];
+groupshared int gs_census_sum5[68];
+groupshared uint gs_census_top3[68];
+groupshared uint gs_census_bot3[68];
+#endif
 [shader("compute")][numthreads(64,1,1)]
-void census(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=2*n)return;uint eye=t/n,i=t%n,x=i%p.width,y=i/p.width;uint* gray=p.borrowed[0]!=0?(uint*)p.borrowed[eye]:uplane(27)+eye*n;uint* support=p.borrowed[0]!=0?(uint*)p.borrowed[2+eye]:uplane(28)+eye*n;bool valid=refinement_support(support,p.width,p.height,x,y);uplane(24)[t]=valid?(((p.subpixel&2u)!=0)?refinement_ortho_thermo_census(gray,p.width,x,y):refinement_census(gray,p.width,x,y)):0;uplane(25)[t]=uint(valid);}
+void census(uint3 tid:SV_DispatchThreadID,uint3 gid:SV_GroupID,uint gidx:SV_GroupIndex){
+    uint n=p.width*p.height,t=tid.x;
+#if !defined(SF_CPU_TARGET)
+    uint base_t=gid.x*64u;
+    uint eye0=base_t/n,rem0=base_t%n,x0=rem0%p.width,y0=rem0/p.width;
+    if((p.subpixel&2u)!=0&&eye0<2u&&x0+64u<=p.width&&y0>=2u&&y0+2u<p.height){
+        uint* gray=p.borrowed[0]!=0?(uint*)p.borrowed[eye0]:uplane(27)+eye0*n;
+        uint* support=p.borrowed[0]!=0?(uint*)p.borrowed[2+eye0]:uplane(28)+eye0*n;
+        uint row_m2=(y0-2u)*p.width,row_m1=(y0-1u)*p.width,row_0=y0*p.width,row_p1=(y0+1u)*p.width,row_p2=(y0+2u)*p.width;
+        {
+            uint hx=gidx+2u;
+            uint ux=x0+gidx;
+            uint s_ok=uint(support[row_m2+ux]!=0&&support[row_m1+ux]!=0&&support[row_0+ux]!=0&&support[row_p1+ux]!=0&&support[row_p2+ux]!=0);
+            uint gm2=gray[row_m2+ux],gm1=gray[row_m1+ux],g0=gray[row_0+ux],gp1=gray[row_p1+ux],gp2=gray[row_p2+ux];
+            gs_census_supp[hx]=s_ok;
+            gs_census_top3[hx]=gm2+gm1+g0;
+            gs_census_bot3[hx]=g0+gp1+gp2;
+            gs_census_sum5[hx]=int(gm2+gm1+g0+gp1+gp2);
+            if(gidx>=32u&&gidx<36u){
+                uint h_side=gidx-32u;
+                uint h_dst=(h_side<2u)?h_side:(h_side+64u);
+                int gx_h=int(x0)+int(h_dst)-2;
+                if(gx_h>=0&&gx_h<int(p.width)){
+                    uint ux_h=uint(gx_h);
+                    uint s_h=uint(support[row_m2+ux_h]!=0&&support[row_m1+ux_h]!=0&&support[row_0+ux_h]!=0&&support[row_p1+ux_h]!=0&&support[row_p2+ux_h]!=0);
+                    uint hm2=gray[row_m2+ux_h],hm1=gray[row_m1+ux_h],h0=gray[row_0+ux_h],hp1=gray[row_p1+ux_h],hp2=gray[row_p2+ux_h];
+                    gs_census_supp[h_dst]=s_h;
+                    gs_census_top3[h_dst]=hm2+hm1+h0;
+                    gs_census_bot3[h_dst]=h0+hp1+hp2;
+                    gs_census_sum5[h_dst]=int(hm2+hm1+h0+hp1+hp2);
+                }else{
+                    gs_census_supp[h_dst]=0u;
+                    gs_census_top3[h_dst]=0u;
+                    gs_census_bot3[h_dst]=0u;
+                    gs_census_sum5[h_dst]=0;
+                }
+            }
+        }
+        GroupMemoryBarrierWithGroupSync();
+        uint x=x0+gidx,lx=gidx+2u;
+        bool valid=(x>=2u&&x+2u<p.width)&&(gs_census_supp[lx-2u]&gs_census_supp[lx-1u]&gs_census_supp[lx]&gs_census_supp[lx+1u]&gs_census_supp[lx+2u])!=0u;
+        uint desc=0u;
+        if(valid){
+            int gxl=gs_census_sum5[lx]-gs_census_sum5[lx-2u];
+            int gxr=gs_census_sum5[lx+2u]-gs_census_sum5[lx];
+            uint lt=gs_census_top3[lx-2u]+gs_census_top3[lx-1u]+gs_census_top3[lx]+gs_census_top3[lx+1u]+gs_census_top3[lx+2u];
+            uint lb=gs_census_bot3[lx-2u]+gs_census_bot3[lx-1u]+gs_census_bot3[lx]+gs_census_bot3[lx+1u]+gs_census_bot3[lx+2u];
+            uint q_gxl=uint(clamp((gxl+60)/15,0,8));
+            uint q_gxr=uint(clamp((gxr+60)/15,0,8));
+            uint q_lt=min(lt/(15u*28u),8u);
+            uint q_lb=min(lb/(15u*28u),8u);
+            desc=refinement_thermo8(q_gxl)|(refinement_thermo8(q_gxr)<<8)|(refinement_thermo8(q_lt)<<16)|(refinement_thermo8(q_lb)<<24);
+        }
+        uplane(24)[t]=desc;
+        uplane(25)[t]=uint(valid);
+        return;
+    }
+#endif
+    if(t>=2*n)return;uint eye=t/n,i=t%n,x=i%p.width,y=i/p.width;uint* gray=p.borrowed[0]!=0?(uint*)p.borrowed[eye]:uplane(27)+eye*n;uint* support=p.borrowed[0]!=0?(uint*)p.borrowed[2+eye]:uplane(28)+eye*n;bool valid=refinement_support(support,p.width,p.height,x,y);uplane(24)[t]=valid?(((p.subpixel&2u)!=0)?refinement_ortho_thermo_census(gray,p.width,x,y):refinement_census(gray,p.width,x,y)):0;uplane(25)[t]=uint(valid);
+}
 [shader("compute")][numthreads(64,1,1)]
 void match(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=2*n)return;uint eye=t/n,i=t%n,x=i%p.width,y=i/p.width,cn=p.coarse_width*p.coarse_height;
     // Half-pixel 2x/4x coordinates are exact binary32 fractions.
@@ -61,33 +126,69 @@ void match(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=
         }
     }
     if(!skip_diag){uplane(11)[t]=lo;uplane(12)[t]=hi;}
+    uint* cen=uplane(24);uint* cval=uplane(25);
     uint best=0xffffffff,second=0xffffffff,third=0xffffffff,winner=0xffffffff,count=0,work=0,minus=0xffffffff,plus=0xffffffff;
-    uint prev_cost=0xffffffff;bool supported=uplane(25)[t]!=0;if(prior&&!supported)reason|=REF_UNSUPPORTED;
+    uint prev_cost=0xffffffff;bool supported=cval[t]!=0;if(prior&&!supported)reason|=REF_UNSUPPORTED;
     bool plateau_tie=false,strict_reject=false;
     if(prior&&supported){
-        uint c0=uplane(24)[t],c_l=c0,c_r=c0,c_u=c0,c_d=c0;
-        if(hybrid&&!(ultra&&eye!=0)){
-            c_l=(x>0&&uplane(25)[t-1]!=0)?uplane(24)[t-1]:c0;
-            c_r=(x+1<p.width&&uplane(25)[t+1]!=0)?uplane(24)[t+1]:c0;
-            c_u=(y>0&&uplane(25)[t-p.width]!=0)?uplane(24)[t-p.width]:c0;
-            c_d=(y+1<p.height&&uplane(25)[t+p.width]!=0)?uplane(24)[t+p.width]:c0;
+        uint c0=cen[t],c_l=c0,c_r=c0,c_u=c0,c_d=c0;
+        bool full_5tap=hybrid&&!(ultra&&eye!=0);
+        if(full_5tap){
+            c_l=(x>0&&cval[t-1]!=0)?cen[t-1]:c0;
+            c_r=(x+1<p.width&&cval[t+1]!=0)?cen[t+1]:c0;
+            c_u=(y>0&&cval[t-p.width]!=0)?cen[t-p.width]:c0;
+            c_d=(y+1<p.height&&cval[t+p.width]!=0)?cen[t+p.width]:c0;
         }
-        for(uint pass_idx=0;pass_idx<2;++pass_idx){
-            for(uint d=lo;d<=hi;++d){uint cost=0xffffffff;int xx=int(x)+(eye!=0?int(d):-int(d));if(xx>=0&&xx<int(p.width)){uint j=(1-eye)*n+y*p.width+uint(xx);if(uplane(25)[j]!=0){
-                uint base=countbits(c0^uplane(24)[j]);
-                if(!hybrid){cost=base;}else if(ultra&&eye!=0){cost=6u*base+uint(abs(int(d)-centre));}else{
-                    uint m_l=(xx>0&&uplane(25)[j-1]!=0)?countbits(c_l^uplane(24)[j-1]):base;
-                    uint m_r=(xx+1<int(p.width)&&uplane(25)[j+1]!=0)?countbits(c_r^uplane(24)[j+1]):base;
-                    uint m_u=(y>0&&uplane(25)[j-p.width]!=0)?countbits(c_u^uplane(24)[j-p.width]):base;
-                    uint m_d=(y+1<p.height&&uplane(25)[j+p.width]!=0)?countbits(c_d^uplane(24)[j+p.width]):base;
-                    uint dist=uint(abs(int(d)-centre));
-                    cost=2u*base+m_l+m_r+m_u+m_d+dist;
+        uint other_row=(1-eye)*n+y*p.width;
+        uint max_passes=(repair&&!ultra)?2u:1u;
+        for(uint pass_idx=0;pass_idx<max_passes;++pass_idx){
+            if(full_5tap&&eye==0){
+                int xx0=int(x)-int(lo);
+                bool v_right=(xx0+1>=0&&xx0+1<int(p.width))?(cval[other_row+uint(xx0+1)]!=0):false;
+                uint d_right=v_right?cen[other_row+uint(xx0+1)]:0u;
+                bool v_curr=(xx0>=0&&xx0<int(p.width))?(cval[other_row+uint(xx0)]!=0):false;
+                uint d_curr=v_curr?cen[other_row+uint(xx0)]:0u;
+                for(uint d=lo;d<=hi;++d){
+                    uint cost=0xffffffff;
+                    int xx=int(x)-int(d);
+                    bool v_left=(xx>0&&xx-1<int(p.width))?(cval[other_row+uint(xx-1)]!=0):false;
+                    uint d_left=v_left?cen[other_row+uint(xx-1)]:0u;
+                    if(xx>=0&&xx<int(p.width)&&v_curr){
+                        uint j=other_row+uint(xx);
+                        uint base=countbits(c0^d_curr);
+                        uint m_l=v_left?countbits(c_l^d_left):base;
+                        uint m_r=v_right?countbits(c_r^d_right):base;
+                        uint m_u=(y>0&&cval[j-p.width]!=0)?countbits(c_u^cen[j-p.width]):base;
+                        uint m_d=(y+1<p.height&&cval[j+p.width]!=0)?countbits(c_d^cen[j+p.width]):base;
+                        uint dist=uint(abs(int(d)-centre));
+                        cost=2u*base+m_l+m_r+m_u+m_d+dist;
+                        ++count;++work;
+                        if(cost<best){third=second;second=best;best=cost;winner=d;minus=prev_cost;plus=0xffffffff;}
+                        else if(cost<second){third=second;second=cost;}
+                        else if(cost<third){third=cost;}
+                    }
+                    if(winner!=0xffffffff&&d==winner+1)plus=cost;
+                    prev_cost=cost;
+                    v_right=v_curr;d_right=d_curr;
+                    v_curr=v_left;d_curr=d_left;
                 }
-                ++count;++work;
-                if(cost<best){third=second;second=best;best=cost;winner=d;minus=prev_cost;plus=0xffffffff;}
-                else if(cost<second){third=second;second=cost;}
-                else if(cost<third){third=cost;}
-            }}if(winner!=0xffffffff&&d==winner+1)plus=cost;prev_cost=cost;}
+            }else{
+                for(uint d=lo;d<=hi;++d){uint cost=0xffffffff;int xx=int(x)+(eye!=0?int(d):-int(d));if(xx>=0&&xx<int(p.width)){uint j=other_row+uint(xx);if(cval[j]!=0){
+                    uint base=countbits(c0^cen[j]);
+                    if(!hybrid){cost=base;}else if(ultra&&eye!=0){cost=6u*base+uint(abs(int(d)-centre));}else{
+                        uint m_l=(xx>0&&cval[j-1]!=0)?countbits(c_l^cen[j-1]):base;
+                        uint m_r=(xx+1<int(p.width)&&cval[j+1]!=0)?countbits(c_r^cen[j+1]):base;
+                        uint m_u=(y>0&&cval[j-p.width]!=0)?countbits(c_u^cen[j-p.width]):base;
+                        uint m_d=(y+1<p.height&&cval[j+p.width]!=0)?countbits(c_d^cen[j+p.width]):base;
+                        uint dist=uint(abs(int(d)-centre));
+                        cost=2u*base+m_l+m_r+m_u+m_d+dist;
+                    }
+                    ++count;++work;
+                    if(cost<best){third=second;second=best;best=cost;winner=d;minus=prev_cost;plus=0xffffffff;}
+                    else if(cost<second){third=second;second=cost;}
+                    else if(cost<third){third=cost;}
+                }}if(winner!=0xffffffff&&d==winner+1)plus=cost;prev_cost=cost;}
+            }
             if(pass_idx==0&&repair&&!ultra&&!boundary_repair&&!hole_fallback&&second<best+p.min_margin&&best>32u){
                 uint lo2=uint(max(0,int(lo)-2)),hi2=uint(min(int(p.disparities)-1,int(hi)+2));
                 if(lo2<lo||hi2>hi){
@@ -109,13 +210,59 @@ void match(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=
     if(!skip_diag){uplane(13)[t]=reason;uplane(14)[t]=prior?1:0;uplane(15)[t]=winner;uplane(16)[t]=best;uplane(17)[t]=second;uplane(18)[t]=count;uplane(19)[t]=work;uplane(20)[t]=uint(applied);}fplane(21)[t]=valid?d:refinement_invalid();if((p.subpixel&20u)!=20u||eye==0)fplane(22)[t]=valid?confidence:0;uplane(23)[t]=uint(valid);
 }
 [shader("compute")][numthreads(64,1,1)]
-void lr(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=2*n)return;bool skip_r=((p.subpixel&20u)==20u);if(skip_r&&p.completed[0]==0&&t>=n)return;uint eye=t/n,i=t%n,target=0;float d=fplane(21)[t];bool valid=false;if(uplane(23)[t]!=0&&refinement_target(p.width,i%p.width,d,eye!=0,target)){uint j=(1-eye)*n+(i/p.width)*p.width+target;valid=observation_lr(d,fplane(21)[j],uplane(23)[t],uplane(23)[j],p.lr_tolerance);}if((p.subpixel&4u)==0&&uplane(23)[t]!=0&&!valid)uplane(13)[t]|=REF_LR_FAILED;fplane(0)[t]=valid?d:refinement_invalid();if(!skip_r||eye==0)fplane(1)[t]=valid?fplane(22)[t]:0;uplane(2)[t]=uint(valid);}
+void lr(uint3 tid:SV_DispatchThreadID){
+    uint n=p.width*p.height,t=tid.x;if(t>=2*n)return;
+    bool skip_r=((p.subpixel&20u)==20u);
+    if(skip_r&&t>=n)return;
+    uint eye=t/n,i=t%n,target=0;
+    float d=fplane(21)[t];bool valid=false;
+    if(uplane(23)[t]!=0&&refinement_target(p.width,i%p.width,d,eye!=0,target)){
+        uint j=(1-eye)*n+(i/p.width)*p.width+target;
+        valid=observation_lr(d,fplane(21)[j],uplane(23)[t],uplane(23)[j],p.lr_tolerance);
+    }
+    if((p.subpixel&4u)==0&&uplane(23)[t]!=0&&!valid)uplane(13)[t]|=REF_LR_FAILED;
+    fplane(0)[t]=valid?d:refinement_invalid();
+    fplane(1)[t]=valid?fplane(22)[t]:0;
+    uplane(2)[t]=uint(valid);
+}
 void write_completed(uint t,float z,float c,uint v,uint prov,uint2 sid,float d){
     ((float*)p.completed[0])[t]=z;((float*)p.completed[1])[t]=c;((uint*)p.completed[2])[t]=v;((uint*)p.completed[3])[t]=prov;
     ((uint2*)p.completed[4])[t]=sid;((float*)p.completed[6])[t]=d;
 }
 [shader("compute")][numthreads(64,1,1)]
-void metric(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=2*n)return;if((p.subpixel&20u)==20u&&t>=n)return;uint eye=t/n,i=t%n,target=0;float z=refinement_invalid(),d=fplane(0)[t];bool valid=uplane(2)[t]!=0&&d>0&&(d-p.principal_offset)>0;if(valid&&refinement_target(p.width,i%p.width,d,eye!=0,target)){uint j=(1-eye)*n+(i/p.width)*p.width+target;valid=uplane(25)[t]!=0&&uplane(25)[j]!=0;if(valid){SF_PRECISE float numerator=p.fx*p.baseline;SF_PRECISE float denominator=d-p.principal_offset;z=numerator/denominator;valid=isfinite(z)&&z>0;}}else valid=false;float z_out=valid?z:refinement_invalid(),c_out=valid?fplane(1)[t]:0;uint v_out=uint(valid),prov_out=valid?SF_PROVENANCE_STEREO:0u;uint2 sid=valid?uint2(p.source_low,p.source_high):uint2(0xffffffff,0xffffffff);fplane(3)[t]=z_out;fplane(4)[t]=c_out;uplane(5)[t]=v_out;uplane(6)[t]=prov_out;((uint2*)p.output[7])[t]=sid;if(p.completed[0]!=0)write_completed(t,z_out,c_out,v_out,prov_out,sid,valid?d:refinement_invalid());}
+void metric(uint3 tid:SV_DispatchThreadID){
+    uint n=p.width*p.height,t=tid.x;if(t>=2*n)return;
+    bool skip_r=((p.subpixel&20u)==20u);
+    if(skip_r&&t>=n)return;
+    float z=refinement_invalid(),d=fplane(0)[t];
+    bool valid=uplane(2)[t]!=0&&d>0&&(d-p.principal_offset)>0;
+    if(valid){
+        SF_PRECISE float numerator=p.fx*p.baseline;
+        SF_PRECISE float denominator=d-p.principal_offset;
+        z=numerator/denominator;
+        valid=isfinite(z)&&z>0;
+    }
+    float z_out=valid?z:refinement_invalid(),c_out=valid?fplane(1)[t]:0;
+    uint v_out=uint(valid),prov_out=valid?SF_PROVENANCE_STEREO:0u;
+    uint2 sid=valid?uint2(p.source_low,p.source_high):uint2(0xffffffff,0xffffffff);
+    if(!skip_r||p.completed[0]==0){
+        fplane(3)[t]=z_out;fplane(4)[t]=c_out;uplane(5)[t]=v_out;uplane(6)[t]=prov_out;((uint2*)p.output[7])[t]=sid;
+    }
+    if(p.completed[0]!=0)write_completed(t,z_out,c_out,v_out,prov_out,sid,valid?d:refinement_invalid());
+}
+bool right_lr_check(uint n,uint y,uint rx,out float d_r){
+    uint jr=n+y*p.width+rx;
+    if((p.subpixel&20u)!=20u){
+        d_r=fplane(0)[jr];
+        return uplane(2)[jr]!=0u;
+    }
+    d_r=fplane(21)[jr];
+    if(uplane(23)[jr]==0u)return false;
+    uint target_l=0u;
+    if(!refinement_target(p.width,rx,d_r,true,target_l))return false;
+    uint jl=y*p.width+target_l;
+    return observation_lr(d_r,fplane(21)[jl],uplane(23)[jr],uplane(23)[jl],p.lr_tolerance);
+}
 #if !defined(SF_CPU_TARGET)
 groupshared uint gs_has_candidate;
 groupshared uint gs_has_valid_coarse;
@@ -148,7 +295,7 @@ void planar(uint3 tid:SV_DispatchThreadID,uint3 gid:SV_GroupID,uint3 gtid:SV_Gro
 #endif
     uint x=tid.x,y=tid.y,n=p.width*p.height,t=y*p.width+x;
     bool in_bounds=(x>=12u&&x+12u<p.width&&y>=12u&&y+12u<p.height);
-    bool is_cand=in_bounds&&(uplane(5)[t]==0u)&&(uplane(25)[t]!=0u);
+    bool is_cand=in_bounds&&(((uint*)p.completed[2])[t]==0u)&&(uplane(25)[t]!=0u);
 #if !defined(SF_CPU_TARGET)
     if(is_cand)InterlockedOr(gs_has_candidate,1u);
     GroupMemoryBarrierWithGroupSync();
@@ -328,14 +475,14 @@ void planar(uint3 tid:SV_DispatchThreadID,uint3 gid:SV_GroupID,uint3 gtid:SV_Gro
                 else{
                     int rx_c=int(floor(float(x)-d_coarse+.5f));
                     if(rx_c>=0&&rx_c<int(p.width)){
-                        uint jr_f=n+y*p.width+uint(rx_c);
-                        if(uplane(2)[jr_f]!=0&&abs(fplane(0)[jr_f]-d_coarse)>2.0f)is_cand=false;
+                        float dr_f=0.f;
+                        if(right_lr_check(n,y,uint(rx_c),dr_f)&&abs(dr_f-d_coarse)>2.0f)is_cand=false;
                     }
                 }
             }
         }
         if(is_cand){
-            // Fast cardinal + diagonal quadrant pre-screen before loading 34x34 LDS tile.
+            // Fast cardinal + diagonal quadrant pre-screen before loading LDS tile.
             uint qpre=0u;
             static const int2 kPre[12]={
                 int2(-5,-2),int2(5,-2),int2(-5,2),int2(5,2),
@@ -361,20 +508,32 @@ void planar(uint3 tid:SV_DispatchThreadID,uint3 gid:SV_GroupID,uint3 gtid:SV_Gro
 #endif
     uint* gray_l=p.borrowed[0]!=0?(uint*)p.borrowed[0]:uplane(27);
     uint* gray_r=p.borrowed[0]!=0?(uint*)p.borrowed[1]:uplane(27)+n;
+    uint halo=ultra?8u:9u;
 #if !defined(SF_CPU_TARGET)
-    int base_x=int(gid.x*16u)-9,base_y=int(gid.y*16u)-9;
-    for(uint k=gidx;k<34u*34u;k+=256u){
-        uint hy=k/34u,hx=k%34u;
-        int gx=clamp(base_x+int(hx),0,int(p.width)-1);
-        int gy=clamp(base_y+int(hy),0,int(p.height)-1);
-        uint g_idx=uint(gy)*p.width+uint(gx);
-        gs_luma[hy][hx]=float(gray_l[g_idx]);
-        gs_disp[hy][hx]=(uplane(2)[g_idx]!=0)?fplane(0)[g_idx]:-1.f;
+    int base_x=int(gid.x*16u)-int(halo),base_y=int(gid.y*16u)-int(halo);
+    if(ultra){
+        for(uint k=gidx;k<1024u;k+=256u){
+            uint hy=k>>5u,hx=k&31u;
+            int gx=clamp(base_x+int(hx),0,int(p.width)-1);
+            int gy=clamp(base_y+int(hy),0,int(p.height)-1);
+            uint g_idx=uint(gy)*p.width+uint(gx);
+            gs_luma[hy][hx]=float(gray_l[g_idx]);
+            gs_disp[hy][hx]=(uplane(2)[g_idx]!=0)?fplane(0)[g_idx]:-1.f;
+        }
+    }else{
+        for(uint k=gidx;k<34u*34u;k+=256u){
+            uint hy=k/34u,hx=k%34u;
+            int gx=clamp(base_x+int(hx),0,int(p.width)-1);
+            int gy=clamp(base_y+int(hy),0,int(p.height)-1);
+            uint g_idx=uint(gy)*p.width+uint(gx);
+            gs_luma[hy][hx]=float(gray_l[g_idx]);
+            gs_disp[hy][hx]=(uplane(2)[g_idx]!=0)?fplane(0)[g_idx]:-1.f;
+        }
     }
     GroupMemoryBarrierWithGroupSync();
     if(!is_cand)return;
 #endif
-    uint lx=gtid.x+9u,ly=gtid.y+9u;
+    uint lx=gtid.x+halo,ly=gtid.y+halo;
     float i0=planar_tile_luma(gray_l,lx,ly,x,y,0,0);
     float l_xm1=planar_tile_luma(gray_l,lx,ly,x,y,-1,0),l_xp1=planar_tile_luma(gray_l,lx,ly,x,y,1,0);
     float l_ym1=planar_tile_luma(gray_l,lx,ly,x,y,0,-1),l_yp1=planar_tile_luma(gray_l,lx,ly,x,y,0,1);
@@ -465,7 +624,10 @@ void planar(uint3 tid:SV_DispatchThreadID,uint3 gid:SV_GroupID,uint3 gtid:SV_Gro
     if(rx<1||rx+1>=int(p.width)||rx0<0||rx0+1>=int(p.width))return;
     uint r_idx=y*p.width+uint(rx),jr=n+r_idx;
     if(uplane(25)[jr]==0)return;
-    if(coarse_lr_guard&&uplane(2)[jr]!=0&&abs(fplane(0)[jr]-d_plane)>1.8f)return;
+    if(coarse_lr_guard){
+        float dr_f=0.f;
+        if(right_lr_check(n,y,uint(rx),dr_f)&&abs(dr_f-d_plane)>1.8f)return;
+    }
     float wf=xr_f-float(rx0);
     float r_luma=(1.f-wf)*float(gray_r[y*p.width+uint(rx0)])+wf*float(gray_r[y*p.width+uint(rx0+1)]);
     float l_mean5=.2f*(i0+l_xm1+l_xp1+l_ym1+l_yp1);

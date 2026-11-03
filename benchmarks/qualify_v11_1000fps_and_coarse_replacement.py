@@ -352,6 +352,8 @@ def evaluate_ablation_on_synthetic_and_counterexamples(work_dir: Path) -> Dict[s
             )
             d = np.fromfile(str(pref) + ".completed_disparity.f32", dtype="<f4").reshape(-1, h, w)[0]
             v = np.fromfile(str(pref) + ".completed_validity.u32", dtype="<u4").reshape(-1, h, w)[0] != 0
+            for f in work_dir.glob(f"{cid}_{sname}.*"):
+                f.unlink(missing_ok=True)
             valid_no = v & non_occ & np.isfinite(d) & (d > 0)
             err = np.abs(d[valid_no] - gt_disp[valid_no])
             no_cnt = int(non_occ.sum())
@@ -405,6 +407,8 @@ def evaluate_ablation_on_synthetic_and_counterexamples(work_dir: Path) -> Dict[s
         d_b = np.fromfile(str(pref_b) + ".completed_disparity.f32", dtype="<f4").reshape(-1, h, w)[0]
         v_b = np.fromfile(str(pref_b) + ".completed_validity.u32", dtype="<u4").reshape(-1, h, w)[0] != 0
         prov_b = np.fromfile(str(pref_b) + ".completed_provenance.u32", dtype="<u4").reshape(-1, h, w)[0]
+        for f in work_dir.glob(f"{cid}_narrow_gaps.*"):
+            f.unlink(missing_ok=True)
         gap_no = gap_mask & non_occ_bars
         gap_inferred_bridged = int(np.sum(gap_no & (prov_b == 6) & (np.abs(d_b - 28.0) < 3.0)))
         gap_valid = gap_no & v_b & np.isfinite(d_b)
@@ -488,6 +492,8 @@ def evaluate_zed2_cohort_decomposition_and_gpu_timings(work_dir: Path) -> Dict[s
             "comp_depth": np.fromfile(str(pref) + ".completed_depth.f32", dtype="<f4").reshape(-1, h, w)[0],
             "comp_prov": np.fromfile(str(pref) + ".completed_provenance.u32", dtype="<u4").reshape(-1, h, w)[0],
         }
+        for f in work_dir.glob(f"zed2_{cid}.*"):
+            f.unlink(missing_ok=True)
 
     # Verify bit-exact left-eye parity between A1 and A2
     a1_d = dumps["A1_quality_shared_census_sgm_r4"]

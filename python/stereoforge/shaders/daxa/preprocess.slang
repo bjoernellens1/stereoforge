@@ -4,7 +4,23 @@ struct Push {uint64_t parameters;};[[vk::push_constant]] Push pc;
 #define p (*(Parameters*)pc.parameters)
 uint raw_byte(uint offset){uint* words=(uint*)p.raw;return (words[offset>>2]>>((offset&3)*8))&255;}
 [shader("compute")][numthreads(8,8,1)]
-void decode_yuyv(uint3 tid:SV_DispatchThreadID){if(tid.x>=p.eye_width||tid.y>=p.source_height||tid.z>=2)return;uint pair=tid.y*p.stride+(tid.z*p.eye_width+(tid.x&~1u))*2;uint color=preprocess_rgb(raw_byte(pair+((tid.x&1)!=0?2:0)),raw_byte(pair+1),raw_byte(pair+3));uint* output=(uint*)p.original[tid.z];output[tid.y*p.eye_width+tid.x]=color;}
+void decode_yuyv(uint3 tid:SV_DispatchThreadID){
+    if(tid.x>=p.eye_width||tid.y>=p.source_height||tid.z>=2)return;
+    uint pair=tid.y*p.stride+(tid.z*p.eye_width+(tid.x&~1u))*2;
+    uint y_v,u_v,v_v;
+    if((pair&3u)==0u){
+        uint w=((uint*)p.raw)[pair>>2];
+        y_v=((tid.x&1u)!=0u)?((w>>16)&255u):(w&255u);
+        u_v=(w>>8)&255u;
+        v_v=w>>24;
+    }else{
+        y_v=raw_byte(pair+((tid.x&1)!=0?2:0));
+        u_v=raw_byte(pair+1);
+        v_v=raw_byte(pair+3);
+    }
+    uint* output=(uint*)p.original[tid.z];
+    output[tid.y*p.eye_width+tid.x]=preprocess_rgb(y_v,u_v,v_v);
+}
 [shader("compute")][numthreads(8,8,1)]
 void rectify_gray(uint3 tid:SV_DispatchThreadID){if(tid.x>=p.width||tid.y>=p.height||tid.z>=2)return;uint i=tid.y*p.width+tid.x;float* mx=(float*)p.maps[tid.z*2];float* my=(float*)p.maps[tid.z*2+1];int qx=preprocess_quantize(mx[i]),qy=preprocess_quantize(my[i]);int x=qx>>5,y=qy>>5;uint fx=uint(qx)&31,fy=uint(qy)&31;uint weights[4]={(32-fx)*(32-fy),fx*(32-fy),(32-fx)*fy,fx*fy};uint3 channels=0;bool full_support=true;uint* original=(uint*)p.original[tid.z];
     [unroll]for(uint tap=0;tap<4;++tap){int xx=x+int(tap&1),yy=y+int(tap>>1);bool inside=xx>=0&&yy>=0&&xx<int(p.eye_width)&&yy<int(p.source_height);if(weights[tap]!=0&&!inside)full_support=false;if(inside){uint rgb=original[uint(yy)*p.eye_width+uint(xx)];channels+=uint3(rgb&255,(rgb>>8)&255,(rgb>>16)&255)*weights[tap];}}
