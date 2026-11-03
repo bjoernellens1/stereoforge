@@ -362,14 +362,14 @@ def main() -> int:
         if BASELINE_V10_0_JSON.exists()
         else {}
     )
-    competing_slowdown = baseline_v10_0.get("joint_3metric_profiler", {}).get(
+    competing_slowdown = baseline_v10_0.get("joint_3_metric_tuple", {}).get(
         "Delta_T_competing_workload", {}
     )
 
     idle_w = float(
-        baseline_v10_0.get("joint_3metric_profiler", {})
-        .get("E_frame", {})
-        .get("idle_baseline_power_w", 14.93)
+        baseline_v10_0.get("joint_3_metric_tuple", {})
+        .get("E_frame_mj", {})
+        .get("idle_gpu_power_w", 14.93)
     )
     for prof in (qual_planar, ultra_planar, ultra_measured):
         active_w = float(prof["power_w"]["mean_w"])
