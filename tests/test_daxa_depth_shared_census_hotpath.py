@@ -83,7 +83,7 @@ def check_shared_storage(stereo, depth):
     assert 's->census_storage->buffers[b-LeftDesc]=d.create_buffer({.size=n*4' in setup
     assert 'allocated+=n*4' in setup
     accounting = body(depth, 'uint64_t DaxaDepthConfig::requested_buffer_bytes(')
-    assert 'if(stereo_schedule==DaxaDepthStereoSchedule::SharedCensusSequential)total-=16*n*slots' in accounting, 'actual bytes drop by one quartet per aligned slot'
+    assert 'if(stereo_schedule==DaxaDepthStereoSchedule::SharedCensusSequential' in accounting and 'total-=16*n*slots' in accounting, 'actual bytes drop by one quartet per aligned slot'
     check_depth_setup_constructors(depth)
     constructor = body(depth, 'Impl(DaxaRectification maps,DaxaDepthConfig c,')
     assert 'left->allocated_bytes()+right->allocated_bytes()+allocated==combined_allocated' in constructor

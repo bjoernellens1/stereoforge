@@ -173,9 +173,11 @@ def timed_loop(source):
 def test_metadata_patch_preserves_audited_timed_loop_bytes():
     # Freeze pre-metadata loops: this patch must add no waits, queries,
     # allocations, helper calls or collection work to the measured population.
+    # Audited update for daxa_refinement_benchmark.cpp: records preallocated
+    # planar_samples[i-warmup]=rt.planar_gpu_ms strictly after d=Clock::now().
     import hashlib
     digests = ('887aaa07c1b0992c39c0b0c64138888f45fa1ec5c1f0391a0c01bced0ac6a8d3',
-               'daf7139dab1bd90ad9f6c9b80647dd670d7cd23145673428a69d679407579265',
+               '5abbf61bee20891193a18e0c9bf03b5a9d049d10d29a85ec370c828bab89ee34',
                '9ea025768c2bd2b27b359175acb2c5fc7ef0490090da69b96e9fa1d9702477f3')
     for name, expected in zip(APPS, digests):
         source = (ROOT / 'apps' / name).read_text()

@@ -58,11 +58,13 @@ def check_hotpaths(src):
         assert enqueue.index('e.available()') < enqueue.index('input.context_id()')
         assert 'for(' not in enqueue and 'while(' not in enqueue
     submit = body(export, 'template<class Input>void submit(')
-    assert submit.count('copy_buffer_to_buffer(') == 2
+    assert submit.count('copy_buffer_to_buffer(') == 3
     assert 'if(config.depth)recorder.copy_buffer_to_buffer(' in submit
     assert 'if(config.rgb)recorder.copy_buffer_to_buffer(' in submit
+    assert 'if(config.provenance)recorder.copy_buffer_to_buffer(' in submit
     assert '.src_offset=0,.dst_offset=0,.size=plane_bytes' in submit
     assert '.dst_offset=config.depth?plane_bytes:0,.size=plane_bytes' in submit
+    assert '.dst_offset=plane_bytes*(unsigned(config.depth)+unsigned(config.rgb)),.size=plane_bytes' in submit
     assert submit.index('s.producer=input') < submit.index('d.submit_commands(')
     assert 'if(latest>before)s.copy_ticket=latest' in submit
     setup = body(export, 'Impl(std::shared_ptr<DaxaFoundation>')

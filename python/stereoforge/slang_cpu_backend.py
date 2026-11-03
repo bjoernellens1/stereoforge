@@ -38,7 +38,9 @@ import hashlib
 import os
 import platform
 import subprocess
+import tarfile
 import threading
+import urllib.request
 from pathlib import Path
 from typing import Any, Dict
 
@@ -49,6 +51,48 @@ BUILD_DIR = ROOT / "build" / "ros-daxa-native"
 SLANGC = BUILD_DIR / "_deps" / "sf_refinement_slang_sdk-src" / "bin" / "slangc"
 SLANG_INCLUDE = BUILD_DIR / "_deps" / "sf_refinement_slang_sdk-src" / "include"
 DAXA_INCLUDE = BUILD_DIR / "_deps" / "sf_daxa-src" / "include"
+SLANG_RELEASE_URL = "https://github.com/shader-slang/slang/releases/download/v2026.19/slang-2026.19-linux-x86_64.tar.gz"
+SLANG_RELEASE_SHA256 = "bd6cfc47b7353b2cffa36a866b1584749f76f4b2dbebf6dda26bc3fb40dc3c0e"
+
+
+def _resolve_slang_sdk() -> tuple[Path, Path]:
+    """Resolves (slangc_bin, slang_include_dir) from local builds or bootstraps pinned Slang 2026.19."""
+    candidates = []
+    if os.environ.get("STEREOFORGE_SLANG_SDK"):
+        candidates.append(Path(os.environ["STEREOFORGE_SLANG_SDK"]))
+    for bdir in ("ros-daxa-native", "daxa", "ros-daxa", "cpu"):
+        candidates.append(ROOT / "build" / bdir / "_deps" / "sf_refinement_slang_sdk-src")
+    cache_sdk = Path("/tmp/stereoforge_slang_cpu_cache/slang-2026.19")
+    candidates.append(cache_sdk)
+    for sdk in candidates:
+        bin_p = sdk / "bin" / "slangc"
+        inc_p = sdk / "include"
+        if bin_p.is_file() and (inc_p / "slang-cpp-prelude.h").is_file():
+            return bin_p, inc_p
+
+    # Bootstrap pinned official Slang 2026.19 release archive if no local CMake build is populated yet
+    cache_root = cache_sdk.parent
+    cache_root.mkdir(parents=True, exist_ok=True)
+    with open(cache_root / "slang_sdk_download.lock", "w", encoding="utf-8") as lf:
+        fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+        bin_p = cache_sdk / "bin" / "slangc"
+        inc_p = cache_sdk / "include"
+        if bin_p.is_file() and (inc_p / "slang-cpp-prelude.h").is_file():
+            return bin_p, inc_p
+        tar_path = cache_root / f"slang-2026.19-{os.getpid()}.tar.gz"
+        tmp_extract = cache_root / f"slang-2026.19-extract-{os.getpid()}"
+        try:
+            urllib.request.urlretrieve(SLANG_RELEASE_URL, tar_path)
+            digest = hashlib.sha256(tar_path.read_bytes()).hexdigest()
+            if digest != SLANG_RELEASE_SHA256:
+                raise RuntimeError(f"Slang SDK SHA256 mismatch: expected {SLANG_RELEASE_SHA256}, got {digest}")
+            tmp_extract.mkdir(parents=True, exist_ok=True)
+            with tarfile.open(tar_path, "r:gz") as tf:
+                tf.extractall(tmp_extract)
+            os.replace(tmp_extract, cache_sdk)
+        finally:
+            tar_path.unlink(missing_ok=True)
+        return bin_p, inc_p
 REFINEMENT_SLANG = ROOT / "python" / "stereoforge" / "shaders" / "daxa" / "refinement.slang"
 PREPROCESS_SLANG = ROOT / "python" / "stereoforge" / "shaders" / "daxa" / "preprocess.slang"
 STEREO_SLANG = ROOT / "python" / "stereoforge" / "shaders" / "daxa" / "stereo.slang"
@@ -172,15 +216,15 @@ def _cpu_hardware_signature() -> str:
     return "|".join(parts)
 
 
-def _compiler_signature() -> str:
+def _compiler_signature(slangc_bin: Path) -> str:
     """Returns the exact compiler and Slang version strings."""
     gpp_ver = subprocess.run(
         ["g++", "--version"], capture_output=True, text=True, check=False
     ).stdout.splitlines()
     slang_ver = subprocess.run(
-        [str(SLANGC), "-v"], capture_output=True, text=True, check=False
+        [str(slangc_bin), "-v"], capture_output=True, text=True, check=False
     ).stderr.splitlines()
-    return f"g++:{gpp_ver[0] if gpp_ver else 'unknown'}|slangc:{slang_ver[0] if slang_ver else 'unknown'}|slang_mtime:{SLANGC.stat().st_mtime_ns if SLANGC.exists() else 0}"
+    return f"g++:{gpp_ver[0] if gpp_ver else 'unknown'}|slangc:{slang_ver[0] if slang_ver else 'unknown'}|slang_mtime:{slangc_bin.stat().st_mtime_ns if slangc_bin.exists() else 0}"
 
 
 def _maps_identity(maps: tuple[np.ndarray, ...]) -> bytes:
@@ -214,8 +258,11 @@ def _build_driver_source(
     sections_by_entry: Dict[str, str],
     *,
     aggressive_inlining: bool,
+    slang_include: Path | None = None,
 ) -> str:
     """Constructs the complete C++ translation unit from the Slang-emitted entrypoints."""
+    if slang_include is None:
+        _, slang_include = _resolve_slang_sdk()
     processed_sections = []
     for entry, raw_src in sections_by_entry.items():
         src = raw_src
@@ -240,7 +287,7 @@ def _build_driver_source(
 
     joined_sections = "\n\n".join(processed_sections)
     return f"""
-#include "{SLANG_INCLUDE}/slang-cpp-prelude.h"
+#include "{slang_include}/slang-cpp-prelude.h"
 #include <cstdint>
 #include <omp.h>
 
@@ -770,8 +817,9 @@ def _ensure_cpu_library(
         ]
 
     # Compute complete source + compiler + flags + CPU hardware identity
+    slangc_bin, slang_inc = _resolve_slang_sdk()
     src_hash = hashlib.sha256()
-    src_hash.update(_compiler_signature().encode("utf-8"))
+    src_hash.update(_compiler_signature(slangc_bin).encode("utf-8"))
     if target_isa == "native":
         src_hash.update(_cpu_hardware_signature().encode("utf-8"))
     src_hash.update(f"isa={target_isa}|inline={aggressive_inlining}|flags={' '.join(cxx_flags)}".encode("utf-8"))
@@ -822,10 +870,8 @@ def _ensure_cpu_library(
             try:
                 subprocess.run(
                     [
-                        str(SLANGC),
+                        str(slangc_bin),
                         str(slang_file),
-                        "-I",
-                        str(DAXA_INCLUDE),
                         "-target",
                         "cpp",
                         "-DSF_CPU_TARGET=1",
@@ -845,6 +891,7 @@ def _ensure_cpu_library(
         driver_code = _build_driver_source(
             sections_by_entry,
             aggressive_inlining=aggressive_inlining,
+            slang_include=slang_inc,
         )
         driver_cpp = cache_dir / f"driver_{target_isa}_{digest}_{pid_tag}.cpp"
         tmp_so = cache_dir / f"libstereoforge_slang_cpu_{target_isa}_{digest}_{pid_tag}.so.tmp"

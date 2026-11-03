@@ -16,8 +16,13 @@ def test_json_serialization_preserves_actual_received_values(tmp_path):
     import os
     exe=tmp_path/'json-trace'
     include=os.environ.get('STEREOFORGE_JSON_INCLUDE',str(ROOT/'build/daxa/_deps/sf_native_json-src'))
+    includes=['-I',str(ROOT/'include'),'-I',include]
+    for extra in (ROOT/'build/ros-daxa-native/_deps/sf_native_json-src',
+                  ROOT/'ros_ws/.pixi/envs/default/include'):
+        if extra.is_dir():
+            includes.extend(['-I',str(extra)])
     subprocess.run(['c++','-std=c++20','-O2','-DNDEBUG','-Wall','-Wextra','-Werror',
-                    '-I',str(ROOT/'include'),'-I',include,str(ROOT/'tests/ros_delivery_json.cpp'),'-o',str(exe)],check=True)
+                    *includes,str(ROOT/'tests/ros_delivery_json.cpp'),'-o',str(exe)],check=True)
     event,published=json.loads(subprocess.check_output([str(exe)],text=True))
     assert event['mapped_capture_ns']==123 and event['arrival_system_ns']==300
     assert event['width']==2 and event['height']==1 and event['payload_bytes']==8

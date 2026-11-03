@@ -10,7 +10,12 @@ def resolve_json_include(root, explicit=None, system=Path('/usr/include/nlohmann
     if explicit is not None:
         candidates = [Path(explicit)]
     else:
-        candidates = [Path(root) / 'build/daxa/_deps/sf_native_json-src', Path(system)]
+        candidates = [
+            Path(root) / 'build/daxa/_deps/sf_native_json-src',
+            Path(root) / 'build/ros-daxa-native/_deps/sf_native_json-src',
+            Path(root) / 'build/ros-daxa/_deps/sf_native_json-src',
+            Path(system),
+        ]
     for candidate in candidates:
         if (candidate / 'json.hpp').is_file():
             return candidate

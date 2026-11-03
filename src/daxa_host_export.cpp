@@ -68,10 +68,9 @@ struct DaxaHostExport::Impl {
         try{
             auto recorder=d.create_command_recorder({.name="selective native host export"});
             recorder.pipeline_barrier({.src_access=daxa::AccessConsts::COMPUTE_SHADER_WRITE|daxa::AccessConsts::TRANSFER_WRITE,.dst_access=daxa::AccessConsts::TRANSFER_READ});
-            size_t offset=0;
-            if(config.depth){recorder.copy_buffer_to_buffer({.src_buffer=depth,.dst_buffer=s.buffer,.src_offset=0,.dst_offset=offset,.size=plane_bytes});offset+=plane_bytes;}
-            if(config.rgb){recorder.copy_buffer_to_buffer({.src_buffer=rgb,.dst_buffer=s.buffer,.src_offset=0,.dst_offset=offset,.size=plane_bytes});offset+=plane_bytes;}
-            if(config.provenance){recorder.copy_buffer_to_buffer({.src_buffer=prov,.dst_buffer=s.buffer,.src_offset=0,.dst_offset=offset,.size=plane_bytes});offset+=plane_bytes;}
+            if(config.depth)recorder.copy_buffer_to_buffer({.src_buffer=depth,.dst_buffer=s.buffer,.src_offset=0,.dst_offset=0,.size=plane_bytes});
+            if(config.rgb)recorder.copy_buffer_to_buffer({.src_buffer=rgb,.dst_buffer=s.buffer,.src_offset=0,.dst_offset=config.depth?plane_bytes:0,.size=plane_bytes});
+            if(config.provenance)recorder.copy_buffer_to_buffer({.src_buffer=prov,.dst_buffer=s.buffer,.src_offset=0,.dst_offset=plane_bytes*(unsigned(config.depth)+unsigned(config.rgb)),.size=plane_bytes});
             recorder.pipeline_barrier({.src_access=daxa::AccessConsts::TRANSFER_WRITE,.dst_access=daxa::AccessConsts::HOST_READ});
             auto command=recorder.complete_current_commands();
             s.copy_ticket=d.submit_commands({.command_lists={&command,1}});

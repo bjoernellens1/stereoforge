@@ -19,9 +19,10 @@ def test_hotpath_guards_and_mutations():
     hot += definition(source, 'DaxaHostExport::Frame DaxaHostExport::enqueue(const DaxaFrame&')
     def check(text):
         assert not re.search(r'\b(create_buffer|create_memory|wait_on_submit|wait_idle|readback|memcpy|make_shared|resize|push_back)\s*\(', text)
-        assert text.count('copy_buffer_to_buffer(') == 2
+        assert text.count('copy_buffer_to_buffer(') == 3
         assert '.src_offset=0,.dst_offset=0,.size=plane_bytes});' in text
         assert '.dst_offset=config.depth?plane_bytes:0,.size=plane_bytes});' in text
+        assert '.dst_offset=plane_bytes*(unsigned(config.depth)+unsigned(config.rgb)),.size=plane_bytes});' in text
         assert 'AccessConsts::HOST_READ' in text
     check(hot)
     for mutation in ('d.create_buffer({});', 'd.wait_idle();', 'memcpy(a,b,n);', 'd.create_memory({});'):
@@ -71,7 +72,7 @@ struct Name{std::string name;};
 struct AccessConsts{static constexpr int COMPUTE_SHADER_WRITE=1,TRANSFER_WRITE=2,TRANSFER_READ=4,HOST_READ=8;};
 struct Barrier{int src_access,dst_access;};
 struct BufferCopyInfo{BufferId src_buffer,dst_buffer;size_t src_offset=0,dst_offset=0,size=0;};
-struct Command{std::array<BufferCopyInfo,2> copies{};unsigned count=0;};
+struct Command{std::array<BufferCopyInfo,3> copies{};unsigned count=0;};
 struct Recorder{Command commands;std::vector<Barrier>* barriers;void pipeline_barrier(Barrier b){barriers->push_back(b);}void copy_buffer_to_buffer(BufferCopyInfo c){commands.copies[commands.count++]=c;}Command complete_current_commands(){return commands;}};
 struct Submit{std::span<const Command> command_lists;};
 struct Wait{int queue;uint64_t queue_submit_index,timeout;};
@@ -99,7 +100,7 @@ struct CaptureFrame {unsigned frame_id=1;};using CaptureLease=std::shared_ptr<co
 struct DaxaFoundation{daxa::Device device;};
 struct DaxaRectification{uint32_t width=7,height=5;};
 namespace detail{inline bool completed_submission(uint64_t submitted,uint64_t oldest){return !submitted||submitted<=oldest;}inline bool available_slot(long refs,uint64_t submitted,uint64_t oldest){return refs==1&&completed_submission(submitted,oldest);}}
-enum class DaxaObservationPlane{Depth};enum class DaxaObservationImage{RectifiedLeft};enum class DaxaPreprocessPlane{RectifiedLeft};
+enum class DaxaObservationPlane{Depth,Provenance};enum class DaxaObservationImage{RectifiedLeft};enum class DaxaPreprocessPlane{RectifiedLeft};
 struct MockImage{daxa::BufferId id;uint32_t w,h;auto buffer()const{return id;}auto width()const{return w;}auto height()const{return h;}};
 struct InputState{std::shared_ptr<DaxaFoundation> context;std::shared_ptr<const DaxaRectification> maps;CaptureLease source;daxa::BufferId depth,rgb;uint64_t ticket=10;uint64_t generation=1;uint32_t w=7,h=5;};
 struct DaxaFrame {std::shared_ptr<InputState> state;uint64_t generation_=1;void validate()const{if(!state||state->generation!=generation_)throw std::invalid_argument("stale producer");}explicit operator bool()const{return bool(state);}uint64_t context_id()const{validate();return reinterpret_cast<uintptr_t>(state->context->device.get());}auto calibration()const{validate();return state->maps;}auto source()const{validate();return state->source;}uint64_t submit_ticket()const{validate();return state->ticket;}auto plane(DaxaPreprocessPlane)const{validate();return MockImage{state->rgb,state->w,state->h};}};

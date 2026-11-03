@@ -1,6 +1,7 @@
 from pathlib import Path
 
 SOURCE = Path(__file__).resolve().parents[1] / 'apps/daxa_refinement_benchmark.cpp'
+COMMON = Path(__file__).resolve().parents[1] / 'apps/daxa_refinement_common.hpp'
 
 
 def test_full_producer_control_and_reuse_share_source_and_order():
@@ -18,9 +19,11 @@ def test_full_producer_control_and_reuse_share_source_and_order():
 
 def test_reuse_requires_post_timing_exact_comparison_of_all_planes():
     s = SOURCE.read_text()
+    c = COMMON.read_text()
+    assert '#include "daxa_refinement_common.hpp"' in s
     assert s.index('auto result=prepared.report()') < s.index('stage->readback(output)') < s.index('exact_readback(r,direct)')
-    body = s[s.index('static void exact_readback'):s.index('int main(')]
-    assert body.count('EQ(') == 29  # 28 scalar planes plus macro declaration
+    body = c[c.index('inline void exact_readback'):c.index('inline uint32_t number(')]
+    assert body.count('SF_EQ(') == 36  # 28 base + 7 completed scalar planes plus macro declaration
     assert 'for(unsigned eye=0;eye<2;++eye)exact_plane(a.rectified_rgb[eye],b.rectified_rgb[eye])' in body
     assert 'all_30_planes_exact_direct_checked' in s
     assert 'raw_samples_ms' in s and 'full_preprocess_memory_scope' in s
