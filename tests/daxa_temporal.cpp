@@ -32,6 +32,32 @@ static void gpu_contracts(){
         // Child leases retain all producers after each public facade is destroyed.
         temporal.reset();depth.reset();view.reset();third.wait();check(third.observations().source()->frame_id==22);third={};lease={};projected.wait();projected={};check(gathered.source()->frame_id==22);gathered.wait();gathered={};
     }
+    // P1/P2/P3: Full-resolution DaxaRefinement::Frame integration with inverse-depth fusion, disocclusion guard, temporal Census re-search, and 50% memory left_eye_only mode.
+    {auto rmaps=[](unsigned scale){DaxaRectification c;c.eye_width=24;c.source_height=20;c.stride_bytes=96;c.width=6*scale;c.height=5*scale;c.original_identity="raw";c.rectified_identity=scale==1?"coarse":"target";DaxaRectifiedGeometry g;g.original_identity=c.original_identity;g.rectified_identity=c.rectified_identity;for(auto& eye:g.original.eyes)eye={24,20,8,8,7,5,{}};for(auto& eye:g.rectified.eyes)eye={c.width,c.height,4.*scale,4.*scale,2.5*scale-0.5,1.5*scale-0.5,{}};g.original.right_to_left=g.rectified.right_to_left={1,0,0,.1,0,1,0,0,0,0,1,0,0,0,0,1};g.R1=g.R2={1,0,0,0,1,0,0,0,1};double f=4.*scale,cx=2.5*scale-0.5,cy=1.5*scale-0.5;g.P1={f,0,cx,0,0,f,cy,0,0,0,1,0};g.P2={f,0,cx,-f*.1,0,f,cy,0,0,0,1,0};c.geometry=g;for(unsigned eye=0;eye<2;++eye)for(unsigned y=0;y<c.height;++y)for(unsigned x=0;x<c.width;++x){c.maps[eye*2].push_back(float((x-cx)/f*8+7));c.maps[eye*2].back()=std::clamp(c.maps[eye*2].back(),0.f,22.f);c.maps[eye*2+1].push_back(float((y-cy)/f*8+5));c.maps[eye*2+1].back()=std::clamp(c.maps[eye*2+1].back(),0.f,18.f);}return c;};
+        auto rsource=[](uint64_t id){auto c=std::make_shared<CaptureFrame>();c->source_width=48;c->height=20;c->stride_bytes=96;c->frame_id=id;c->calibration_identity="raw";c->device_identity="temporal-refinement";c->host_clock_domain="steady";c->host_ingress_timestamp_ns=id;c->packed_yuyv.resize(1920);for(unsigned i=0;i<1920;++i)c->packed_yuyv[i]=uint8_t(i*17);return c;};
+        auto low=rmaps(1),high=rmaps(2);
+        DaxaDepthConfig dcfg{StereoConfig{6,5,3,4},1.f,2,32};
+        DaxaDepthPipeline depth(low,dcfg,context,rsource(1));
+        auto coarse=depth.enqueue(rsource(1));
+        DaxaRefinementConfig rcfg;rcfg.disparities=8;rcfg.subpixel=true;rcfg.continuous_subpixel=true;rcfg.planar_recovery=true;
+        DaxaRefinement ref(context,high,coarse,rcfg);
+        auto ref_frame=ref.process(coarse);
+        DaxaTemporalConfig tcfg_full;tcfg_full.inverse_depth_fusion=true;tcfg_full.disocclusion_guard=true;tcfg_full.temporal_stereo_research=true;
+        DaxaTemporalConfig tcfg_left=tcfg_full;tcfg_left.left_eye_only=true;
+        DaxaTemporal temporal_full(context,ref_frame,tcfg_full);
+        DaxaTemporal temporal_left(context,ref_frame,tcfg_left);
+        check(temporal_left.requested_buffer_bytes()<temporal_full.requested_buffer_bytes());
+        auto out1=temporal_left.process(ref_frame,pose_for(1),true);out1.wait();
+        auto rb1=temporal_left.readback(out1);
+        check(rb1.depth.size()==12*10&&rb1.provenance.size()==12*10);
+        out1={};ref_frame={};coarse={};temporal_left.collect();ref.collect();depth.collect();
+        auto coarse2=depth.enqueue(rsource(2));auto ref_frame2=ref.process(coarse2);
+        auto out2=temporal_left.process(ref_frame2,pose_for(2),true);out2.wait();
+        auto rb2=temporal_left.readback(out2);
+        check(rb2.counters.arithmetic_faults==0);
+        out2={};ref_frame2={};coarse2={};temporal_left.collect();ref.collect();depth.collect();
+        check(temporal_left.completed_source_retirements()==2);
+    }
     check(context->validation_errors.load()==0);context->close();check(context->validation_errors.load()==0);
 }
 int main(int argc,char** argv){try{

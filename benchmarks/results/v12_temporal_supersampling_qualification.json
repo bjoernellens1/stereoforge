@@ -1,0 +1,210 @@
+{
+  "schema": "stereoforge.milestone.v12_temporal_supersampling_qualification.v1",
+  "provenance": {
+    "git_head_at_generation": "ceefe111333b3ec23cd9650c57e6a670a1555b6a",
+    "git_head_commit_timestamp": "2026-11-04T00:03:00+01:00",
+    "working_tree_dirty_at_generation": true,
+    "binaries_sha256": {
+      "daxa_depth_benchmark": "4e0e0d1eb1ea0dd7372b23b57a30b92143540692690f5624d9f12d954f57af36",
+      "daxa_refinement_benchmark": "8fddadff92c6c0b91e3d3be0f227f3a8c57273c3912f59aab221be83fa250420",
+      "daxa_dual_preprocess_benchmark": "87516530b4b7efd5bbd4015c605b0eec23638d9616eba63469bba9d4224d6ca2",
+      "stereoforge_ros2_depth_publisher": "2622e991f7d08b38e002ad67e32344952d07d3cf8590a6eac1ee703a7d0ac463",
+      "stereoforge_ros2_delivery_probe": "efd22fc212b05169077f7dd3c8a2ed4d478ac484f8ce254eaa885fb1a082f372",
+      "daxa_refinement_contracts": "5c1d0bfb14c6ef4e470e545adfb44e8eb0c0f64d9398afe4e5f0ca57fc146fe4"
+    },
+    "compiled_spv_bundle_sha256": "68b283f0727be44725ea4f0f9769dd4e19122b9174a800f348790593cad28342",
+    "compiled_spv_count": 83
+  },
+  "roadmap_stages": {
+    "P0": "Single-frame continuous 5-point half-pixel zero-mean 3x3 photometric subpixel refinement (`continuous_subpixel` in `refinement.slang`)",
+    "P1": "Full-resolution `v11` (`DaxaRefinement::Frame`) integration with pose-warped `DaxaTemporal` (4 contributors, 200 ms history bound)",
+    "P2": "Calibrated inverse-depth uncertainty fusion (`w = conf / sigma_rho^2`), foreground depth-ordering disocclusion guard, age-decayed confidence, and 50% `left_eye_only` memory reduction",
+    "P3": "Pose-warped temporal stereo cost refinement (`d_pred = fx * B / z_warp + cx_offset` guiding current-frame Census re-search in `[-2, +2]` with L-R check and strict provenance separation)",
+    "P4": "Optional 2x joint-luma edge-preserving inverse-depth super-resolution & multi-sequence evaluation benchmark"
+  },
+  "suite_a_synthetic_known_pose_translation": {
+    "repetitive_and_subpixel": {
+      "v11_single_frame": {
+        "disparity_mae_px": 0.36316385865211487,
+        "bad_0_5px_pct": 3.860003790511087,
+        "bad_1_0px_pct": 1.7166420666325903,
+        "depth_mae_mm": 44.29298782348633,
+        "valid_coverage_pct": 89.9672412367725,
+        "superres_2x_depth_mae_mm": 44.62284851074219
+      },
+      "v11_p0_continuous_subpixel": {
+        "disparity_mae_px": 0.15199467539787292,
+        "bad_0_5px_pct": 1.7799426934097422,
+        "bad_1_0px_pct": 1.589111747851003,
+        "depth_mae_mm": 18.349863052368164,
+        "valid_coverage_pct": 90.16410383597884,
+        "superres_2x_depth_mae_mm": 21.505786895751953
+      },
+      "realsense_ema_temporal": {
+        "disparity_mae_px": 0.1371670812368393,
+        "bad_0_5px_pct": 2.0330927653582114,
+        "bad_1_0px_pct": 1.9999585822711414,
+        "depth_mae_mm": 16.494455337524414,
+        "valid_coverage_pct": 99.8026207010582,
+        "superres_2x_depth_mae_mm": 15.969602584838867
+      },
+      "daxa_temporal_p1_p2": {
+        "disparity_mae_px": 0.13345201313495636,
+        "bad_0_5px_pct": 1.5951758882605198,
+        "bad_1_0px_pct": 1.481628468432715,
+        "depth_mae_mm": 16.08426284790039,
+        "valid_coverage_pct": 93.74069940476191,
+        "superres_2x_depth_mae_mm": 19.091217041015625
+      },
+      "temporal_cost_refinement_p3_p4": {
+        "disparity_mae_px": 0.13322947919368744,
+        "bad_0_5px_pct": 1.5950440097664755,
+        "bad_1_0px_pct": 1.4815059772813703,
+        "depth_mae_mm": 16.0565128326416,
+        "valid_coverage_pct": 93.74844990079364,
+        "superres_2x_depth_mae_mm": 19.06708335876465
+      }
+    },
+    "slanted_planes": {
+      "v11_single_frame": {
+        "disparity_mae_px": 0.17404602468013763,
+        "bad_0_5px_pct": 3.486226859214963,
+        "bad_1_0px_pct": 0.37322136692325636,
+        "depth_mae_mm": 24.518232345581055,
+        "valid_coverage_pct": 97.4640376984127,
+        "superres_2x_depth_mae_mm": 22.997163772583008
+      },
+      "v11_p0_continuous_subpixel": {
+        "disparity_mae_px": 0.1000107154250145,
+        "bad_0_5px_pct": 1.0929192559701375,
+        "bad_1_0px_pct": 0.3442431666147486,
+        "depth_mae_mm": 13.994060516357422,
+        "valid_coverage_pct": 97.86344659391534,
+        "superres_2x_depth_mae_mm": 13.821980476379395
+      },
+      "realsense_ema_temporal": {
+        "disparity_mae_px": 0.14745202660560608,
+        "bad_0_5px_pct": 0.5261172238789,
+        "bad_1_0px_pct": 0.36693833885463556,
+        "depth_mae_mm": 20.370906829833984,
+        "valid_coverage_pct": 99.97778191137566,
+        "superres_2x_depth_mae_mm": 20.17134666442871
+      },
+      "daxa_temporal_p1_p2": {
+        "disparity_mae_px": 0.08874452114105225,
+        "bad_0_5px_pct": 0.875541329316513,
+        "bad_1_0px_pct": 0.3227054959308772,
+        "depth_mae_mm": 12.399606704711914,
+        "valid_coverage_pct": 98.79092261904762,
+        "superres_2x_depth_mae_mm": 12.402642250061035
+      },
+      "temporal_cost_refinement_p3_p4": {
+        "disparity_mae_px": 0.08871686458587646,
+        "bad_0_5px_pct": 0.8755367500536096,
+        "bad_1_0px_pct": 0.32270380811414406,
+        "depth_mae_mm": 12.395237922668457,
+        "valid_coverage_pct": 98.79143931878306,
+        "superres_2x_depth_mae_mm": 12.39792537689209
+      }
+    }
+  },
+  "suite_b_moving_object_disocclusion": {
+    "mean_disocclusion_ghosting_false_obstacle_pct": {
+      "v11_single_frame": 0.7865646258503401,
+      "realsense_ema_temporal": 75.2905328798186,
+      "daxa_temporal_no_disocclusion_guard": 75.46060090702947,
+      "daxa_temporal_p1_p2": 8.517573696145124,
+      "temporal_cost_refinement_p3_p4": 8.517573696145124
+    },
+    "max_disocclusion_ghosting_false_obstacle_pct": {
+      "v11_single_frame": 1.0629251700680271,
+      "realsense_ema_temporal": 77.1045918367347,
+      "daxa_temporal_no_disocclusion_guard": 77.27465986394559,
+      "daxa_temporal_p1_p2": 9.863945578231291,
+      "temporal_cost_refinement_p3_p4": 9.863945578231291
+    },
+    "p3_promoted_current_stereo_pixels_total": 221,
+    "provenance_honesty_violations": 0
+  },
+  "suite_c_zed2_real_sequence_and_gpu_audit": {
+    "zed2_5frame_tier_comparison": {
+      "v11_single_frame": {
+        "total_valid_coverage_pct": 26.217122395833332,
+        "fresh_stereo_coverage_pct": 24.00271267361111,
+        "planar_inferred_coverage_pct": 2.2144097222222223,
+        "historical_reprojected_coverage_pct": 0.0,
+        "independent_zncc_mae_px": 1.1672112941741943,
+        "temporal_depth_jitter_median_std_mm": null
+      },
+      "v11_p0_continuous_subpixel": {
+        "total_valid_coverage_pct": 25.98383246527778,
+        "fresh_stereo_coverage_pct": 23.73752170138889,
+        "planar_inferred_coverage_pct": 2.246310763888889,
+        "historical_reprojected_coverage_pct": 0.0,
+        "independent_zncc_mae_px": 1.13851797580719,
+        "temporal_depth_jitter_median_std_mm": 9.964680671691895
+      },
+      "realsense_ema_temporal": {
+        "total_valid_coverage_pct": 51.21940104166667,
+        "fresh_stereo_coverage_pct": 23.73752170138889,
+        "planar_inferred_coverage_pct": 2.246310763888889,
+        "historical_reprojected_coverage_pct": 25.23556857638889,
+        "independent_zncc_mae_px": 1.3464919328689575,
+        "temporal_depth_jitter_median_std_mm": 7.487356662750244
+      },
+      "daxa_temporal_p1_p2": {
+        "total_valid_coverage_pct": 34.06532118055556,
+        "fresh_stereo_coverage_pct": 22.54177517361111,
+        "planar_inferred_coverage_pct": 2.246310763888889,
+        "historical_reprojected_coverage_pct": 9.277235243055555,
+        "independent_zncc_mae_px": 1.0891607999801636,
+        "temporal_depth_jitter_median_std_mm": 6.754843711853027
+      },
+      "temporal_cost_refinement_p3_p4": {
+        "total_valid_coverage_pct": 34.06890190972222,
+        "fresh_stereo_coverage_pct": 22.93598090277778,
+        "planar_inferred_coverage_pct": 2.246310763888889,
+        "historical_reprojected_coverage_pct": 8.886610243055555,
+        "independent_zncc_mae_px": 1.0891807079315186,
+        "temporal_depth_jitter_median_std_mm": 6.647294998168945
+      }
+    },
+    "gpu_timing_1280x720_ms": {
+      "v11_single_frame_combined_gpu_ms": {
+        "max": 2.901833519622803,
+        "mean": 2.07908679064908,
+        "p50": 1.9612764495420456,
+        "p95": 2.879681430378914,
+        "p99": 2.901833519622803
+      },
+      "v11_p0_continuous_subpixel_combined_gpu_ms": {
+        "max": 3.0106903489465715,
+        "mean": 2.1390351933566096,
+        "p50": 2.029946924294472,
+        "p95": 2.3864242356004715,
+        "p99": 3.0106903489465715
+      },
+      "v11_single_frame_match_gpu_ms": {
+        "max": 0.9309287762031555,
+        "mean": 0.6413044864660262,
+        "p50": 0.5938883953056335,
+        "p95": 0.877266817817688,
+        "p99": 0.9309287762031555
+      },
+      "v11_p0_continuous_subpixel_match_gpu_ms": {
+        "max": 1.0527602575263977,
+        "mean": 0.7179160493843078,
+        "p50": 0.687907031879425,
+        "p95": 0.7602444739151001,
+        "p99": 1.0527602575263977
+      }
+    },
+    "temporal_gpu_memory_optimization_1280x720": {
+      "baseline_two_eye_bytes": 339149872,
+      "baseline_two_eye_mb": 323.44,
+      "left_eye_only_bytes": 169575472,
+      "left_eye_only_mb": 161.72,
+      "reduction_pct": 50.0
+    }
+  }
+}

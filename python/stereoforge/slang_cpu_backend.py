@@ -1076,6 +1076,7 @@ class SlangCpuRefinementBackend:
         disparities: int = 128,
         min_margin: int = 1,
         subpixel: bool = True,
+        continuous_subpixel: bool = False,
         ortho_hybrid: bool = True,
         fast_mode: bool = False,
         ultra_fast: bool = False,
@@ -1151,6 +1152,7 @@ class SlangCpuRefinementBackend:
                 | (4 if fast_mode else 0)
                 | (8 if selective_repair else 0)
                 | (16 if ultra_fast else 0)
+                | (32 if continuous_subpixel else 0)
             )
             params.prior_floor = prior_floor
             params.max_span = max_span
@@ -1239,6 +1241,7 @@ class SlangCpuRefinementBackend:
         disparities: int = 128,
         radius: int = 2,
         subpixel: bool = True,
+        continuous_subpixel: bool = False,
         ortho_hybrid: bool = True,
         fast_mode: bool = True,
         ultra_fast: bool = True,
@@ -1450,6 +1453,7 @@ class SlangCpuRefinementBackend:
                 | (4 if fast_mode else 0)
                 | (8 if selective_repair else 0)
                 | (16 if ultra_fast else 0)
+                | (32 if continuous_subpixel else 0)
             )
             ref_p.prior_floor = 0.05
             ref_p.max_span = 2.0
@@ -1527,6 +1531,8 @@ class SlangCpuRefinementBackend:
                 "coarse_validity": ws["c_lr_val"],
                 "rectified_left": ws["rect_t_l"],
                 "rectified_right": ws["rect_t_r"],
+                "luma": luma_t,
+                "support": supp_t,
             }
             if borrow_workspace:
                 return raw_result

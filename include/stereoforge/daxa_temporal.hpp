@@ -1,5 +1,6 @@
 #pragma once
 #include <stereoforge/daxa_depth.hpp>
+#include <stereoforge/daxa_refinement.hpp>
 #include <optional>
 #include <string_view>
 namespace stereoforge {
@@ -7,6 +8,7 @@ struct DaxaTemporalConfig {
     unsigned slots=2,max_contributors=4,max_reuses=4;
     int64_t max_age_ns=200000000;
     float relative_depth_tolerance=.03f,confidence_floor=.05f;
+    bool inverse_depth_fusion=false,disocclusion_guard=false,temporal_stereo_research=false,left_eye_only=false;
     void validate()const;
 };
 struct DaxaTimedRigPose {
@@ -47,7 +49,9 @@ public:
         DaxaTemporalTiming timings()const;
     };
     DaxaTemporal(std::shared_ptr<DaxaFoundation>,DaxaDepthPipeline::Frame const& prototype,DaxaTemporalConfig={});
+    DaxaTemporal(std::shared_ptr<DaxaFoundation>,DaxaRefinement::Frame const& prototype,DaxaTemporalConfig={});
     Frame process(DaxaDepthPipeline::Frame const&,std::optional<DaxaTimedRigPose> const&);
+    Frame process(DaxaRefinement::Frame const&,std::optional<DaxaTimedRigPose> const&,bool use_completed=false);
     // Call collect before upstream capture/upload; can_process only checks admission.
     size_t collect();bool can_process()const;void reset();
     DaxaTemporalReadback readback(Frame const&)const; // Explicit diagnostic transfer/wait boundary.

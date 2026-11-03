@@ -206,7 +206,86 @@ void match(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=
     uint eff_margin=plateau_tie?p.min_margin:(second-best);
     uint eff_second=plateau_tie?(best+p.min_margin):second;
     bool unique=count>=2&&eff_margin>=p.min_margin&&!strict_reject;if(count<2)reason|=REF_TOO_FEW;if(count>=2&&!unique)reason|=REF_AMBIGUOUS;bool restricted=!hybrid&&count>0&&((winner==lo&&lo>0)||(winner==hi&&hi+1<p.disparities));if(restricted)reason|=REF_RESTRICTED;if(count>0&&(winner==0||winner+1==p.disparities))reason|=REF_GLOBAL;bool valid=unique&&!restricted;
-    float d=float(winner),confidence=0;bool applied=false;if(valid){confidence=clamp(float(eff_margin)/float(max(eff_second,1u)),0.f,1.f);if((p.subpixel&1u)!=0&&!(ultra&&eye!=0)){if(minus!=0xffffffff&&plus!=0xffffffff){SF_PRECISE float denominator=(float(minus)-2.f*float(best))+float(plus);SF_PRECISE float numerator=.5f*(float(minus)-float(plus));SF_PRECISE float offset=denominator!=0?clamp(numerator/denominator,-1.f,1.f):0;d=d+offset;applied=true;}else reason|=REF_MISSING_SUBPIXEL;}}
+    float d=float(winner),confidence=0;bool applied=false;
+    if(valid){
+        confidence=clamp(float(eff_margin)/float(max(eff_second,1u)),0.f,1.f);
+        if((p.subpixel&1u)!=0&&!(ultra&&eye!=0)){
+            SF_PRECISE float offset=0.f;
+            if(minus!=0xffffffff&&plus!=0xffffffff){
+                SF_PRECISE float denominator=(float(minus)-2.f*float(best))+float(plus);
+                SF_PRECISE float numerator=.5f*(float(minus)-float(plus));
+                offset=denominator!=0?clamp(numerator/denominator,-1.f,1.f):0.f;
+                applied=true;
+            }
+            if((p.subpixel&32u)!=0){
+                int s_dir=eye!=0?1:-1;
+                int xr=int(x)+s_dir*int(winner);
+                if(x>=2u&&x+2u<p.width&&y>=1u&&y+1u<p.height&&xr>=2&&xr+2<int(p.width)){
+                    uint* gray_own=p.borrowed[0]!=0?(uint*)p.borrowed[eye]:uplane(27)+eye*n;
+                    uint* gray_oth=p.borrowed[0]!=0?(uint*)p.borrowed[1u-eye]:uplane(27)+(1u-eye)*n;
+                    SF_PRECISE float sum_l=0.f,sum_m2=0.f,sum_m1=0.f,sum_0=0.f,sum_p1=0.f,sum_p2=0.f,gx_energy=0.f;
+                    [unroll]for(int dy=-1;dy<=1;++dy){
+                        uint row_l=uint(int(y)+dy)*p.width;
+                        uint row_r=uint(int(y)+dy)*p.width;
+                        SF_PRECISE float gl_m1=float(gray_own[row_l+uint(int(x)-1)]);
+                        SF_PRECISE float gl_p1=float(gray_own[row_l+uint(int(x)+1)]);
+                        SF_PRECISE float gdiff=gl_p1-gl_m1;
+                        gx_energy=gx_energy+(gdiff*gdiff);
+                        [unroll]for(int dx=-1;dx<=1;++dx){
+                            SF_PRECISE float lv=float(gray_own[row_l+uint(int(x)+dx)]);
+                            int rx=xr+dx;
+                            SF_PRECISE float rv_0=float(gray_oth[row_r+uint(rx)]);
+                            SF_PRECISE float rv_m=float(gray_oth[row_r+uint(rx-s_dir)]);
+                            SF_PRECISE float rv_p=float(gray_oth[row_r+uint(rx+s_dir)]);
+                            SF_PRECISE float hm=.5f*(rv_0+rv_m);
+                            SF_PRECISE float hp=.5f*(rv_0+rv_p);
+                            sum_l=sum_l+lv;sum_m2=sum_m2+rv_m;sum_m1=sum_m1+hm;sum_0=sum_0+rv_0;sum_p1=sum_p1+hp;sum_p2=sum_p2+rv_p;
+                        }
+                    }
+                    SF_PRECISE float inv9=0.1111111111f;
+                    SF_PRECISE float mean_l=sum_l*inv9,mean_m2=sum_m2*inv9,mean_m1=sum_m1*inv9,mean_0=sum_0*inv9,mean_p1=sum_p1*inv9,mean_p2=sum_p2*inv9;
+                    SF_PRECISE float e_m2=0.f,e_m1=0.f,e_0=0.f,e_p1=0.f,e_p2=0.f;
+                    [unroll]for(int dy2=-1;dy2<=1;++dy2){
+                        uint row_l=uint(int(y)+dy2)*p.width;
+                        uint row_r=uint(int(y)+dy2)*p.width;
+                        [unroll]for(int dx2=-1;dx2<=1;++dx2){
+                            SF_PRECISE float lv=float(gray_own[row_l+uint(int(x)+dx2)]);
+                            int rx=xr+dx2;
+                            SF_PRECISE float rv_0=float(gray_oth[row_r+uint(rx)]);
+                            SF_PRECISE float rv_m=float(gray_oth[row_r+uint(rx-s_dir)]);
+                            SF_PRECISE float rv_p=float(gray_oth[row_r+uint(rx+s_dir)]);
+                            SF_PRECISE float hm=.5f*(rv_0+rv_m);
+                            SF_PRECISE float hp=.5f*(rv_0+rv_p);
+                            SF_PRECISE float dl=lv-mean_l;
+                            SF_PRECISE float dm2=dl-(rv_m-mean_m2);
+                            SF_PRECISE float dm1=dl-(hm-mean_m1);
+                            SF_PRECISE float d0=dl-(rv_0-mean_0);
+                            SF_PRECISE float dp1=dl-(hp-mean_p1);
+                            SF_PRECISE float dp2=dl-(rv_p-mean_p2);
+                            e_m2=e_m2+(dm2*dm2);e_m1=e_m1+(dm1*dm1);e_0=e_0+(d0*d0);e_p1=e_p1+(dp1*dp1);e_p2=e_p2+(dp2*dp2);
+                        }
+                    }
+                    SF_PRECISE float base_off=0.f,el=e_m1,ec=e_0,er=e_p1;
+                    if(e_m1<ec&&e_m1<=e_p1){base_off=-.5f;el=e_m2;ec=e_m1;er=e_0;}
+                    else if(e_p1<ec){base_off=.5f;el=e_0;ec=e_p1;er=e_p2;}
+                    SF_PRECISE float p_denom=(el-2.f*ec)+er;
+                    SF_PRECISE float p_num=.25f*(el-er);
+                    if(gx_energy>12.f&&p_denom>1e-3f&&ec<=el&&ec<=er){
+                        SF_PRECISE float p_off=clamp(base_off+clamp(p_num/p_denom,-.25f,.25f),-.85f,.85f);
+                        if(!applied){
+                            offset=p_off;applied=true;
+                        }else{
+                            SF_PRECISE float wp=(minus==plus||eff_margin<=8u)?.75f:.55f;
+                            SF_PRECISE float wc=1.f-wp;
+                            offset=clamp((wc*offset)+(wp*p_off),-1.f,1.f);
+                        }
+                    }
+                }
+            }
+            if(applied)d=d+offset;
+            else reason|=REF_MISSING_SUBPIXEL;
+        }
+    }
     if(!skip_diag){uplane(13)[t]=reason;uplane(14)[t]=prior?1:0;uplane(15)[t]=winner;uplane(16)[t]=best;uplane(17)[t]=second;uplane(18)[t]=count;uplane(19)[t]=work;uplane(20)[t]=uint(applied);}fplane(21)[t]=valid?d:refinement_invalid();if((p.subpixel&20u)!=20u||eye==0)fplane(22)[t]=valid?confidence:0;uplane(23)[t]=uint(valid);
 }
 [shader("compute")][numthreads(64,1,1)]

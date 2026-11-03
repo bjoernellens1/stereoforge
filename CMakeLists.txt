@@ -260,6 +260,9 @@ endif()
 
 if(TARGET stereoforge_daxa_depth)
   include(cmake/DaxaRefinement.cmake)
+  if(TARGET stereoforge_daxa_temporal AND TARGET stereoforge_daxa_refinement)
+    target_link_libraries(stereoforge_daxa_temporal PUBLIC stereoforge_daxa_refinement)
+  endif()
 endif()
 
 if(STEREOFORGE_BUILD_ZED_REFERENCE)
