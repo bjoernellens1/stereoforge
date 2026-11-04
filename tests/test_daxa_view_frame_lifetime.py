@@ -32,7 +32,7 @@ def test_actual_frame_assignment_releases_children_before_context(tmp_path, stag
 #include <iostream>
 namespace daxa {struct BufferId{};}
 namespace stereoforge {
-class DaxaObservationFrame;class DaxaObservationAncestryView;struct DaxaTemporalTiming;
+class DaxaObservationFrame;class DaxaLeftObservationFrame;class DaxaObservationAncestryView;struct DaxaTemporalTiming;
 struct GeometryConfig{};struct CaptureFrame{};using CaptureLease=std::shared_ptr<CaptureFrame>;
 enum class DepthConvention{AxialZ};
 struct State{unsigned violations=0,closed=0,slots_destroyed=0;};

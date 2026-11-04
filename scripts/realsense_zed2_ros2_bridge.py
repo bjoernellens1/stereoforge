@@ -9,6 +9,7 @@ and publishes both raw metric depth (32FC1) and colorized/RGB-registered views.
 from __future__ import annotations
 
 import array
+import collections
 import os
 import struct
 import subprocess
@@ -179,6 +180,7 @@ class DualCameraDepthBridgeNode(Node):
         self.pub_zed_dc_reg = self.create_publisher(Image, "/stereoforge/depth_completed_rgb_registered", qos)
 
         self.latest_zed_nat_rgb: np.ndarray | None = None
+        self.zed_rgb_ring: collections.deque[tuple[int, np.ndarray]] = collections.deque(maxlen=8)
         self.pending_rs: tuple[int, np.ndarray, np.ndarray, np.ndarray] | None = None
         self.msg_pool: dict[str, tuple[Image, np.ndarray]] = {}
         self.lock = threading.Lock()
@@ -228,18 +230,38 @@ class DualCameraDepthBridgeNode(Node):
         msg._data = buf
         return msg
 
+    @staticmethod
+    def _stamp_ns(header: Any) -> int:
+        return int(header.stamp.sec) * 1_000_000_000 + int(header.stamp.nanosec)
+
+    def _match_zed_rgb(self, stamp_ns: int) -> np.ndarray | None:
+        if not self.zed_rgb_ring:
+            return self.latest_zed_nat_rgb
+        best_rgb = self.latest_zed_nat_rgb
+        best_dt = 1_000_000_000
+        for s_ns, rgb in self.zed_rgb_ring:
+            dt = abs(s_ns - stamp_ns)
+            if dt < best_dt:
+                best_dt = dt
+                best_rgb = rgb
+                if dt == 0:
+                    break
+        return best_rgb
+
     def on_zed_rgb(self, msg: Image) -> None:
-        need_nat = (
-            self.pub_zed_rgb_nat.get_subscription_count() > 0
-            or self.pub_zed_d_reg.get_subscription_count() > 0
+        need_reg = (
+            self.pub_zed_d_reg.get_subscription_count() > 0
             or self.pub_zed_dc_reg.get_subscription_count() > 0
         )
+        need_nat = self.pub_zed_rgb_nat.get_subscription_count() > 0 or need_reg
         if not need_nat:
             return
         raw_rgba = np.frombuffer(msg._data, dtype=np.uint8).reshape(msg.height, msg.width, 4)
         out_msg, out_view = self.get_pooled_rgb_msg("zed_nat", msg.header, msg.height, msg.width)
         restore_zed2_natural_rgb(raw_rgba, dst=out_view)
         self.latest_zed_nat_rgb = out_view
+        if need_reg:
+            self.zed_rgb_ring.append((self._stamp_ns(msg.header), out_view.copy()))
         if self.pub_zed_rgb_nat.get_subscription_count() > 0:
             self.pub_zed_rgb_nat.publish(out_msg)
 
@@ -251,13 +273,16 @@ class DualCameraDepthBridgeNode(Node):
         d_m = np.frombuffer(msg._data, dtype=np.float32).reshape(msg.height, msg.width)
         cmap, reg, alpha, zmin, zmax = self.params()
         out_msg, out_view = self.get_pooled_rgb_msg(pool_key, msg.header, msg.height, msg.width)
+        base_rgb = self._match_zed_rgb(self._stamp_ns(msg.header)) if (reg and need_reg) else None
         _, reg_rgb = stylize_depth_rgb(
-            d_m, self.latest_zed_nat_rgb, cmap, reg and need_reg, alpha, zmin, zmax, dst_col=out_view
+            d_m, base_rgb, cmap, reg and need_reg, alpha, zmin, zmax, dst_col=out_view
         )
         if need_col:
             pub_col.publish(out_msg)
         if need_reg and reg_rgb is not None:
-            pub_reg.publish(self.make_rgb_msg(msg.header, reg_rgb))
+            reg_msg, reg_view = self.get_pooled_rgb_msg(pool_key + "_reg", msg.header, msg.height, msg.width)
+            np.copyto(reg_view, reg_rgb)
+            pub_reg.publish(reg_msg)
 
     def on_zed_depth(self, msg: Image) -> None:
         self._publish_stylized_zed_depth(msg, "zed_d_col", self.pub_zed_d_col, self.pub_zed_d_reg)

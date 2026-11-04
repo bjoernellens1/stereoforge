@@ -262,3 +262,34 @@ def test_v13_mandatory_targets_range_oracle_and_5way_ablation_gates() -> None:
     assert gpu["measured_depth_v13_adaptive_gpu_ms"]["p50"] <= 1.25
     assert gpu["measured_depth_v13_adaptive_gpu_ms"]["p50"] < gpu["measured_depth_v11_p0_gpu_ms"]["p50"]
     assert gpu["refinement_v13_adaptive_tiles_gpu_ms"]["p50"] < gpu["refinement_p0_gpu_ms"]["p50"]
+
+    # 5. Adaptive-matching precision gate (fixes the 49.05 mm / 7.06% bad-0.5px regression)
+    abl5 = data["five_way_ablation"]
+    assert abl5["2_adaptive_resolution_only"]["overall_depth_mae_mm"] <= abl5["1_full_resolution_baseline"]["overall_depth_mae_mm"]
+    assert abl5["2_adaptive_resolution_only"]["bad_0_5px_pct"] <= abl5["1_full_resolution_baseline"]["bad_0_5px_pct"]
+    assert abl5["5_v13_combined_optimizer"]["bad_0_5px_pct"] <= 1.0
+
+
+def test_v13_1_four_way_rectangular_artifact_and_grid_alignment_audit() -> None:
+    """Verify the 4-way rectangular artifact ablation (A, B, C, D) and B_4, B_8, B_16, B_32 grid-alignment gates."""
+    audit_path = ROOT / "benchmarks" / "results" / "v13_rectangular_artifact_audit.json"
+    assert audit_path.exists(), "Run benchmarks/rectangular_artifact_audit_v13.py first"
+    audit = json.loads(audit_path.read_text(encoding="utf-8"))
+    abl = audit["four_way_ablation"]
+
+    ref_a = abl["A_reference_adaptive0_planar0"]
+    adp_b = abl["B_adaptive_matching_only_adaptive1_planar0"]
+    pln_c = abl["C_planar_completion_only_adaptive0_planar1"]
+    cmb_d = abl["D_combined_pipeline_adaptive1_planar1"]
+
+    # Paired-support depth MAE and bad-0.5px in B and D must not degrade vs uniform reference A
+    assert adp_b["paired_support_depth_mae_mm"] <= ref_a["paired_support_depth_mae_mm"]
+    assert adp_b["paired_support_bad_0_5px_pct"] <= ref_a["paired_support_bad_0_5px_pct"]
+    assert cmb_d["paired_support_depth_mae_mm"] <= ref_a["paired_support_depth_mae_mm"]
+    assert cmb_d["completed_depth_mae_mm"] <= pln_c["completed_depth_mae_mm"]
+
+    # Grid-alignment boundary excess ratios B_4, B_8, B_16, B_32 on smooth surfaces must stay <= 1.05
+    for cfg_data in (ref_a, adp_b, pln_c, cmb_d):
+        for kind in ("grid_alignment_measured", "grid_alignment_completed"):
+            for p in (4, 8, 16, 32):
+                assert cfg_data[kind][f"B_{p}_mean"] <= 1.05
