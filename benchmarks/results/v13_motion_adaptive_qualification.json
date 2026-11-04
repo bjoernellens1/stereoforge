@@ -1,16 +1,16 @@
 {
   "schema": "stereoforge.milestone.v13_motion_adaptive_qualification.v2",
   "provenance": {
-    "git_head_at_generation": "0bb6ee89604a503f2d26ea5f7f36b72605567e5d",
-    "git_head_commit_timestamp": "2026-11-04T09:13:51+01:00",
+    "git_head_at_generation": "b64d2ec99db3928a3d9517f2827613acbea79b01",
+    "git_head_commit_timestamp": "2026-11-04T12:03:32+01:00",
     "working_tree_dirty_at_generation": true,
     "binaries_sha256": {
       "daxa_depth_benchmark": "4e0e0d1eb1ea0dd7372b23b57a30b92143540692690f5624d9f12d954f57af36",
-      "daxa_refinement_benchmark": "6594fe9ca724edc42e796fd5acae38fdb3be538a14e4411f7711a93bae09dd1d",
-      "daxa_dual_preprocess_benchmark": "87516530b4b7efd5bbd4015c605b0eec23638d9616eba63469bba9d4224d6ca2",
-      "stereoforge_ros2_depth_publisher": "2622e991f7d08b38e002ad67e32344952d07d3cf8590a6eac1ee703a7d0ac463",
+      "daxa_refinement_benchmark": "49b651c15a14bbf63cfa2895198dcae347637c3a4f69d3963f213f7fe1d044ce",
+      "daxa_dual_preprocess_benchmark": "f949512412fc9823fffe28f6564ac5b3097e738982b3a1cd9c86c95ed6f2df86",
+      "stereoforge_ros2_depth_publisher": "92873a35bc07653f82863cdd68f61bf734794fb4668b496fc856ceccca578e60",
       "stereoforge_ros2_delivery_probe": "efd22fc212b05169077f7dd3c8a2ed4d478ac484f8ce254eaa885fb1a082f372",
-      "daxa_refinement_contracts": "cd22a0ba9cc9f86fbccd950db0b740d52040733f01072214bc6fff05e7778e60"
+      "daxa_refinement_contracts": "9c2965b47fd128479dede41dfebd4ba2f9b1a26f13da4f91de79cd614935dc29"
     },
     "compiled_spv_bundle_sha256": "4defeac3b017cad423d551a60615aa13b832940be1c204d4df3ba23b2e188c2a",
     "compiled_spv_count": 83
@@ -19,8 +19,8 @@
     "performance_target_720p_measured_depth_p50_ms": {
       "v11_baseline_ms": 1.5326,
       "v13_target_max_ms": 1.25,
-      "v13_achieved_p50_ms": 1.2104,
-      "v13_achieved_p95_ms": 1.5823,
+      "v13_achieved_p50_ms": 1.1614,
+      "v13_achieved_p95_ms": 1.1744,
       "qualified": true
     },
     "quality_target_moving_object_wake_ghosting_pct": {
@@ -207,16 +207,16 @@
     "E2_sparse_and_adaptive_tile_matching": {
       "candidate_reduction_vs_uniform_pct": 32.75865033506334,
       "measured_depth_v13_adaptive_gpu_ms": {
-        "p50": 1.2104,
-        "p95": 1.5823,
-        "p99": 1.693,
-        "mean": 1.2508
+        "p50": 1.1614,
+        "p95": 1.1744,
+        "p99": 1.2144,
+        "mean": 1.1571
       },
       "refinement_v13_adaptive_tiles_gpu_ms": {
-        "p50": 1.1638,
-        "p95": 1.7076,
-        "p99": 1.7526,
-        "mean": 1.266
+        "p50": 1.1076,
+        "p95": 1.1283,
+        "p99": 1.134,
+        "mean": 1.1032
       }
     },
     "E3_selective_precision": {
@@ -707,46 +707,46 @@
     "measured_depth_v11_reference_p50_ms": 1.5326,
     "measured_depth_v13_target_p50_ms": 1.25,
     "measured_depth_v11_p0_gpu_ms": {
-      "p50": 1.3155,
-      "p95": 1.8355,
-      "p99": 1.8407,
-      "mean": 1.3787
+      "p50": 1.2521,
+      "p95": 1.2674,
+      "p99": 1.3036,
+      "mean": 1.2431
     },
     "measured_depth_v13_adaptive_gpu_ms": {
-      "p50": 1.2104,
-      "p95": 1.5823,
-      "p99": 1.693,
-      "mean": 1.2508
+      "p50": 1.1614,
+      "p95": 1.1744,
+      "p99": 1.2144,
+      "mean": 1.1571
     },
     "refinement_p0_gpu_ms": {
-      "p50": 1.3512,
-      "p95": 1.8421,
-      "p99": 1.9984,
-      "mean": 1.395
+      "p50": 1.2818,
+      "p95": 1.3011,
+      "p99": 1.3086,
+      "mean": 1.2751
     },
     "refinement_v13_adaptive_tiles_gpu_ms": {
-      "p50": 1.1638,
-      "p95": 1.7076,
-      "p99": 1.7526,
-      "mean": 1.266
+      "p50": 1.1076,
+      "p95": 1.1283,
+      "p99": 1.134,
+      "mean": 1.1032
     },
     "temporal_total_gpu_ms": {
-      "p50": 1.419,
-      "p95": 1.8373,
-      "p99": 1.8486,
-      "mean": 1.4632
+      "p50": 1.3945,
+      "p95": 1.4217,
+      "p99": 1.4358,
+      "mean": 1.3886
     },
     "full_chain_p0_plus_temporal_gpu_ms": {
-      "p50": 3.1191,
-      "p95": 4.012,
-      "p99": 4.018,
-      "mean": 3.2127
+      "p50": 3.0172,
+      "p95": 3.0751,
+      "p99": 3.1222,
+      "mean": 3.0056
     },
     "full_chain_v13_plus_temporal_gpu_ms": {
-      "p50": 2.9616,
-      "p95": 3.6737,
-      "p99": 3.8072,
-      "mean": 3.0836
+      "p50": 2.8468,
+      "p95": 2.8841,
+      "p99": 2.9333,
+      "mean": 2.8337
     },
     "native_gpu_wake_test": {
       "wake_pixels": 11560,
@@ -759,46 +759,46 @@
     "measured_depth_v11_reference_p50_ms": 1.5326,
     "measured_depth_v13_target_p50_ms": 1.25,
     "measured_depth_v11_p0_gpu_ms": {
-      "p50": 1.3155,
-      "p95": 1.8355,
-      "p99": 1.8407,
-      "mean": 1.3787
+      "p50": 1.2521,
+      "p95": 1.2674,
+      "p99": 1.3036,
+      "mean": 1.2431
     },
     "measured_depth_v13_adaptive_gpu_ms": {
-      "p50": 1.2104,
-      "p95": 1.5823,
-      "p99": 1.693,
-      "mean": 1.2508
+      "p50": 1.1614,
+      "p95": 1.1744,
+      "p99": 1.2144,
+      "mean": 1.1571
     },
     "refinement_p0_gpu_ms": {
-      "p50": 1.3512,
-      "p95": 1.8421,
-      "p99": 1.9984,
-      "mean": 1.395
+      "p50": 1.2818,
+      "p95": 1.3011,
+      "p99": 1.3086,
+      "mean": 1.2751
     },
     "refinement_v13_adaptive_tiles_gpu_ms": {
-      "p50": 1.1638,
-      "p95": 1.7076,
-      "p99": 1.7526,
-      "mean": 1.266
+      "p50": 1.1076,
+      "p95": 1.1283,
+      "p99": 1.134,
+      "mean": 1.1032
     },
     "temporal_total_gpu_ms": {
-      "p50": 1.419,
-      "p95": 1.8373,
-      "p99": 1.8486,
-      "mean": 1.4632
+      "p50": 1.3945,
+      "p95": 1.4217,
+      "p99": 1.4358,
+      "mean": 1.3886
     },
     "full_chain_p0_plus_temporal_gpu_ms": {
-      "p50": 3.1191,
-      "p95": 4.012,
-      "p99": 4.018,
-      "mean": 3.2127
+      "p50": 3.0172,
+      "p95": 3.0751,
+      "p99": 3.1222,
+      "mean": 3.0056
     },
     "full_chain_v13_plus_temporal_gpu_ms": {
-      "p50": 2.9616,
-      "p95": 3.6737,
-      "p99": 3.8072,
-      "mean": 3.0836
+      "p50": 2.8468,
+      "p95": 2.8841,
+      "p99": 2.9333,
+      "mean": 2.8337
     },
     "native_gpu_wake_test": {
       "wake_pixels": 11560,
