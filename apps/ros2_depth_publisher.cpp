@@ -3,6 +3,7 @@
 #include <stereoforge/capture.hpp>
 #include <stereoforge/depth_rate_controller.hpp>
 #include <stereoforge/depth_speckle.hpp>
+#include <stereoforge/guided_depth_fill.hpp>
 #include <stereoforge/daxa_depth.hpp>
 #include <stereoforge/daxa_dual_preprocess.hpp>
 #include <stereoforge/daxa_refinement.hpp>
@@ -54,7 +55,7 @@ struct Options {
     std::string pipeline_mode="full-sgm",coarse_manifest,descriptor_mode="census",coarse_schedule="sequential",coarse_right_mode="independent-sgm",profile="quality";
     std::string depth_topic="/stereoforge/depth",rgb_topic="/stereoforge/rectified_rgb",completed_depth_topic="/stereoforge/depth_completed",completed_provenance_topic="/stereoforge/depth_completed_provenance";
     std::string depth_rate="adaptive",rate_report;
-    unsigned depth_speckle_min_pixels=0; double depth_speckle_delta_m=0.05; double depth_speckle_delta_px=1.25; double gpu_duty_budget_pct=0.0;
+    unsigned depth_speckle_min_pixels=0,guided_fill_px=0; double depth_speckle_delta_m=0.05; double depth_speckle_delta_px=1.25; double gpu_duty_budget_pct=0.0;
     unsigned min_depth_fps=5,max_depth_fps=60,consumer_min_depth_fps=5,max_depth_age_ms=250,downshift_ms=3000;
     unsigned fps=60,disparities=128,warmup=5,max_frames=100000,qos_depth=1,min_disparity_bound=0,max_disparity_bound=0;int device_id=-1;double duration=600,subscriber_wait=0;bool validation=false,thread_cpu_timing=false,fast_mode=false,ultra_fast=false,refinement_subpixel=false,continuous_subpixel=false,adaptive_tiles=false,selective_repair=false,planar_recovery=false,verify_payload_checksum=false;
 };
@@ -84,6 +85,7 @@ Options parse(int argc,char** argv){
         else if(a=="--qos-depth")o.qos_depth=number(v,1,64);
         else if(a=="--depth-rate")o.depth_rate=v;else if(a=="--rate-report")o.rate_report=v;
         else if(a=="--depth-speckle-min-pixels")o.depth_speckle_min_pixels=number(v,0,10000);
+        else if(a=="--guided-fill-px")o.guided_fill_px=number(v,0,255);
         else if(a=="--depth-speckle-delta-m"){size_t n=0;o.depth_speckle_delta_m=std::stod(v,&n);if(n!=v.size()||!std::isfinite(o.depth_speckle_delta_m)||o.depth_speckle_delta_m<0||o.depth_speckle_delta_m>10)throw std::invalid_argument("invalid depth speckle delta");}
         else if(a=="--depth-speckle-delta-px"){size_t n=0;o.depth_speckle_delta_px=std::stod(v,&n);if(n!=v.size()||!std::isfinite(o.depth_speckle_delta_px)||o.depth_speckle_delta_px<0||o.depth_speckle_delta_px>32)throw std::invalid_argument("invalid depth speckle disparity delta");}
         else if(a=="--min-depth-fps")o.min_depth_fps=number(v,5,60);
@@ -237,6 +239,8 @@ void run(const Options& o, OutputFile& file){
             mc.fx*mc.baseline_m,float(o.depth_speckle_delta_px),true,
             disp_mode?3u:0u,disp_mode?0.8f:0.0f,disp_mode?8.0f:0.0f,disp_mode?6u:0u});
     }
+    std::unique_ptr<GuidedDepthFill> guided_fill;std::vector<std::uint8_t> guided_filled;
+    if(depth&&rgb&&completed_exporter&&o.guided_fill_px)guided_fill=std::make_unique<GuidedDepthFill>(GuidedDepthFillConfig{maps.width,maps.height,o.guided_fill_px});
     std::uint64_t speckle_input_valid_total=0,speckle_output_valid_total=0;
     std::uint64_t speckle_invalidated_total=0,speckle_removed_total=0;
     std::uint64_t speckle_filter_ns_total=0,speckle_filtered_frames=0;
@@ -326,7 +330,7 @@ void run(const Options& o, OutputFile& file){
             } else {
                 std::memcpy(image.data.data(),bytes.data(),bytes.size());
             }
-            if(which==RosDeliveryOutput::Depth&&depth_speckle){
+            if((which==RosDeliveryOutput::Depth||which==RosDeliveryOutput::CompletedDepth)&&depth_speckle){
                 const auto filter_begin=now_ns<steady>();
                 const auto rgba_span=rgb?p.output.rgba_bytes():std::span<const std::byte>{};
                 const auto stats=depth_speckle->apply(std::as_writable_bytes(std::span(image.data)),rgba_span);
@@ -336,6 +340,17 @@ void run(const Options& o, OutputFile& file){
                 speckle_output_valid_total+=stats.output_valid_pixels;
                 speckle_invalidated_total+=stats.invalidated_pixels;
                 speckle_removed_total+=stats.removed_components;
+            }
+            if(which==RosDeliveryOutput::CompletedDepth&&guided_fill){
+                guided_fill->apply(std::span<float>(reinterpret_cast<float*>(image.data.data()),image.data.size()/sizeof(float)),p.output.rgba_bytes(),guided_filled);
+            }
+            if(which==RosDeliveryOutput::CompletedProvenance&&!guided_filled.empty()){
+                // Keep provenance honest after speckle removal (0) and guided fill (8).
+                const auto* zf=reinterpret_cast<const float*>(completed_depth_image.data.data());
+                for(size_t i=0;i<image.data.size();++i){
+                    const bool valid=std::isfinite(zf[i])&&zf[i]>0.f;
+                    image.data[i]=!valid?std::uint8_t(0):(guided_filled[i]?std::uint8_t(8):image.data[i]);
+                }
             }
             // Preserve the GPU's 32FC1 invalid depth encoding, including NaN.
             // Do not silently replace NaNs with zero during ROS publication.

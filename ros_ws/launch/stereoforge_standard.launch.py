@@ -36,6 +36,7 @@ _OPTIONAL_VALUE_ARGUMENTS = (
     ("completed_provenance_topic", "--completed-provenance-topic"),
     ("reliability", "--reliability"),
     ("depth_speckle_min_pixels", "--depth-speckle-min-pixels"),
+    ("guided_fill_px", "--guided-fill-px"),
     ("depth_speckle_delta_m", "--depth-speckle-delta-m"),
     ("depth_speckle_delta_px", "--depth-speckle-delta-px"),
 )
@@ -293,7 +294,8 @@ def generate_launch_description():
             "completed_provenance_topic",
             default_value="/stereoforge/depth_completed_provenance",
         ),
-        DeclareLaunchArgument("depth_speckle_min_pixels", default_value="0"),
+        DeclareLaunchArgument("depth_speckle_min_pixels", default_value="64"),
+        DeclareLaunchArgument("guided_fill_px", default_value="48"),
         DeclareLaunchArgument("depth_speckle_delta_m", default_value="0.05"),
         DeclareLaunchArgument("depth_speckle_delta_px", default_value="1.25"),
         DeclareLaunchArgument(
