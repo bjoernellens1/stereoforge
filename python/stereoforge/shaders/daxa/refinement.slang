@@ -107,7 +107,28 @@ void match(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=
             predicted=predicted/w_valid;
             float span_limit=repair?(p.max_span*3.0f):(p.max_span*2.5f);
             if(mx-mn>span_limit)reason|=REF_PRIOR_SPAN;
-            else if(repair&&!hole_fallback&&(mx-mn>p.max_span*2.5f))boundary_repair=true;
+            else if(repair&&!hole_fallback&&(mx-mn>p.max_span*(adaptive_tiles?2.0f:2.5f))){
+                boundary_repair=true;
+                if(adaptive_tiles&&valid_taps>=2u){
+                    uint* gray_own=p.borrowed[0]!=0?(uint*)p.borrowed[eye]:uplane(27)+eye*n;
+                    float luma_0=float(gray_own[y*p.width+x]);
+                    float b_pred=0.f,b_w=0.f;
+                    [unroll]for(uint tap=0;tap<4;++tap){
+                        int xx=ix+int(tap&1),yy=iy+int(tap>>1);
+                        if(xx<0||yy<0||xx>=int(p.coarse_width)||yy>=int(p.coarse_height))continue;
+                        uint j=eye*cn+uint(yy)*p.coarse_width+uint(xx);
+                        float d=((float*)p.coarse[0])[j];
+                        if(((uint*)p.coarse[2])[j]!=0&&isfinite(d)&&d>=0&&d<=float(p.disparities-1)*step){
+                            uint gx_c=min(uint(max(0,xx))*4u+2u,p.width-1u);
+                            uint gy_c=min(uint(max(0,yy))*4u+2u,p.height-1u);
+                            float l_tap=float(gray_own[gy_c*p.width+gx_c]);
+                            float wp=(weights[tap]+.05f)/(1.f+.12f*abs(luma_0-l_tap));
+                            b_pred+=d*wp;b_w+=wp;
+                        }
+                    }
+                    if(b_w>0.f)predicted=.5f*predicted+.5f*(b_pred/b_w);
+                }
+            }
         }else reason|=REF_NO_PRIOR;
     }
     bool prior=reason==0;predicted=predicted*mult;if(!skip_diag){fplane(9)[t]=prior?predicted:refinement_invalid();uplane(10)[t]=uint(prior);}
@@ -115,7 +136,7 @@ void match(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=
     bool supported=cval[t]!=0;if(prior&&!supported)reason|=REF_UNSUPPORTED;
     bool coarse_planar_pixel=false,precision_pixel=false;
     if(adaptive_tiles&&prior&&supported){
-        coarse_planar_pixel=(valid_taps==4u&&min_c_conf>=.20f&&(mx-mn)<=.50f&&predicted<=56.f);
+        coarse_planar_pixel=(valid_taps==4u&&min_c_conf>=.25f&&(mx-mn)<=.35f&&predicted<=56.f);
         precision_pixel=!coarse_planar_pixel&&((mx-mn)>.75f||min_c_conf<.15f||predicted>64.f||boundary_repair||hole_fallback);
     }
     int centre=0;uint lo=0,hi=0xffffffff;
@@ -146,16 +167,28 @@ void match(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=
     if(prior&&supported&&lo<=hi){
         uint c0=cen[t],c_l=c0,c_r=c0,c_u=c0,c_d=c0;
         bool full_5tap=hybrid&&!(ultra&&eye!=0)&&!coarse_planar_pixel;
+        bool edge_clamp_l=false,edge_clamp_r=false,edge_clamp_u=false,edge_clamp_d=false;
         if(full_5tap){
             c_l=(x>0&&cval[t-1]!=0)?cen[t-1]:c0;
             c_r=(x+1<p.width&&cval[t+1]!=0)?cen[t+1]:c0;
             c_u=(y>0&&cval[t-p.width]!=0)?cen[t-p.width]:c0;
             c_d=(y+1<p.height&&cval[t+p.width]!=0)?cen[t+p.width]:c0;
+            if(adaptive_tiles&&boundary_repair){
+                uint* gray_own=p.borrowed[0]!=0?(uint*)p.borrowed[eye]:uplane(27)+eye*n;
+                int g0=int(gray_own[t]);
+                if(x>0&&abs(int(gray_own[t-1])-g0)>20){c_l=c0;edge_clamp_l=true;}
+                if(x+1<p.width&&abs(int(gray_own[t+1])-g0)>20){c_r=c0;edge_clamp_r=true;}
+                if(y>0&&abs(int(gray_own[t-p.width])-g0)>20){c_u=c0;edge_clamp_u=true;}
+                if(y+1<p.height&&abs(int(gray_own[t+p.width])-g0)>20){c_d=c0;edge_clamp_d=true;}
+            }
+        }else if(adaptive_tiles&&coarse_planar_pixel&&eye==0){
+            c_l=(x>0&&cval[t-1]!=0)?cen[t-1]:c0;
+            c_r=(x+1<p.width&&cval[t+1]!=0)?cen[t+1]:c0;
         }
         uint other_row=(1-eye)*n+y*p.width;
         uint max_passes=(repair&&!ultra)?2u:1u;
         for(uint pass_idx=0;pass_idx<max_passes;++pass_idx){
-            if(full_5tap&&eye==0){
+            if((full_5tap||(adaptive_tiles&&coarse_planar_pixel))&&eye==0){
                 int xx0=int(x)-int(lo);
                 bool v_right=(xx0+1>=0&&xx0+1<int(p.width))?(cval[other_row+uint(xx0+1)]!=0):false;
                 uint d_right=v_right?cen[other_row+uint(xx0+1)]:0u;
@@ -169,12 +202,16 @@ void match(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=
                     if(xx>=0&&xx<int(p.width)&&v_curr){
                         uint j=other_row+uint(xx);
                         uint base=countbits(c0^d_curr);
-                        uint m_l=v_left?countbits(c_l^d_left):base;
-                        uint m_r=v_right?countbits(c_r^d_right):base;
-                        uint m_u=(y>0&&cval[j-p.width]!=0)?countbits(c_u^cen[j-p.width]):base;
-                        uint m_d=(y+1<p.height&&cval[j+p.width]!=0)?countbits(c_d^cen[j+p.width]):base;
+                        uint m_l=(v_left&&!edge_clamp_l)?countbits(c_l^d_left):base;
+                        uint m_r=(v_right&&!edge_clamp_r)?countbits(c_r^d_right):base;
                         uint dist=uint(abs(int(d)-centre));
-                        cost=2u*base+m_l+m_r+m_u+m_d+dist;
+                        if(coarse_planar_pixel){
+                            cost=4u*base+m_l+m_r+dist;
+                        }else{
+                            uint m_u=(y>0&&!edge_clamp_u&&cval[j-p.width]!=0)?countbits(c_u^cen[j-p.width]):base;
+                            uint m_d=(y+1<p.height&&!edge_clamp_d&&cval[j+p.width]!=0)?countbits(c_d^cen[j+p.width]):base;
+                            cost=2u*base+m_l+m_r+m_u+m_d+dist;
+                        }
                         ++count;++work;
                         if(cost<best){third=second;second=best;best=cost;winner=d;minus=prev_cost;plus=0xffffffff;}
                         else if(cost<second){third=second;second=cost;}
@@ -491,6 +528,29 @@ void planar(uint3 tid:SV_DispatchThreadID,uint3 gid:SV_GroupID,uint3 gtid:SV_Gro
                 ac_full=plane.y;bc_full=plane.z;
                 d_coarse=(plane.x+ac_full*(cx-float(rcx))+bc_full*(cy-float(rcy)))*mult;
                 strong_coarse=(plane.w>1.5f);
+                if((p.subpixel&64u)!=0){
+                    int sx=(gtid.x&3u)<2u?-1:1,sy=(gtid.y&3u)<2u?-1:1;
+                    float wx=abs(float(gtid.x&3u)-1.5f)*.25f,wy=abs(float(gtid.y&3u)-1.5f)*.25f;
+                    float w_sum=(1.f-wx)*(1.f-wy);
+                    float d_sum=w_sum*d_coarse,ac_sum=w_sum*ac_full,bc_sum=w_sum*bc_full;
+                    [unroll]for(uint tap=1u;tap<4u;++tap){
+                        int tx=int(px)+((tap&1u)!=0u?sx:0),ty=int(py)+((tap&2u)!=0u?sy:0);
+                        if(tx>=0&&tx<4&&ty>=0&&ty<4){
+                            float4 pn=gs_coarse_plane[uint(ty)][uint(tx)];
+                            if(pn.w>0.f){
+                                int rtx=clamp(int(gid.x*4u)+tx,1,int(p.coarse_width)-2);
+                                int rty=clamp(int(gid.y*4u)+ty,1,int(p.coarse_height)-2);
+                                float dn=(pn.x+pn.y*(cx-float(rtx))+pn.z*(cy-float(rty)))*mult;
+                                if(abs(dn-d_coarse)<=1.8f){
+                                    float wn=((tap&1u)!=0u?wx:(1.f-wx))*((tap&2u)!=0u?wy:(1.f-wy));
+                                    w_sum+=wn;d_sum+=wn*dn;ac_sum+=wn*pn.y;bc_sum+=wn*pn.z;
+                                }
+                            }
+                        }
+                    }
+                    float inv_w=1.f/w_sum;
+                    d_coarse=d_sum*inv_w;ac_full=ac_sum*inv_w;bc_full=bc_sum*inv_w;
+                }
             }
         }else
 #endif
