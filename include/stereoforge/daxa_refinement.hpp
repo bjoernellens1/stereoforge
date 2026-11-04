@@ -7,6 +7,8 @@ struct DaxaRefinementConfig {
     float prior_confidence_floor=.05f,max_coarse_span=2.f,lr_tolerance=1.f;
     bool subpixel=false;
     bool continuous_subpixel=false;
+    bool adaptive_tiles=false;
+    unsigned min_disparity_bound=0,max_disparity_bound=0;
     // Experimental: retain and read the two full-frame eyes without GPU packing.
     bool borrow_full_frame=false;
     bool ortho_hybrid=false;

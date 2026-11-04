@@ -88,14 +88,14 @@ void census(uint3 tid:SV_DispatchThreadID,uint3 gid:SV_GroupID,uint gidx:SV_Grou
 [shader("compute")][numthreads(64,1,1)]
 void match(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=2*n)return;uint eye=t/n,i=t%n,x=i%p.width,y=i/p.width,cn=p.coarse_width*p.coarse_height;
     // Half-pixel 2x/4x coordinates are exact binary32 fractions.
-    bool scale4=(p.width==p.coarse_width*4u),hybrid=(p.subpixel&2u)!=0,ultra=(p.subpixel&16u)!=0,skip_diag=(p.subpixel&4u)!=0,repair=(p.subpixel&8u)!=0;
+    bool scale4=(p.width==p.coarse_width*4u),hybrid=(p.subpixel&2u)!=0,ultra=(p.subpixel&16u)!=0,skip_diag=(p.subpixel&4u)!=0,repair=(p.subpixel&8u)!=0,adaptive_tiles=(p.subpixel&64u)!=0;
     SF_PRECISE float step=scale4?.25f:.5f,mult=scale4?4.f:2.f;
-    SF_PRECISE float cx=(float(x)+.5f)*step-.5f,cy=(float(y)+.5f)*step-.5f;int ix=int(floor(cx)),iy=int(floor(cy));SF_PRECISE float wx=cx-float(ix),wy=cy-float(iy);SF_PRECISE float weights[4]={(1.f-wx)*(1.f-wy),wx*(1.f-wy),(1.f-wx)*wy,wx*wy};SF_PRECISE float predicted=0,w_valid=0;float mn=3.402823466e38f,mx=-3.402823466e38f;uint reason=0;bool boundary_repair=false,hole_fallback=false,expanded_sweep=false;
+    SF_PRECISE float cx=(float(x)+.5f)*step-.5f,cy=(float(y)+.5f)*step-.5f;int ix=int(floor(cx)),iy=int(floor(cy));SF_PRECISE float wx=cx-float(ix),wy=cy-float(iy);SF_PRECISE float weights[4]={(1.f-wx)*(1.f-wy),wx*(1.f-wy),(1.f-wx)*wy,wx*wy};SF_PRECISE float predicted=0,w_valid=0;float mn=3.402823466e38f,mx=-3.402823466e38f,min_c_conf=1.f;uint reason=0,valid_taps=0;bool boundary_repair=false,hole_fallback=false,expanded_sweep=false;
     if(!hybrid){
         [unroll]for(uint tap=0;tap<4;++tap){if(weights[tap]==0)continue;int xx=ix+int(tap&1),yy=iy+int(tap>>1);if(xx<0||yy<0||xx>=int(p.coarse_width)||yy>=int(p.coarse_height)){reason|=REF_OUTSIDE;continue;}uint j=eye*cn+uint(yy)*p.coarse_width+uint(xx);float d=((float*)p.coarse[0])[j],confidence=((float*)p.coarse[1])[j];if(((uint*)p.coarse[2])[j]==0)reason|=REF_NO_PRIOR;if(!isfinite(d))reason|=REF_NONFINITE;if(confidence<p.prior_floor)reason|=REF_LOW_CONFIDENCE;if(isfinite(d)){if(d<0||d>float(p.disparities-1)*step)reason|=REF_OUTSIDE;mn=min(mn,d);mx=max(mx,d);predicted=predicted+d*weights[tap];}}
         if(mx-mn>p.max_span)reason|=REF_PRIOR_SPAN;
     }else{
-        [unroll]for(uint tap=0;tap<4;++tap){int xx=ix+int(tap&1),yy=iy+int(tap>>1);if(xx<0||yy<0||xx>=int(p.coarse_width)||yy>=int(p.coarse_height))continue;uint j=eye*cn+uint(yy)*p.coarse_width+uint(xx);float d=((float*)p.coarse[0])[j];if(((uint*)p.coarse[2])[j]!=0&&isfinite(d)&&d>=0&&d<=float(p.disparities-1)*step){SF_PRECISE float w=weights[tap]+.001f;predicted=predicted+d*w;w_valid=w_valid+w;mn=min(mn,d);mx=max(mx,d);}}
+        [unroll]for(uint tap=0;tap<4;++tap){int xx=ix+int(tap&1),yy=iy+int(tap>>1);if(xx<0||yy<0||xx>=int(p.coarse_width)||yy>=int(p.coarse_height))continue;uint j=eye*cn+uint(yy)*p.coarse_width+uint(xx);float d=((float*)p.coarse[0])[j],cc=((float*)p.coarse[1])[j];if(((uint*)p.coarse[2])[j]!=0&&isfinite(d)&&d>=0&&d<=float(p.disparities-1)*step){SF_PRECISE float w=weights[tap]+.001f;predicted=predicted+d*w;w_valid=w_valid+w;mn=min(mn,d);mx=max(mx,d);min_c_conf=min(min_c_conf,cc);++valid_taps;}}
         int rx=int(floor(cx+.5f)),ry=int(floor(cy+.5f));
         if(w_valid==0.f){[unroll]for(int dy=-1;dy<=1;++dy)[unroll]for(int dx=-1;dx<=1;++dx){int xx=rx+dx,yy=ry+dy;if(xx<0||yy<0||xx>=int(p.coarse_width)||yy>=int(p.coarse_height))continue;uint j=eye*cn+uint(yy)*p.coarse_width+uint(xx);float d=((float*)p.coarse[0])[j];if(((uint*)p.coarse[2])[j]!=0&&isfinite(d)&&d>=0&&d<=float(p.disparities-1)*step){predicted=predicted+d;w_valid=w_valid+1.f;mn=min(mn,d);mx=max(mx,d);}}}
         if(repair&&!ultra&&w_valid==0.f){
@@ -111,10 +111,17 @@ void match(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=
         }else reason|=REF_NO_PRIOR;
     }
     bool prior=reason==0;predicted=predicted*mult;if(!skip_diag){fplane(9)[t]=prior?predicted:refinement_invalid();uplane(10)[t]=uint(prior);}
+    uint* cen=uplane(24);uint* cval=uplane(25);
+    bool supported=cval[t]!=0;if(prior&&!supported)reason|=REF_UNSUPPORTED;
+    bool coarse_planar_pixel=false,precision_pixel=false;
+    if(adaptive_tiles&&prior&&supported){
+        coarse_planar_pixel=(valid_taps==4u&&min_c_conf>=.20f&&(mx-mn)<=.50f&&predicted<=56.f);
+        precision_pixel=!coarse_planar_pixel&&((mx-mn)>.75f||min_c_conf<.15f||predicted>64.f||boundary_repair||hole_fallback);
+    }
     int centre=0;uint lo=0,hi=0xffffffff;
     if(prior){
         centre=int(floor(predicted+.5f));
-        int rad=int(p.radius);
+        int rad=coarse_planar_pixel?1:(precision_pixel?max(int(p.radius),3):int(p.radius));
         if(boundary_repair){
             int lo_b=max(int(floor(mn*mult))-1,centre-4);
             int hi_b=min(int(floor(mx*mult+1.f))+1,centre+4);
@@ -124,15 +131,21 @@ void match(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=
             lo=uint(max(0,centre-rad));
             hi=uint(min(int(p.disparities)-1,centre+rad));
         }
+        uint min_d_b=(p.planar_cfg>>16)&0xffu,max_d_b=(p.planar_cfg>>24)&0xffu;
+        if(min_d_b>0u)lo=max(lo,min_d_b);
+        if(max_d_b>0u)hi=min(hi,max_d_b);
+        if(adaptive_tiles){
+            if(eye==0)hi=min(hi,x);
+            else hi=min(hi,(p.width-1u)-x);
+        }
     }
     if(!skip_diag){uplane(11)[t]=lo;uplane(12)[t]=hi;}
-    uint* cen=uplane(24);uint* cval=uplane(25);
     uint best=0xffffffff,second=0xffffffff,third=0xffffffff,winner=0xffffffff,count=0,work=0,minus=0xffffffff,plus=0xffffffff;
-    uint prev_cost=0xffffffff;bool supported=cval[t]!=0;if(prior&&!supported)reason|=REF_UNSUPPORTED;
+    uint prev_cost=0xffffffff;
     bool plateau_tie=false,strict_reject=false;
-    if(prior&&supported){
+    if(prior&&supported&&lo<=hi){
         uint c0=cen[t],c_l=c0,c_r=c0,c_u=c0,c_d=c0;
-        bool full_5tap=hybrid&&!(ultra&&eye!=0);
+        bool full_5tap=hybrid&&!(ultra&&eye!=0)&&!coarse_planar_pixel;
         if(full_5tap){
             c_l=(x>0&&cval[t-1]!=0)?cen[t-1]:c0;
             c_r=(x+1<p.width&&cval[t+1]!=0)?cen[t+1]:c0;
@@ -175,7 +188,7 @@ void match(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=
             }else{
                 for(uint d=lo;d<=hi;++d){uint cost=0xffffffff;int xx=int(x)+(eye!=0?int(d):-int(d));if(xx>=0&&xx<int(p.width)){uint j=other_row+uint(xx);if(cval[j]!=0){
                     uint base=countbits(c0^cen[j]);
-                    if(!hybrid){cost=base;}else if(ultra&&eye!=0){cost=6u*base+uint(abs(int(d)-centre));}else{
+                    if(!hybrid){cost=base;}else if(coarse_planar_pixel||(ultra&&eye!=0)){cost=6u*base+uint(abs(int(d)-centre));}else{
                         uint m_l=(xx>0&&cval[j-1]!=0)?countbits(c_l^cen[j-1]):base;
                         uint m_r=(xx+1<int(p.width)&&cval[j+1]!=0)?countbits(c_r^cen[j+1]):base;
                         uint m_u=(y>0&&cval[j-p.width]!=0)?countbits(c_u^cen[j-p.width]):base;
@@ -205,7 +218,7 @@ void match(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=
     }
     uint eff_margin=plateau_tie?p.min_margin:(second-best);
     uint eff_second=plateau_tie?(best+p.min_margin):second;
-    bool unique=count>=2&&eff_margin>=p.min_margin&&!strict_reject;if(count<2)reason|=REF_TOO_FEW;if(count>=2&&!unique)reason|=REF_AMBIGUOUS;bool restricted=!hybrid&&count>0&&((winner==lo&&lo>0)||(winner==hi&&hi+1<p.disparities));if(restricted)reason|=REF_RESTRICTED;if(count>0&&(winner==0||winner+1==p.disparities))reason|=REF_GLOBAL;bool valid=unique&&!restricted;
+    bool unique=(count>=2&&eff_margin>=p.min_margin&&!strict_reject);if(count<2)reason|=REF_TOO_FEW;if(count>=2&&!unique)reason|=REF_AMBIGUOUS;bool restricted=!hybrid&&count>0&&((winner==lo&&lo>0)||(winner==hi&&hi+1<p.disparities));if(restricted)reason|=REF_RESTRICTED;if(count>0&&(winner==0||winner+1==p.disparities))reason|=REF_GLOBAL;bool valid=unique&&!restricted;
     float d=float(winner),confidence=0;bool applied=false;
     if(valid){
         confidence=clamp(float(eff_margin)/float(max(eff_second,1u)),0.f,1.f);
@@ -217,14 +230,16 @@ void match(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=
                 offset=denominator!=0?clamp(numerator/denominator,-1.f,1.f):0.f;
                 applied=true;
             }
-            if((p.subpixel&32u)!=0){
+            if((!ultra&&((p.subpixel&32u)!=0||precision_pixel||coarse_planar_pixel))||(ultra&&(p.subpixel&32u)!=0&&!adaptive_tiles)){
                 int s_dir=eye!=0?1:-1;
                 int xr=int(x)+s_dir*int(winner);
                 if(x>=2u&&x+2u<p.width&&y>=1u&&y+1u<p.height&&xr>=2&&xr+2<int(p.width)){
                     uint* gray_own=p.borrowed[0]!=0?(uint*)p.borrowed[eye]:uplane(27)+eye*n;
                     uint* gray_oth=p.borrowed[0]!=0?(uint*)p.borrowed[1u-eye]:uplane(27)+(1u-eye)*n;
+                    int dy_lim=(coarse_planar_pixel&&(p.subpixel&32u)==0)?0:1;
+                    SF_PRECISE float inv_n=(dy_lim==0)?0.3333333333f:0.1111111111f;
                     SF_PRECISE float sum_l=0.f,sum_m2=0.f,sum_m1=0.f,sum_0=0.f,sum_p1=0.f,sum_p2=0.f,gx_energy=0.f;
-                    [unroll]for(int dy=-1;dy<=1;++dy){
+                    for(int dy=-dy_lim;dy<=dy_lim;++dy){
                         uint row_l=uint(int(y)+dy)*p.width;
                         uint row_r=uint(int(y)+dy)*p.width;
                         SF_PRECISE float gl_m1=float(gray_own[row_l+uint(int(x)-1)]);
@@ -242,10 +257,9 @@ void match(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=
                             sum_l=sum_l+lv;sum_m2=sum_m2+rv_m;sum_m1=sum_m1+hm;sum_0=sum_0+rv_0;sum_p1=sum_p1+hp;sum_p2=sum_p2+rv_p;
                         }
                     }
-                    SF_PRECISE float inv9=0.1111111111f;
-                    SF_PRECISE float mean_l=sum_l*inv9,mean_m2=sum_m2*inv9,mean_m1=sum_m1*inv9,mean_0=sum_0*inv9,mean_p1=sum_p1*inv9,mean_p2=sum_p2*inv9;
+                    SF_PRECISE float mean_l=sum_l*inv_n,mean_m2=sum_m2*inv_n,mean_m1=sum_m1*inv_n,mean_0=sum_0*inv_n,mean_p1=sum_p1*inv_n,mean_p2=sum_p2*inv_n;
                     SF_PRECISE float e_m2=0.f,e_m1=0.f,e_0=0.f,e_p1=0.f,e_p2=0.f;
-                    [unroll]for(int dy2=-1;dy2<=1;++dy2){
+                    for(int dy2=-dy_lim;dy2<=dy_lim;++dy2){
                         uint row_l=uint(int(y)+dy2)*p.width;
                         uint row_r=uint(int(y)+dy2)*p.width;
                         [unroll]for(int dx2=-1;dx2<=1;++dx2){
@@ -270,12 +284,12 @@ void match(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=
                     else if(e_p1<ec){base_off=.5f;el=e_0;ec=e_p1;er=e_p2;}
                     SF_PRECISE float p_denom=(el-2.f*ec)+er;
                     SF_PRECISE float p_num=.25f*(el-er);
-                    if(gx_energy>12.f&&p_denom>1e-3f&&ec<=el&&ec<=er){
+                    if(gx_energy>4.f&&p_denom>1e-3f&&ec<=el&&ec<=er){
                         SF_PRECISE float p_off=clamp(base_off+clamp(p_num/p_denom,-.25f,.25f),-.85f,.85f);
                         if(!applied){
                             offset=p_off;applied=true;
                         }else{
-                            SF_PRECISE float wp=(minus==plus||eff_margin<=8u)?.75f:.55f;
+                            SF_PRECISE float wp=coarse_planar_pixel?.90f:((minus==plus||eff_margin<=8u)?.75f:.55f);
                             SF_PRECISE float wc=1.f-wp;
                             offset=clamp((wc*offset)+(wp*p_off),-1.f,1.f);
                         }
@@ -290,6 +304,7 @@ void match(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=
 }
 [shader("compute")][numthreads(64,1,1)]
 void lr(uint3 tid:SV_DispatchThreadID){
+    if((p.subpixel&84u)==84u)return;
     uint n=p.width*p.height,t=tid.x;if(t>=2*n)return;
     bool skip_r=((p.subpixel&20u)==20u);
     if(skip_r&&t>=n)return;
@@ -313,15 +328,32 @@ void metric(uint3 tid:SV_DispatchThreadID){
     uint n=p.width*p.height,t=tid.x;if(t>=2*n)return;
     bool skip_r=((p.subpixel&20u)==20u);
     if(skip_r&&t>=n)return;
-    float z=refinement_invalid(),d=fplane(0)[t];
-    bool valid=uplane(2)[t]!=0&&d>0&&(d-p.principal_offset)>0;
+    float d=0.f,c_in=0.f;bool lr_valid=false;
+    if((p.subpixel&84u)==84u){
+        uint eye=t/n,i=t%n,target=0;
+        d=fplane(21)[t];
+        if(uplane(23)[t]!=0&&refinement_target(p.width,i%p.width,d,eye!=0,target)){
+            uint j=(1-eye)*n+(i/p.width)*p.width+target;
+            lr_valid=observation_lr(d,fplane(21)[j],uplane(23)[t],uplane(23)[j],p.lr_tolerance);
+        }
+        c_in=lr_valid?fplane(22)[t]:0.f;
+        fplane(0)[t]=lr_valid?d:refinement_invalid();
+        fplane(1)[t]=c_in;
+        uplane(2)[t]=uint(lr_valid);
+    }else{
+        d=fplane(0)[t];
+        c_in=fplane(1)[t];
+        lr_valid=(uplane(2)[t]!=0);
+    }
+    float z=refinement_invalid();
+    bool valid=lr_valid&&d>0&&(d-p.principal_offset)>0;
     if(valid){
         SF_PRECISE float numerator=p.fx*p.baseline;
         SF_PRECISE float denominator=d-p.principal_offset;
         z=numerator/denominator;
         valid=isfinite(z)&&z>0;
     }
-    float z_out=valid?z:refinement_invalid(),c_out=valid?fplane(1)[t]:0;
+    float z_out=valid?z:refinement_invalid(),c_out=valid?c_in:0;
     uint v_out=uint(valid),prov_out=valid?SF_PROVENANCE_STEREO:0u;
     uint2 sid=valid?uint2(p.source_low,p.source_high):uint2(0xffffffff,0xffffffff);
     if(!skip_r||p.completed[0]==0){

@@ -5,11 +5,34 @@
 #include <string_view>
 namespace stereoforge {
 struct DaxaTemporalConfig {
-    unsigned slots=2,max_contributors=4,max_reuses=4;
+    unsigned slots=2,max_contributors=4,max_reuses=4,max_disparity=128;
     int64_t max_age_ns=200000000;
     float relative_depth_tolerance=.03f,confidence_floor=.05f;
     bool inverse_depth_fusion=false,disocclusion_guard=false,temporal_stereo_research=false,left_eye_only=false;
     void validate()const;
+};
+class DaxaLeftObservationFrame {
+    std::shared_ptr<DaxaFoundation> context_;
+    std::shared_ptr<void> owner_,lease_;
+    std::shared_ptr<const DaxaRectification> maps_;CaptureLease source_;
+    const uint64_t* live_generation_=nullptr;
+    uint64_t generation_=0,submit_=0;uint32_t width_=0,height_=0;
+    std::array<daxa::BufferId,6> planes_{};
+    std::array<DaxaObservationImageView,2> images_{};
+    DaxaObservationAncestryView ancestry_;
+    void validate()const;
+    friend class DaxaTemporal;
+public:
+    DaxaLeftObservationFrame()=default;
+    explicit operator bool()const{return bool(context_&&owner_&&lease_);}
+    uint32_t width()const{validate();return width_;}uint32_t height()const{validate();return height_;}
+    uint32_t layers()const{validate();return 1;}
+    uint64_t generation()const{validate();return generation_;}uint64_t submit_ticket()const{validate();return submit_;}
+    CaptureLease source()const{validate();return source_;}
+    daxa::BufferId buffer(DaxaObservationPlane p)const;
+    size_t size_bytes(DaxaObservationPlane p)const;
+    DaxaObservationImageView image(unsigned i)const;
+    DaxaObservationAncestryView ancestry()const{validate();return ancestry_;}
 };
 struct DaxaTimedRigPose {
     std::array<double,16> world_from_rig{};
@@ -45,7 +68,7 @@ public:
         Frame& operator=(Frame)noexcept;explicit operator bool()const{return bool(owner_&&slot_);}
         void wait()const;bool ready()const;
         uint32_t width()const;uint32_t height()const;uint64_t generation()const;uint64_t context_id()const;uint64_t submit_ticket()const;
-        DaxaObservationFrame observations()const;DaxaObservationAncestryView ancestry()const;
+        DaxaObservationFrame observations()const;DaxaLeftObservationFrame left_observations()const;DaxaObservationAncestryView ancestry()const;
         DaxaTemporalTiming timings()const;
     };
     DaxaTemporal(std::shared_ptr<DaxaFoundation>,DaxaDepthPipeline::Frame const& prototype,DaxaTemporalConfig={});

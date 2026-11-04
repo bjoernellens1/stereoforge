@@ -1077,6 +1077,9 @@ class SlangCpuRefinementBackend:
         min_margin: int = 1,
         subpixel: bool = True,
         continuous_subpixel: bool = False,
+        adaptive_tiles: bool = False,
+        min_disparity_bound: int = 0,
+        max_disparity_bound: int = 0,
         ortho_hybrid: bool = True,
         fast_mode: bool = False,
         ultra_fast: bool = False,
@@ -1153,6 +1156,7 @@ class SlangCpuRefinementBackend:
                 | (8 if selective_repair else 0)
                 | (16 if ultra_fast else 0)
                 | (32 if continuous_subpixel else 0)
+                | (64 if adaptive_tiles else 0)
             )
             params.prior_floor = prior_floor
             params.max_span = max_span
@@ -1167,6 +1171,8 @@ class SlangCpuRefinementBackend:
                 | (256 if planar_coarse_affine else 0)
                 | (512 if planar_ray_crossing_guard else 0)
                 | (1024 if planar_coarse_lr_guard else 0)
+                | ((min_disparity_bound & 0xFF) << 16)
+                | ((max_disparity_bound & 0xFF) << 24)
             )
             params.planar_coarse_lr_tol = planar_coarse_lr_tol
             params.planar_patch_luma_tol = planar_patch_luma_tol
@@ -1198,6 +1204,8 @@ class SlangCpuRefinementBackend:
                 outputs[6][:n] = np.where(meas_mask, 1, 0).astype(np.uint32)
 
             raw_result = {
+                "evaluated_candidates": outputs[19],
+                "subpixel_applied": outputs[20],
                 "census": outputs[24],
                 "census_validity": outputs[25],
                 "raw_disparity": outputs[21],
@@ -1242,6 +1250,9 @@ class SlangCpuRefinementBackend:
         radius: int = 2,
         subpixel: bool = True,
         continuous_subpixel: bool = False,
+        adaptive_tiles: bool = False,
+        min_disparity_bound: int = 0,
+        max_disparity_bound: int = 0,
         ortho_hybrid: bool = True,
         fast_mode: bool = True,
         ultra_fast: bool = True,
@@ -1454,6 +1465,7 @@ class SlangCpuRefinementBackend:
                 | (8 if selective_repair else 0)
                 | (16 if ultra_fast else 0)
                 | (32 if continuous_subpixel else 0)
+                | (64 if adaptive_tiles else 0)
             )
             ref_p.prior_floor = 0.05
             ref_p.max_span = 2.0
@@ -1463,7 +1475,14 @@ class SlangCpuRefinementBackend:
             ref_p.principal_offset = principal_offset
             ref_p.source_low = 1
             ref_p.source_high = 0
-            ref_p.planar_cfg = 10 | 256 | 512 | 1024
+            ref_p.planar_cfg = (
+                10
+                | 256
+                | 512
+                | 1024
+                | ((min_disparity_bound & 0xFF) << 16)
+                | ((max_disparity_bound & 0xFF) << 24)
+            )
             ref_p.planar_coarse_lr_tol = 2.0
             ref_p.planar_patch_luma_tol = 12.0
             ref_p.planar_max_rmse = 0.65
@@ -1510,6 +1529,8 @@ class SlangCpuRefinementBackend:
                 outputs[6][:n_t] = np.where(meas_mask, 1, 0).astype(np.uint32)
 
             raw_result = {
+                "evaluated_candidates": outputs[19],
+                "subpixel_applied": outputs[20],
                 "census": outputs[24],
                 "census_validity": outputs[25],
                 "raw_disparity": outputs[21],
@@ -1528,6 +1549,7 @@ class SlangCpuRefinementBackend:
                 "completed_provenance": completed[3] if planar_recovery else outputs[6],
                 "completed_disparity": completed[6] if planar_recovery else outputs[0],
                 "coarse_disparity": ws["c_lr_disp"],
+                "coarse_confidence": ws["c_lr_conf"],
                 "coarse_validity": ws["c_lr_val"],
                 "rectified_left": ws["rect_t_l"],
                 "rectified_right": ws["rect_t_r"],

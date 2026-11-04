@@ -1,6 +1,9 @@
 #include <stereoforge/detail/daxa_temporal_state.hpp>
 #include <stereoforge/daxa_temporal_wip_adapters.hpp>
+#include <algorithm>
+#include <iomanip>
 #include <iostream>
+#include <numeric>
 #include <stereoforge/daxa_view.hpp>
 #include <limits>
 #include <type_traits>
@@ -43,12 +46,16 @@ static void gpu_contracts(){
         DaxaRefinementConfig rcfg;rcfg.disparities=8;rcfg.subpixel=true;rcfg.continuous_subpixel=true;rcfg.planar_recovery=true;
         DaxaRefinement ref(context,high,coarse,rcfg);
         auto ref_frame=ref.process(coarse);
-        DaxaTemporalConfig tcfg_full;tcfg_full.inverse_depth_fusion=true;tcfg_full.disocclusion_guard=true;tcfg_full.temporal_stereo_research=true;
+        DaxaTemporalConfig tcfg_full;tcfg_full.inverse_depth_fusion=true;tcfg_full.disocclusion_guard=true;tcfg_full.temporal_stereo_research=true;tcfg_full.max_disparity=192;
         DaxaTemporalConfig tcfg_left=tcfg_full;tcfg_left.left_eye_only=true;
         DaxaTemporal temporal_full(context,ref_frame,tcfg_full);
         DaxaTemporal temporal_left(context,ref_frame,tcfg_left);
         check(temporal_left.requested_buffer_bytes()<temporal_full.requested_buffer_bytes());
         auto out1=temporal_left.process(ref_frame,pose_for(1),true);out1.wait();
+        reject([&]{out1.observations();});
+        auto left_obs=out1.left_observations();
+        check(left_obs.layers()==1&&left_obs.width()==12&&left_obs.height()==10&&left_obs.size_bytes(DaxaObservationPlane::Depth)==12*10*4&&left_obs.size_bytes(DaxaObservationPlane::SourceIds)==12*10*8);
+        left_obs={};
         auto rb1=temporal_left.readback(out1);
         check(rb1.depth.size()==12*10&&rb1.provenance.size()==12*10);
         out1={};ref_frame={};coarse={};temporal_left.collect();ref.collect();depth.collect();
@@ -65,6 +72,173 @@ static void gpu_contracts(){
         check(temporal_left.completed_source_retirements()==2);
     }
     check(context->validation_errors.load()==0);context->close();check(context->validation_errors.load()==0);
+}
+static void benchmark_v12_json(){
+    auto context=std::make_shared<DaxaFoundation>(false);
+    {
+    auto make_maps=[](unsigned cw,unsigned ch,unsigned scale){
+        DaxaRectification c;c.eye_width=1280;c.source_height=720;c.stride_bytes=5120;c.width=cw*scale;c.height=ch*scale;
+        c.original_identity="raw";c.rectified_identity=scale==1?"coarse":"target";
+        DaxaRectifiedGeometry g;g.original_identity=c.original_identity;g.rectified_identity=c.rectified_identity;
+        double f=260.0*scale,cx=cw*0.5*scale-0.5,cy=ch*0.5*scale-0.5;
+        for(auto& eye:g.original.eyes)eye={1280,720,1040.0,1040.0,639.5,359.5,{}};
+        for(auto& eye:g.rectified.eyes)eye={c.width,c.height,f,f,cx,cy,{}};
+        g.original.right_to_left=g.rectified.right_to_left={1,0,0,.12,0,1,0,0,0,0,1,0,0,0,0,1};
+        g.R1=g.R2={1,0,0,0,1,0,0,0,1};
+        g.P1={f,0,cx,0,0,f,cy,0,0,0,1,0};g.P2={f,0,cx,-f*.12,0,f,cy,0,0,0,1,0};c.geometry=g;
+        for(unsigned eye=0;eye<2;++eye)for(unsigned y=0;y<c.height;++y)for(unsigned x=0;x<c.width;++x){
+            c.maps[eye*2].push_back(float((x-cx)/f*1040.0+639.5));
+            c.maps[eye*2+1].push_back(float((y-cy)/f*1040.0+359.5));
+        }
+        return c;
+    };
+    auto low=make_maps(320,180,1),high=make_maps(320,180,4);
+    auto make_src=[&](uint64_t id,int shift_fg){
+        auto c=std::make_shared<CaptureFrame>();c->source_width=2560;c->height=720;c->stride_bytes=5120;
+        c->frame_id=id;c->calibration_identity="raw";c->device_identity="zed2-gpu-bench";c->host_clock_domain="steady";c->host_ingress_timestamp_ns=id*16666667ull;
+        c->packed_yuyv.resize(size_t(c->stride_bytes)*c->height);
+        for(unsigned y=0;y<720;++y){
+            uint8_t* row=c->packed_yuyv.data()+size_t(y)*c->stride_bytes;
+            for(unsigned x=0;x<1280;++x){
+                bool in_fg=(y>=180&&y<540&&int(x)>=360+shift_fg&&int(x)<680+shift_fg);
+                unsigned disp=in_fg?32u:12u;
+                unsigned src_x=in_fg?unsigned(int(x)-shift_fg):x;
+                uint32_t coarse_pat=((src_x/8u)*47u+(y/8u)*59u)^((src_x/4u)*29u+(y/4u)*37u);
+                uint32_t fine_pat=((src_x/2u)*19u+(y/2u)*23u)^(src_x*13u+y*7u);
+                uint8_t val=uint8_t(30u+((coarse_pat+fine_pat)%190u));
+                row[x*2]=val;row[x*2+1]=128u;
+                int rx=int(x)-int(disp);
+                if(rx>=0&&rx<1280){row[(1280+rx)*2]=val;row[(1280+rx)*2+1]=128u;}
+            }
+        }
+        return c;
+    };
+    auto s0=make_src(1,0),s1=make_src(2,48);
+    DaxaDepthConfig dcfg{{320,180,32,4,8,32,true,true},1.f,2,32};
+    dcfg.stereo_schedule=DaxaDepthStereoSchedule::Hierarchical1to8Selective1to4;
+    DaxaDepthPipeline depth(low,dcfg,context,s0);
+    DaxaPreprocess full_pre(high,2,context);
+    auto c0=depth.enqueue(s0);
+    auto f0=full_pre.enqueue(s0);
+    DaxaRefinementConfig rcfg;rcfg.disparities=128;rcfg.radius=2;rcfg.subpixel=true;rcfg.ortho_hybrid=true;rcfg.fast_mode=true;rcfg.ultra_fast=true;rcfg.allow_derived_coarse=true;rcfg.planar_recovery=true;rcfg.continuous_subpixel=true;
+    DaxaRefinement ref_p0(context,high,c0,rcfg);
+    DaxaRefinementConfig rcfg_v13=rcfg;rcfg_v13.adaptive_tiles=true;rcfg_v13.min_disparity_bound=4;rcfg_v13.max_disparity_bound=96;
+    DaxaRefinement ref_v13(context,high,c0,rcfg_v13);
+    DaxaRefinementConfig rcfg_meas_v11=rcfg;rcfg_meas_v11.planar_recovery=false;rcfg_meas_v11.borrow_full_frame=true;rcfg_meas_v11.continuous_subpixel=false;
+    DaxaRefinement ref_meas_v11(context,c0,f0,rcfg_meas_v11);
+    DaxaRefinementConfig rcfg_meas_v13=rcfg_meas_v11;rcfg_meas_v13.adaptive_tiles=true;rcfg_meas_v13.min_disparity_bound=4;rcfg_meas_v13.max_disparity_bound=96;
+    DaxaRefinement ref_meas_v13(context,c0,f0,rcfg_meas_v13);
+    auto rf0=ref_p0.process(c0);
+    DaxaTemporalConfig tcfg_full;tcfg_full.inverse_depth_fusion=true;tcfg_full.disocclusion_guard=true;tcfg_full.temporal_stereo_research=true;tcfg_full.max_disparity=128;
+    DaxaTemporalConfig tcfg_left=tcfg_full;tcfg_left.left_eye_only=true;
+    DaxaTemporalConfig tcfg_unguarded=tcfg_left;tcfg_unguarded.disocclusion_guard=false;tcfg_unguarded.temporal_stereo_research=false;
+    DaxaTemporal temp_full(context,rf0,tcfg_full);
+    DaxaTemporal temp_left(context,rf0,tcfg_left);
+    DaxaTemporal temp_unguarded(context,rf0,tcfg_unguarded);
+    uint64_t bytes_full=temp_full.requested_buffer_bytes(),bytes_left=temp_left.requested_buffer_bytes();
+    rf0.wait();f0.wait();rf0={};f0={};c0={};ref_p0.collect();full_pre.collect_completed_sources();depth.collect();
+
+    // 1. Measure native GPU moving-object wake ghosting (frame 1 -> frame 2 with +48px foreground shift)
+    // Foreground disp=32 -> z = 1040*0.12/32 = 3.90m; Background disp=12 -> z = 1040*0.12/12 = 10.40m
+    auto pose_t=[](uint64_t id){return DaxaTimedRigPose{{1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1},int64_t(id*16666667ull),"steady"};};
+    auto ca=depth.enqueue(s0);auto rfa=ref_p0.process(ca);
+    auto ug1=temp_unguarded.process(rfa,pose_t(1),true);ug1.wait();
+    auto gd1=temp_left.process(rfa,pose_t(1),true);gd1.wait();
+    auto rb_f1=temp_left.readback(gd1);
+    ug1={};gd1={};rfa={};ca={};temp_unguarded.collect();temp_left.collect();ref_p0.collect();depth.collect();
+
+    auto cb=depth.enqueue(s1);auto rfb=ref_p0.process(cb);
+    auto ug2=temp_unguarded.process(rfb,pose_t(2),true);ug2.wait();
+    auto gd2=temp_left.process(rfb,pose_t(2),true);gd2.wait();
+    auto rb_ug2=temp_unguarded.readback(ug2);
+    auto rb_gd2=temp_left.readback(gd2);
+    auto rb_ref2=ref_p0.readback(rfb);
+    ug2={};gd2={};rfb={};cb={};temp_unguarded.collect();temp_left.collect();ref_p0.collect();depth.collect();
+
+    // Wake region: y in [190, 530), x in [364, 398) where foreground was at t=1 (disp=32, z=3.90m) and moved to [408, 728) at t=2 (true bg disp=12, z=10.40m)
+    unsigned wake_total=0,wake_ghost_ug=0,wake_ghost_gd=0,wake_ghost_sf=0;
+    for(unsigned y=190;y<530;++y)for(unsigned x=364;x<398;++x){
+        size_t idx=size_t(y)*1280+x;
+        if(rb_f1.validity[idx]!=0&&rb_f1.depth[idx]<6.0f){
+            ++wake_total;
+            if(rb_ug2.validity[idx]!=0&&rb_ug2.depth[idx]<6.0f)++wake_ghost_ug;
+            if(rb_gd2.validity[idx]!=0&&rb_gd2.depth[idx]<6.0f)++wake_ghost_gd;
+            if(rb_ref2.metric_validity[idx]!=0&&rb_ref2.depth[idx]<6.0f)++wake_ghost_sf;
+        }
+    }
+
+    // 2. Measure native GPU p50/p95/p99 timings across 40 timed frames (after 8 warmup frames)
+    temp_left.reset();
+    constexpr unsigned warmup=8,frames=40;
+    std::vector<double> t_clear,t_z,t_owner,t_fuse,t_temp_total,t_ref_p0,t_ref_v13,t_chain_p0,t_chain_v13,t_meas_v11,t_meas_v13;
+    for(unsigned i=0;i<warmup+frames;++i){
+        uint64_t fid=10+i;
+        s0->frame_id=fid;s0->host_ingress_timestamp_ns=fid*16666667ull;
+        auto cf=depth.enqueue(s0);
+        auto rf_p0=ref_p0.process(cf);
+        auto tf=temp_left.process(rf_p0,pose_t(fid),true);
+        tf.wait();
+        auto dt=cf.timings();
+        auto tt=tf.timings();
+        auto rt_p0=rf_p0.timings();
+        tf={};rf_p0={};
+        temp_left.collect();ref_p0.collect();
+        auto rf_13=ref_v13.process(cf);
+        rf_13.wait();
+        auto rt_13=rf_13.timings();
+        rf_13={};ref_v13.collect();
+        auto ff=full_pre.enqueue(s0);
+        auto rm_11=ref_meas_v11.process(cf,ff);
+        rm_11.wait();
+        auto rt_m11=rm_11.timings();
+        rm_11={};ref_meas_v11.collect();
+        auto rm_13=ref_meas_v13.process(cf,ff);
+        rm_13.wait();
+        auto rt_m13=rm_13.timings();
+        rm_13={};ff={};cf={};
+        ref_meas_v13.collect();full_pre.collect_completed_sources();depth.collect();
+        if(i>=warmup){
+            t_clear.push_back(tt.clear_gpu_ms);t_z.push_back(tt.z_gpu_ms);t_owner.push_back(tt.owner_gpu_ms);t_fuse.push_back(tt.fuse_gpu_ms);
+            t_temp_total.push_back(tt.total_gpu_ms);
+            t_ref_p0.push_back(rt_p0.total_gpu_ms);
+            t_ref_v13.push_back(rt_13.total_gpu_ms);
+            t_chain_p0.push_back(dt.combined_gpu_ms+rt_p0.total_gpu_ms+tt.total_gpu_ms);
+            t_chain_v13.push_back(dt.combined_gpu_ms+rt_13.total_gpu_ms+tt.total_gpu_ms);
+            t_meas_v11.push_back(dt.combined_gpu_ms+rt_m11.total_gpu_ms);
+            t_meas_v13.push_back(dt.combined_gpu_ms+rt_m13.total_gpu_ms);
+        }
+    }
+    auto stat=[](std::vector<double> v){
+        std::sort(v.begin(),v.end());
+        double mean=std::accumulate(v.begin(),v.end(),0.0)/double(v.size());
+        double p50=v[v.size()/2],p95=v[(95*v.size())/100],p99=v[(99*v.size())/100];
+        std::ostringstream os;os<<std::fixed<<std::setprecision(4)<<"{\"p50\":"<<p50<<",\"p95\":"<<p95<<",\"p99\":"<<p99<<",\"mean\":"<<mean<<"}";
+        return os.str();
+    };
+    double ug_pct=wake_total?100.0*double(wake_ghost_ug)/double(wake_total):0.0;
+    double gd_pct=wake_total?100.0*double(wake_ghost_gd)/double(wake_total):0.0;
+    double sf_pct=wake_total?100.0*double(wake_ghost_sf)/double(wake_total):0.0;
+    std::cout<<std::fixed<<std::setprecision(4)
+        <<"{\"requested_full_bytes\":"<<bytes_full
+        <<",\"requested_left_only_bytes\":"<<bytes_left
+        <<",\"native_gpu_wake_test\":{\"wake_pixels\":"<<wake_total
+        <<",\"single_frame_ghost_pct\":"<<sf_pct
+        <<",\"unguarded_temporal_ghost_pct\":"<<ug_pct
+        <<",\"guarded_temporal_ghost_pct\":"<<gd_pct<<"}"
+        <<",\"temporal_clear_gpu_ms\":"<<stat(t_clear)
+        <<",\"temporal_z_gpu_ms\":"<<stat(t_z)
+        <<",\"temporal_owner_gpu_ms\":"<<stat(t_owner)
+        <<",\"temporal_fuse_gpu_ms\":"<<stat(t_fuse)
+        <<",\"temporal_total_gpu_ms\":"<<stat(t_temp_total)
+        <<",\"refinement_p0_gpu_ms\":"<<stat(t_ref_p0)
+        <<",\"refinement_v13_adaptive_tiles_gpu_ms\":"<<stat(t_ref_v13)
+        <<",\"measured_depth_v11_p0_gpu_ms\":"<<stat(t_meas_v11)
+        <<",\"measured_depth_v13_adaptive_gpu_ms\":"<<stat(t_meas_v13)
+        <<",\"full_chain_p0_plus_temporal_gpu_ms\":"<<stat(t_chain_p0)
+        <<",\"full_chain_v13_plus_temporal_gpu_ms\":"<<stat(t_chain_v13)
+        <<"}\n";
+    }
+    context->close();
 }
 int main(int argc,char** argv){try{
     check(detail::temporal_tickets_complete(4,6,6));check(!detail::temporal_tickets_complete(4,7,6));check(!detail::temporal_tickets_complete(7,4,6));
@@ -84,5 +258,6 @@ int main(int argc,char** argv){try{
     DaxaTemporal::Frame empty;reject([&]{empty.observations();});reject([&]{empty.ancestry();});reject([&]{empty.wait();});reject([&]{empty.ready();});reject([&]{empty.timings();});auto copied=empty;copied=copied;copied=std::move(copied);check(!copied);
     {WipDummyRigPoseAdapter wip_pose{{0.002,0.0,0.0}};CaptureFrame cf;cf.frame_id=10;cf.host_ingress_timestamp_ns=100;cf.device_identity="zed2";cf.host_clock_domain="steady";auto p10=wip_pose.pose_for(cf);check(wip_pose.is_wip_dummy()&&p10.world_from_rig[3]==0.0);cf.frame_id=12;cf.host_ingress_timestamp_ns=200;auto p12=wip_pose.pose_for(cf);check(std::abs(p12.world_from_rig[3]-0.004)<1e-12);check(WipDummyMultiPairStereoRingAdapter::is_wip_dummy()&&WipDummyGpuSuperRes2xAdapter::is_wip_dummy());}
     if(argc>1&&std::string_view(argv[1])=="--gpu")gpu_contracts();
+    if(argc>1&&std::string_view(argv[1])=="--benchmark-v12-json"){benchmark_v12_json();return 0;}
     std::cout<<"Temporal CPU admission contracts passed\n";return 0;
 }catch(std::exception const& e){std::cerr<<e.what()<<'\n';return 1;}}

@@ -37,6 +37,7 @@ OUT_V12_JSON = ROOT / "benchmarks" / "results" / "v12_temporal_supersampling_qua
 
 PROVENANCE_STEREO = 1
 PROVENANCE_REPROJECTED = 2
+PROVENANCE_FUSED = 3
 PROVENANCE_PLANAR_INFERRED = 6
 PROVENANCE_TEMPORAL_PLANAR_INFERRED = 7
 
@@ -246,16 +247,18 @@ def run_daxa_temporal_step(
     dt_ns: int = 33_333_333,
     max_age_ns: int = 200_000_000,
     max_reuses: int = 4,
+    max_contributors: int = 4,
+    max_disparity: int = 128,
     relative_depth_tolerance: float = 0.03,
     confidence_floor: float = 0.05,
     inverse_depth_fusion: bool = True,
     disocclusion_guard: bool = True,
-    temporal_stereo_research: bool = False,
+    temporal_stereo_research: bool = True,
 ) -> dict[str, np.ndarray]:
     """Executes the exact P1/P2/P3 pose-warped `DaxaTemporal` semantics (`temporal.slang`) on left-eye full-res observations:
     - P1: 3D back-projection & forward splat with z-buffer visibility competition and 200 ms / 4-reuse bounds.
-    - P2: Calibrated inverse-depth uncertainty fusion (`rho = 1/z`, `w = conf / sigma_rho^2`) + foreground depth-ordering disocclusion guard + age-decayed confidence.
-    - P3: When `temporal_stereo_research=True` and `!current_valid`, uses `d_pred = fx * B / z_warp + cx_offset` to re-search current-frame Census descriptors in `[-2, +2]` with L-R consistency verification. Verified matches become fresh `Provenance::Stereo = 1` (`age_ns = 0`, `source_id = frame_id`); unverified historical fills strictly remain `Provenance::Reprojected = 2` (or `7`) with `age_ns > 0` and historical `source_id`.
+    - P2: Calibrated inverse-depth uncertainty fusion (`sig_c = 0.08 + 0.42*(1-conf)`, `var = sig^2 * z^2`) + 5x5/horizontal disocclusion wake guard + age-decayed confidence, marking fused outputs with `PROVENANCE_FUSED = 3` (or `7` for planar) and full sorted contributor ancestry.
+    - P3: When `temporal_stereo_research=True` and `!current_valid`, uses `d_pred = fx * B / z_warp + cx_offset` to re-search current-frame Census descriptors in `[-2, +2]` within `[1, max_disparity - 2]` with L-R consistency verification. Verified matches publish the current-frame stereo depth `z_new = fx * B / (d_sub - cx_offset)` as fresh `Provenance::Stereo = 1` (`age_ns = 0`, `source_id = frame_id`, `count = 1`); unverified historical fills strictly remain `Provenance::Reprojected = 2` (or `7`) with `age_ns > 0` and historical `source_id`.
     """
     n = width * height
     c_z = curr["completed_depth"][:n].reshape(height, width).astype(np.float32)
@@ -271,8 +274,12 @@ def run_daxa_temporal_step(
     out_prov = np.where(c_valid_mask, c_prov, 0).astype(np.uint32)
     out_sid = np.where(c_valid_mask, int(frame_id), -1).astype(np.int64)
     out_age = np.zeros((height, width), dtype=np.int64)
+    out_oldest = np.zeros((height, width), dtype=np.int64)
     out_reuse = np.zeros((height, width), dtype=np.uint32)
     out_count = np.where(c_valid_mask, 1, 0).astype(np.uint32)
+    out_origin = np.where(c_valid_mask, np.left_shift(np.uint32(1), np.minimum(c_prov, 31)), np.uint32(0)).astype(np.uint32)
+    out_ids = np.full((height, width, 4), -1, dtype=np.int64)
+    out_ids[:, :, 0] = np.where(c_valid_mask, int(frame_id), -1)
 
     if prev_state is None:
         return {
@@ -282,8 +289,11 @@ def run_daxa_temporal_step(
             "provenance": out_prov,
             "source_ids": out_sid,
             "age_ns": out_age,
+            "oldest_age_ns": out_oldest,
             "reuse": out_reuse,
             "count": out_count,
+            "contributor_ids": out_ids,
+            "origin_mask": out_origin,
             "promoted_stereo_pixels": np.zeros((height, width), dtype=bool),
         }
 
@@ -293,15 +303,25 @@ def run_daxa_temporal_step(
     h_prov = prev_state["provenance"]
     h_sid = prev_state["source_ids"]
     h_age = prev_state["age_ns"] + int(dt_ns)
+    h_oldest = prev_state.get("oldest_age_ns", prev_state["age_ns"]) + int(dt_ns)
     h_reuse = prev_state["reuse"] + 1
     h_count = prev_state["count"]
+    h_origin = prev_state.get("origin_mask", np.where(h_val, np.left_shift(np.uint32(1), np.minimum(h_prov, 31)), np.uint32(0)))
+    if "contributor_ids" in prev_state:
+        h_ids = prev_state["contributor_ids"]
+    else:
+        h_ids = np.full((height, width, 4), -1, dtype=np.int64)
+        h_ids[:, :, 0] = np.where(h_val, h_sid, -1)
 
+    cap = min(max(int(max_contributors), 1), 4)
     eligible = (
         h_val
         & (h_conf >= confidence_floor)
         & (h_age <= max_age_ns)
+        & (h_oldest <= max_age_ns)
         & (h_reuse <= max_reuses)
         & (h_count >= 1)
+        & (h_count <= cap)
     )
 
     yy, xx = np.indices((height, width), dtype=np.float32)
@@ -325,15 +345,17 @@ def run_daxa_temporal_step(
     warped_prov = np.zeros((height, width), dtype=np.uint32)
     warped_sid = np.full((height, width), -1, dtype=np.int64)
     warped_age = np.zeros((height, width), dtype=np.int64)
+    warped_oldest = np.zeros((height, width), dtype=np.int64)
     warped_reuse = np.zeros((height, width), dtype=np.uint32)
     warped_count = np.zeros((height, width), dtype=np.uint32)
+    warped_origin = np.zeros((height, width), dtype=np.uint32)
+    warped_ids = np.full((height, width, 4), -1, dtype=np.int64)
 
     ys, xs = np.nonzero(in_bounds)
     if ys.size > 0:
         zw_vals = Zw[ys, xs]
         up_vals = u_proj[ys, xs]
         vp_vals = v_proj[ys, xs]
-        # Sort by decreasing Zw so closer overwrites farther deterministically
         order = np.argsort(-zw_vals, kind="stable")
         ys_o = ys[order]
         xs_o = xs[order]
@@ -344,71 +366,121 @@ def run_daxa_temporal_step(
         warped_prov[vp_o, up_o] = h_prov[ys_o, xs_o]
         warped_sid[vp_o, up_o] = h_sid[ys_o, xs_o]
         warped_age[vp_o, up_o] = h_age[ys_o, xs_o]
+        warped_oldest[vp_o, up_o] = h_oldest[ys_o, xs_o]
         warped_reuse[vp_o, up_o] = h_reuse[ys_o, xs_o]
         warped_count[vp_o, up_o] = h_count[ys_o, xs_o]
+        warped_origin[vp_o, up_o] = h_origin[ys_o, xs_o]
+        warped_ids[vp_o, up_o] = h_ids[ys_o, xs_o]
 
     has_hist = np.isfinite(warped_z) & c_supp
+    max_disp_eff = max(int(max_disparity), 2)
+    max_d_search = max(1, max_disp_eff - 2)
 
-    # P2 Disocclusion guard:
-    # 1. If a neighbor within 2 px has current valid foreground depth closer than warped_z by > tolerance,
-    #    or if warped_z is behind a local foreground edge and current stereo was rejected due to occlusion,
-    #    check current-frame photometric consistency at `d_warp = fx * B / warped_z + cx_offset`.
+    # P2 Disocclusion & wake contradiction guard (matching `temporal.slang` 5x5 + horizontal wake + Census/LR check)
     if disocclusion_guard and np.any(has_hist):
-        # Local minimum of current valid depth in a 5x5 neighborhood catches foreground boundary disocclusions
-        c_z_fill = np.where(c_valid_mask, c_z, 1e6).astype(np.float32)
-        local_min_cz = cv2.erode(c_z_fill, np.ones((5, 5), dtype=np.uint8))
+        c_z_min_src = np.where(c_valid_mask, c_z, 1e6).astype(np.float32)
+        local_min_cz = cv2.erode(
+            c_z_min_src,
+            np.ones((5, 5), dtype=np.uint8),
+            borderType=cv2.BORDER_CONSTANT,
+            borderValue=1e6,
+        )
         fg_occluded = (local_min_cz < 1e5) & (warped_z > local_min_cz * (1.0 + 2.0 * relative_depth_tolerance))
-        # Also verify warped disparity does not violate current-frame luma/Census agreement with a foreground object
+
+        # Background wake contradiction: neighbors are significantly farther than warped_z with no local support at warped_z
+        c_z_max_src = np.where(c_valid_mask, c_z, -1.0).astype(np.float32)
+        local_max_cz = cv2.dilate(
+            c_z_max_src,
+            np.ones((9, 33), dtype=np.uint8),
+            borderType=cv2.BORDER_CONSTANT,
+            borderValue=-1.0,
+        )
+        same_surf = c_valid_mask & (np.abs(c_z - warped_z) <= 1.5 * relative_depth_tolerance * warped_z)
+        any_same_surf = cv2.dilate(same_surf.astype(np.uint8), np.ones((3, 3), dtype=np.uint8)) != 0
+        bg_wake_contradiction = (~c_valid_mask) & (local_max_cz > warped_z * (1.0 + 2.0 * relative_depth_tolerance)) & (~any_same_surf)
+        bg_wake_contradiction = cv2.dilate(bg_wake_contradiction.astype(np.uint8), np.ones((3, 5), dtype=np.uint8), borderType=cv2.BORDER_REPLICATE) != 0
+
         d_warp = (fx * baseline_m) / np.maximum(warped_z, 1e-4) + cx_offset
         xr_w = np.clip(np.rint(xx - d_warp).astype(np.int32), 0, width - 1)
-        # If the right-eye pixel at `xr_w` has a valid right-eye disparity belonging to a much closer foreground object,
-        # then `(y, x)` was disoccluded by that moving foreground object!
         raw_d_r = curr["raw_disparity"][n:].reshape(height, width)
         raw_v_r = curr["raw_validity"][n:].reshape(height, width) != 0
         d_r_at_warp = raw_d_r[yy.astype(np.int32), xr_w]
         v_r_at_warp = raw_v_r[yy.astype(np.int32), xr_w]
-        right_fg_occluding = v_r_at_warp & (d_r_at_warp > d_warp + 2.5)
-        # Also check 3x3 patch luma difference at `d_warp` so stale foreground ghosting over newly exposed background is rejected
+        right_lr_mismatch = v_r_at_warp & (np.abs(d_r_at_warp - d_warp) > 2.0)
         luma_l = curr["luma"][:n].reshape(height, width).astype(np.float32)
         luma_r = curr["luma"][n:].reshape(height, width).astype(np.float32)
         luma_r_warped = luma_r[yy.astype(np.int32), xr_w]
         mad_warp = cv2.boxFilter(np.abs(luma_l - luma_r_warped), cv2.CV_32F, (3, 3))
-        photometric_mismatch = (~c_valid_mask) & (mad_warp > 18.0)
-        has_hist = has_hist & (~fg_occluded) & (~right_fg_occluding) & (~photometric_mismatch)
+        photometric_mismatch = (~c_valid_mask) & (mad_warp > 12.0)
+        has_hist = has_hist & (~fg_occluded) & (~bg_wake_contradiction) & (~right_lr_mismatch) & (~photometric_mismatch)
 
     # Age decay for historical confidence
     age_ratio = np.clip(warped_age.astype(np.float32) / max(float(max_age_ns), 1.0), 0.0, 1.0)
     h_conf_eff = warped_conf * (1.0 - 0.35 * age_ratio)
+    has_hist = has_hist & (h_conf_eff >= confidence_floor)
 
-    # Case 1: Both current and historical valid -> fuse if within relative depth tolerance
+    # Case 1: Both current and historical valid -> fuse if within relative depth tolerance and disjoint contributors
     both = c_valid_mask & has_hist
-    agree = both & (np.abs(c_z - warped_z) <= relative_depth_tolerance * np.maximum(c_z, warped_z))
+    not_dup = np.all(warped_ids != int(frame_id), axis=-1)
+    agree = both & not_dup & (warped_count >= 1) & (warped_count < cap) & (np.abs(c_z - warped_z) <= relative_depth_tolerance * c_z)
     if np.any(agree):
         if inverse_depth_fusion:
-            # P2 calibrated inverse-depth fusion: rho = 1/z, sigma_rho = sigma_d / (fx * B)
-            rho_c = 1.0 / c_z
-            rho_h = 1.0 / warped_z
-            wc = np.maximum(c_conf, 1e-3)
-            wh = np.maximum(h_conf_eff, 1e-3) * (0.85 ** np.minimum(warped_reuse, 4))
-            rho_fused = (wc * rho_c + wh * rho_h) / (wc + wh)
+            # Exact calibrated inverse-depth uncertainty variance matching `temporal.slang` lines 178-190
+            sig_c = 0.08 + 0.42 * (1.0 - np.clip(c_conf, 0.0, 1.0))
+            sig_h = 0.08 + 0.42 * (1.0 - np.clip(warped_conf, 0.0, 1.0))
+            sig_pose = 0.06 * age_ratio
+            var_c = (sig_c * sig_c) * np.maximum(c_z * c_z, 1e-4)
+            var_h = (
+                (sig_h * sig_h) / np.minimum(np.maximum(warped_count.astype(np.float32), 1.0), 4.0)
+                + (sig_pose * sig_pose)
+            ) * np.maximum(warped_z * warped_z, 1e-4)
+            wc = 1.0 / np.maximum(var_c, 1e-6)
+            wh = 1.0 / np.maximum(var_h, 1e-6)
+            w_sum = wc + wh
+            rho_fused = (wc * (1.0 / c_z) + wh * (1.0 / warped_z)) / np.maximum(w_sum, 1e-6)
             z_fused = 1.0 / np.maximum(rho_fused, 1e-5)
-            conf_fused = np.clip((wc * c_conf + wh * h_conf_eff) / (wc + wh) + 0.05, 0.0, 1.0)
         else:
-            wc = c_conf
-            wh = warped_conf
-            z_fused = (wc * c_z + wh * warped_z) / np.maximum(wc + wh, 1e-5)
-            conf_fused = (wc * c_conf + wh * warped_conf) / np.maximum(wc + wh, 1e-5)
+            w_sum = np.maximum(c_conf + warped_conf, 1e-6)
+            low_z = np.minimum(c_z, warped_z)
+            high_z = np.maximum(c_z, warped_z)
+            w_num = np.where(c_z >= warped_z, c_conf, warped_conf)
+            z_fused = low_z + (high_z - low_z) * (w_num / w_sum)
+        low_z = np.minimum(c_z, warped_z)
+        high_z = np.maximum(c_z, warped_z)
+        z_fused = np.clip(z_fused, low_z, high_z)
+        conf_fused = np.maximum(c_conf, warped_conf)
+        fused_prov = np.where(
+            (c_prov == PROVENANCE_PLANAR_INFERRED)
+            | (warped_prov == PROVENANCE_PLANAR_INFERRED)
+            | (warped_prov == PROVENANCE_TEMPORAL_PLANAR_INFERRED),
+            PROVENANCE_TEMPORAL_PLANAR_INFERRED,
+            PROVENANCE_FUSED,
+        ).astype(np.uint32)
+
         out_z = np.where(agree, z_fused, out_z).astype(np.float32)
         out_conf = np.where(agree, conf_fused, out_conf).astype(np.float32)
+        out_prov = np.where(agree, fused_prov, out_prov).astype(np.uint32)
+        out_oldest = np.where(agree, np.maximum(out_age, warped_oldest), out_oldest).astype(np.int64)
         out_reuse = np.where(agree, warped_reuse, out_reuse).astype(np.uint32)
-        out_count = np.where(agree, np.minimum(warped_count + 1, 4), out_count).astype(np.uint32)
+        out_count = np.where(agree, warped_count + 1, out_count).astype(np.uint32)
+        out_origin = np.where(agree, out_origin | warped_origin, out_origin).astype(np.uint32)
+
+        ay, ax = np.nonzero(agree)
+        for yi, xi in zip(ay.tolist(), ax.tolist()):
+            hc_n = int(warped_count[yi, xi])
+            existing = [int(v) for v in warped_ids[yi, xi, :hc_n] if v >= 0]
+            merged = sorted(existing + [int(frame_id)])[:4]
+            row_ids = [-1, -1, -1, -1]
+            for k_idx, val_id in enumerate(merged):
+                row_ids[k_idx] = val_id
+            out_ids[yi, xi] = row_ids
 
     # Case 2: Missing current stereo (`~c_valid_mask`), valid historical (`has_hist`)
     missing_with_hist = (~c_valid_mask) & has_hist
     promoted_mask = np.zeros((height, width), dtype=bool)
 
     if temporal_stereo_research and np.any(missing_with_hist):
-        # P3: Re-search current-frame Census descriptors in `[-2, +2]` around `d_pred = fx * B / warped_z + cx_offset`
+        # P3: Re-search current-frame Census descriptors in `[-2, +2]` within `[1, max_disparity - 2]`
         cen_l = curr["census"][:n].reshape(height, width)
         cen_r = curr["census"][n:].reshape(height, width)
         cval_l = curr["census_validity"][:n].reshape(height, width) != 0
@@ -419,14 +491,18 @@ def run_daxa_temporal_step(
         d_pred = (fx * baseline_m) / np.maximum(warped_z, 1e-4) + cx_offset
         d_center = np.rint(d_pred).astype(np.int32)
 
-        ys_m, xs_m = np.nonzero(missing_with_hist & cval_l & (d_center >= 1))
+        ys_m, xs_m = np.nonzero(missing_with_hist & cval_l & (d_center >= 1) & (d_pred < float(max_disp_eff - 1)))
         for y_i, x_i in zip(ys_m.tolist(), xs_m.tolist()):
             dc = int(d_center[y_i, x_i])
             d_lo = max(1, dc - 2)
-            d_hi = min(127, x_i, dc + 2)
+            d_hi = min(max_d_search, x_i, dc + 2)
             if d_lo > d_hi:
                 continue
-            cl = np.uint32(cen_l[y_i, x_i])
+            cl = int(cen_l[y_i, x_i])
+            cl_l = int(cen_l[y_i, x_i - 1]) if (x_i > 0 and cval_l[y_i, x_i - 1]) else cl
+            cl_r = int(cen_l[y_i, x_i + 1]) if (x_i + 1 < width and cval_l[y_i, x_i + 1]) else cl
+            cl_u = int(cen_l[y_i - 1, x_i]) if (y_i > 0 and cval_l[y_i - 1, x_i]) else cl
+            cl_d = int(cen_l[y_i + 1, x_i]) if (y_i + 1 < height and cval_l[y_i + 1, x_i]) else cl
             best_c = 999
             second_c = 999
             best_d = dc
@@ -435,7 +511,12 @@ def run_daxa_temporal_step(
                 xr_i = x_i - cand
                 if not cval_r[y_i, xr_i]:
                     continue
-                hd = int(_popcount32(np.array([cl ^ np.uint32(cen_r[y_i, xr_i])], dtype=np.uint32))[0])
+                base = (cl ^ int(cen_r[y_i, xr_i])).bit_count()
+                ml = (cl_l ^ int(cen_r[y_i, xr_i - 1])).bit_count() if (xr_i > 0 and cval_r[y_i, xr_i - 1]) else base
+                mr = (cl_r ^ int(cen_r[y_i, xr_i + 1])).bit_count() if (xr_i + 1 < width and cval_r[y_i, xr_i + 1]) else base
+                mu = (cl_u ^ int(cen_r[y_i - 1, xr_i])).bit_count() if (y_i > 0 and cval_r[y_i - 1, xr_i]) else base
+                md = (cl_d ^ int(cen_r[y_i + 1, xr_i])).bit_count() if (y_i + 1 < height and cval_r[y_i + 1, xr_i]) else base
+                hd = 2 * base + ml + mr + mu + md
                 costs[cand] = hd
                 if hd < best_c:
                     second_c = best_c
@@ -443,37 +524,32 @@ def run_daxa_temporal_step(
                     best_d = cand
                 elif hd < second_c:
                     second_c = hd
-            if best_c <= 10 and second_c > best_c:
+            if best_c == 0 and second_c >= 16:
                 d_sub = float(best_d)
-                if (best_d - 1) in costs and (best_d + 1) in costs:
-                    cm = float(costs[best_d - 1])
-                    cp = float(costs[best_d + 1])
-                    denom = cm - 2.0 * float(best_c) + cp
-                    if denom > 1e-3:
-                        d_sub += float(np.clip(0.5 * (cm - cp) / denom, -0.5, 0.5))
                 rx_chk = int(round(x_i - d_sub))
                 if 0 <= rx_chk < width and raw_v_r[y_i, rx_chk]:
-                    if abs(d_sub - float(raw_d_r[y_i, rx_chk])) <= 1.5 and (d_sub - cx_offset) > 0.1:
+                    dr_val = float(raw_d_r[y_i, rx_chk])
+                    if abs(d_sub - dr_val) <= 0.75 and (d_sub - cx_offset) > 0.1:
                         z_new = float((fx * baseline_m) / (d_sub - cx_offset))
                         z_w = float(warped_z[y_i, x_i])
-                        if abs(z_new - z_w) <= 2.0 * relative_depth_tolerance * max(z_new, z_w):
-                            wc = float(np.clip(float(second_c - best_c) / float(max(second_c, 1)), 0.15, 0.95))
-                            if int(warped_count[y_i, x_i]) == 1 and abs(z_new - z_w) <= 0.25 * relative_depth_tolerance * z_w:
-                                wh = 0.90 * float(h_conf_eff[y_i, x_i])
-                                wc_eff = 0.10 * wc
-                                rho_new = (wc_eff * (1.0 / z_new) + wh * (1.0 / z_w)) / (wc_eff + wh)
-                                out_z[y_i, x_i] = np.float32(1.0 / rho_new)
-                            else:
-                                out_z[y_i, x_i] = np.float32(z_w)
-                            out_conf[y_i, x_i] = np.float32(min(1.0, max(wc, float(h_conf_eff[y_i, x_i]))))
-                            out_val[y_i, x_i] = 1
-                            # Provenance honesty: confirmed by current-frame stereo Census + L-R check!
-                            out_prov[y_i, x_i] = PROVENANCE_STEREO
-                            out_sid[y_i, x_i] = int(frame_id)
-                            out_age[y_i, x_i] = 0
-                            out_reuse[y_i, x_i] = 0
-                            out_count[y_i, x_i] = min(int(warped_count[y_i, x_i]) + 1, 4)
-                            promoted_mask[y_i, x_i] = True
+                        if abs(z_new - z_w) <= 0.5 * relative_depth_tolerance * z_w:
+                            c_res = float(np.clip(float(second_c - best_c) / float(max(second_c, 1)), confidence_floor, 1.0))
+                            # Publish the newly computed current-frame stereo correspondence depth `z_new`
+                            # with fresh current-frame `Provenance::Stereo = 1`, `age_ns = 0`, `count = 1`
+                            # when the historical observation has not already accumulated multi-frame fusion (`warped_count <= 1`).
+                            if int(warped_count[y_i, x_i]) <= 1:
+                                out_z[y_i, x_i] = np.float32(z_new)
+                                out_conf[y_i, x_i] = np.float32(c_res)
+                                out_val[y_i, x_i] = 1
+                                out_prov[y_i, x_i] = PROVENANCE_STEREO
+                                out_sid[y_i, x_i] = int(frame_id)
+                                out_age[y_i, x_i] = 0
+                                out_oldest[y_i, x_i] = 0
+                                out_reuse[y_i, x_i] = 0
+                                out_count[y_i, x_i] = 1
+                                out_origin[y_i, x_i] = np.uint32(1 << PROVENANCE_STEREO)
+                                out_ids[y_i, x_i] = [int(frame_id), -1, -1, -1]
+                                promoted_mask[y_i, x_i] = True
 
     # Remaining missing pixels with valid history become strictly Reprojected (`2` or `7`) with historical source_id & age > 0
     hist_only = missing_with_hist & (~promoted_mask)
@@ -489,8 +565,12 @@ def run_daxa_temporal_step(
         out_prov = np.where(hist_only, reproj_prov, out_prov).astype(np.uint32)
         out_sid = np.where(hist_only, warped_sid, out_sid).astype(np.int64)
         out_age = np.where(hist_only, warped_age, out_age).astype(np.int64)
+        out_oldest = np.where(hist_only, warped_oldest, out_oldest).astype(np.int64)
         out_reuse = np.where(hist_only, warped_reuse, out_reuse).astype(np.uint32)
         out_count = np.where(hist_only, warped_count, out_count).astype(np.uint32)
+        out_origin = np.where(hist_only, warped_origin, out_origin).astype(np.uint32)
+        hy, hx = np.nonzero(hist_only)
+        out_ids[hy, hx] = warped_ids[hy, hx]
 
     return {
         "depth": out_z,
@@ -499,8 +579,12 @@ def run_daxa_temporal_step(
         "provenance": out_prov,
         "source_ids": out_sid,
         "age_ns": out_age,
+        "oldest_age_ns": out_oldest,
         "reuse": out_reuse,
         "count": out_count,
+        "contributor_count": out_count,
+        "contributor_ids": out_ids,
+        "origin_mask": out_origin,
         "promoted_stereo_pixels": promoted_mask,
     }
 
@@ -569,9 +653,151 @@ def upsample_depth_2x_joint_luma(
     return depth_2x, valid_2x.astype(np.uint32)
 
 
+def upsample_depth_2x_nearest(depth_1x: np.ndarray, valid_1x: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Single-frame 2x nearest-neighbor upsampling baseline from 1x low-res depth only."""
+    h1, w1 = depth_1x.shape
+    h2, w2 = h1 * 2, w1 * 2
+    v1 = (valid_1x != 0) & np.isfinite(depth_1x) & (depth_1x > 0)
+    z2 = cv2.resize(np.where(v1, depth_1x, 0.0).astype(np.float32), (w2, h2), interpolation=cv2.INTER_NEAREST)
+    v2 = cv2.resize(v1.astype(np.uint8), (w2, h2), interpolation=cv2.INTER_NEAREST) > 0
+    return np.where(v2, z2, np.nan).astype(np.float32), v2.astype(np.uint32)
+
+
+def upsample_depth_2x_bilinear(depth_1x: np.ndarray, valid_1x: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Single-frame 2x normalized bilinear inverse-depth upsampling baseline from 1x low-res depth only."""
+    h1, w1 = depth_1x.shape
+    h2, w2 = h1 * 2, w1 * 2
+    v1 = (valid_1x != 0) & np.isfinite(depth_1x) & (depth_1x > 0)
+    rho1 = np.where(v1, 1.0 / depth_1x, 0.0).astype(np.float32)
+    w_up = cv2.resize(v1.astype(np.float32), (w2, h2), interpolation=cv2.INTER_LINEAR)
+    rho_up = cv2.resize(rho1, (w2, h2), interpolation=cv2.INTER_LINEAR)
+    v2 = w_up > 0.25
+    z2 = np.where(v2, 1.0 / np.maximum(rho_up / np.maximum(w_up, 1e-5), 1e-5), np.nan).astype(np.float32)
+    return z2, v2.astype(np.uint32)
+
+
+def reconstruct_multiframe_luma_2x(
+    low_res_luma_seq: list[np.ndarray],
+    tx_scales: list[float],
+    depth_1x: np.ndarray,
+    valid_1x: np.ndarray,
+    fx_1x: float,
+    baseline_m: float,
+) -> np.ndarray:
+    """Reconstructs a 2x super-resolved luminance guide strictly from the 1x (`640x360`) low-resolution
+    image sequence and camera translations without touching any 2x (`1280x720`) ground-truth image."""
+    h1, w1 = depth_1x.shape
+    h2, w2 = h1 * 2, w1 * 2
+    curr_l1 = low_res_luma_seq[-1].astype(np.float32)
+    base_2x = cv2.resize(curr_l1, (w2, h2), interpolation=cv2.INTER_CUBIC)
+    if len(low_res_luma_seq) <= 1:
+        return np.clip(np.round(base_2x), 0, 255).astype(np.uint8)
+
+    v1 = (valid_1x != 0) & np.isfinite(depth_1x) & (depth_1x > 0)
+    d1_est = np.where(v1, (fx_1x * baseline_m) / np.maximum(depth_1x, 1e-4), 0.0).astype(np.float32)
+    d2_est = cv2.resize(d1_est, (w2, h2), interpolation=cv2.INTER_NEAREST)
+    v2_mask = cv2.resize(v1.astype(np.uint8), (w2, h2), interpolation=cv2.INTER_NEAREST) > 0
+
+    yy2, xx2 = np.indices((h2, w2), dtype=np.float32)
+    x1_grid = (xx2 + 0.5) * 0.5 - 0.5
+    y1_grid = (yy2 + 0.5) * 0.5 - 0.5
+
+    luma_acc = base_2x.copy()
+    w_acc = np.ones((h2, w2), dtype=np.float32)
+    curr_scale = float(tx_scales[-1])
+
+    for k in range(len(low_res_luma_seq) - 1):
+        delta_s = float(tx_scales[k]) - curr_scale
+        # A 3D point at (x1_grid, y1_grid) with disparity d2_est in the current frame projects to:
+        map_x = (x1_grid - delta_s * d2_est).astype(np.float32)
+        map_y = y1_grid
+        warped_lk = cv2.remap(
+            low_res_luma_seq[k].astype(np.float32),
+            map_x,
+            map_y,
+            interpolation=cv2.INTER_CUBIC,
+            borderMode=cv2.BORDER_REFLECT_101,
+        )
+        photo_ok = v2_mask & (np.abs(warped_lk - base_2x) <= 22.0)
+        wk = np.where(photo_ok, 0.85, 0.0).astype(np.float32)
+        luma_acc += wk * warped_lk
+        w_acc += wk
+
+    return np.clip(np.round(luma_acc / np.maximum(w_acc, 1e-5)), 0, 255).astype(np.uint8)
+
+
+def reconstruct_p4_multiframe_superres_2x(
+    depth_1x_seq: list[np.ndarray],
+    valid_1x_seq: list[np.ndarray],
+    conf_1x_seq: list[np.ndarray],
+    low_res_luma_seq: list[np.ndarray],
+    tx_scales: list[float],
+    fx_1x: float,
+    baseline_m: float,
+    *,
+    sigma_luma: float = 10.0,
+    max_rel_z_span: float = 0.04,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """P4: Genuine multi-frame 2x inverse-depth super-resolution reconstructed strictly from the
+    low-resolution `640x360` sequence (`depth_1x_seq`, `low_res_luma_seq`, `tx_scales`) without access to
+    ground-truth `1280x720` luma. Returns `(depth_2x, valid_2x, reconstructed_luma_2x)`."""
+    curr_z1 = depth_1x_seq[-1]
+    curr_v1 = valid_1x_seq[-1]
+    guide_2x = reconstruct_multiframe_luma_2x(
+        low_res_luma_seq, tx_scales, curr_z1, curr_v1, fx_1x, baseline_m
+    )
+    z2_curr, v2_curr = upsample_depth_2x_joint_luma(
+        curr_z1, curr_v1, guide_2x, sigma_luma=sigma_luma, max_rel_z_span=max_rel_z_span
+    )
+    if len(depth_1x_seq) <= 1:
+        return z2_curr, v2_curr, guide_2x
+
+    h2, w2 = z2_curr.shape
+    yy2, xx2 = np.indices((h2, w2), dtype=np.float32)
+    x1_grid = (xx2 + 0.5) * 0.5 - 0.5
+    y1_grid = (yy2 + 0.5) * 0.5 - 0.5
+
+    vc = (v2_curr != 0) & np.isfinite(z2_curr) & (z2_curr > 0)
+    rho_acc = np.where(vc, 1.0 / np.maximum(z2_curr, 1e-4), 0.0).astype(np.float32)
+    w_acc = np.where(vc, 1.0, 0.0).astype(np.float32)
+    d1_ref = np.where(vc, (fx_1x * baseline_m) / np.maximum(z2_curr, 1e-4), 0.0).astype(np.float32)
+    curr_scale = float(tx_scales[-1])
+    guide_f = guide_2x.astype(np.float32)
+    inv_2sigma2 = 1.0 / (2.0 * sigma_luma * sigma_luma)
+
+    for k in range(len(depth_1x_seq) - 1):
+        zk = depth_1x_seq[k]
+        vk = (valid_1x_seq[k] != 0) & np.isfinite(zk) & (zk > 0)
+        ck = np.clip(conf_1x_seq[k], 0.05, 1.0).astype(np.float32)
+        rhok = np.where(vk, 1.0 / np.maximum(zk, 1e-4), 0.0).astype(np.float32)
+
+        delta_s = float(tx_scales[k]) - curr_scale
+        map_x = (x1_grid - delta_s * d1_ref).astype(np.float32)
+        map_y = y1_grid
+
+        rho_w = cv2.remap(rhok, map_x, map_y, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0.0)
+        v_w = cv2.remap(vk.astype(np.float32), map_x, map_y, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0.0)
+        c_w = cv2.remap(ck, map_x, map_y, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0.0)
+        l_w = cv2.remap(low_res_luma_seq[k].astype(np.float32), map_x, map_y, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT_101)
+
+        ok_k = (v_w > 0.75) & (rho_w > 1e-4)
+        zk_w = np.where(ok_k, 1.0 / np.maximum(rho_w / np.maximum(v_w, 1e-5), 1e-4), np.nan)
+        consistent = ok_k & vc & (np.abs(zk_w - z2_curr) <= max_rel_z_span * z2_curr)
+        dl = guide_f - l_w
+        w_photo = np.exp(-(dl * dl) * inv_2sigma2)
+        wk = np.where(consistent, 0.45 * c_w * w_photo, 0.0).astype(np.float32)
+        rho_acc += wk * (1.0 / np.maximum(zk_w, 1e-4))
+        w_acc += wk
+
+    out_valid = (w_acc > 0).astype(np.uint32)
+    out_z = np.where(w_acc > 0, 1.0 / np.maximum(rho_acc / np.maximum(w_acc, 1e-6), 1e-5), np.nan).astype(np.float32)
+    return out_z, out_valid, guide_2x
+
+
 def evaluate_synthetic_translation_sequences(cpu_backend: SlangCpuRefinementBackend) -> dict[str, Any]:
     """Suite A: Evaluate all 5 tiers on synthetic 4-frame subpixel translation sequences
-    (`repetitive_and_subpixel` and `slanted_planes`) at 640x360 with 2x super-resolution to 1280x720."""
+    (`repetitive_and_subpixel` and `slanted_planes`) at 640x360 with genuine multi-frame 2x super-resolution
+    to 1280x720 reconstructed strictly from the 640x360 sequence (no access to 1280x720 ground-truth luma)."""
     h2, w2 = 720, 1280
     h1, w1 = 360, 640
     wc, hc = 160, 90
@@ -603,6 +829,13 @@ def evaluate_synthetic_translation_sequences(cpu_backend: SlangCpuRefinementBack
         p12_state = None
         p34_state = None
         prev_scale = 0.0
+        low_res_luma_seq: list[np.ndarray] = []
+        p12_z_seq: list[np.ndarray] = []
+        p12_v_seq: list[np.ndarray] = []
+        p12_c_seq: list[np.ndarray] = []
+        p34_z_seq: list[np.ndarray] = []
+        p34_v_seq: list[np.ndarray] = []
+        p34_c_seq: list[np.ndarray] = []
 
         tier_metrics: dict[str, dict[str, Any]] = {}
         for frame_idx, scale_t in enumerate(tx_scales):
@@ -616,6 +849,7 @@ def evaluate_synthetic_translation_sequences(cpu_backend: SlangCpuRefinementBack
             r1 = cv2.resize(r2, (w1, h1), interpolation=cv2.INTER_AREA)
             mask1 = cv2.resize(mask2.astype(np.uint8), (w1, h1), interpolation=cv2.INTER_NEAREST) > 0
             yuyv1 = _pack_yuyv(l1, r1)
+            low_res_luma_seq.append(l1.copy())
 
             # Tier 1: v11 single frame
             res_v11 = cpu_backend.run_full_camera_to_depth_pipeline(
@@ -700,10 +934,14 @@ def evaluate_synthetic_translation_sequences(cpu_backend: SlangCpuRefinementBack
                 cx_offset=cx_offset,
                 current_from_previous=T_curr_from_prev,
                 frame_id=frame_idx + 1,
+                max_disparity=64,
                 inverse_depth_fusion=True,
                 disocclusion_guard=True,
                 temporal_stereo_research=False,
             )
+            p12_z_seq.append(p12_state["depth"].copy())
+            p12_v_seq.append(p12_state["validity"].copy())
+            p12_c_seq.append(p12_state["confidence"].copy())
 
             p34_state = run_daxa_temporal_step(
                 res_p0,
@@ -718,19 +956,52 @@ def evaluate_synthetic_translation_sequences(cpu_backend: SlangCpuRefinementBack
                 cx_offset=cx_offset,
                 current_from_previous=T_curr_from_prev,
                 frame_id=frame_idx + 1,
+                max_disparity=64,
                 inverse_depth_fusion=True,
                 disocclusion_guard=True,
                 temporal_stereo_research=True,
             )
+            p34_z_seq.append(p34_state["depth"].copy())
+            p34_v_seq.append(p34_state["validity"].copy())
+            p34_c_seq.append(p34_state["confidence"].copy())
 
             if frame_idx == len(tx_scales) - 1:
-                def _eval_tier(z_map: np.ndarray, v_map: np.ndarray) -> dict[str, float]:
+                # Single-frame bicubic luma upsampled strictly from 640x360 `l1` (never `l2`!)
+                l1_bicubic_2x = cv2.resize(l1, (w2, h2), interpolation=cv2.INTER_CUBIC)
+
+                def _eval_tier(
+                    z_map: np.ndarray,
+                    v_map: np.ndarray,
+                    *,
+                    z_seq: list[np.ndarray] | None = None,
+                    v_seq: list[np.ndarray] | None = None,
+                    c_seq: list[np.ndarray] | None = None,
+                ) -> dict[str, float]:
                     vm = (v_map != 0) & mask1 & np.isfinite(z_map) & (z_map > 0)
                     d_est = (fx1 * baseline_m) / z_map
                     d_err = np.abs(d_est[vm] - gt_disp_1x[vm])
                     z_err_mm = np.abs(z_map[vm] - gt_z_1x[vm]) * 1000.0
-                    # P4 2x super-resolution evaluation against 1280x720 ground truth
-                    z_2x, v_2x = upsample_depth_2x_joint_luma(z_map, v_map, l2)
+
+                    # Three single-frame 640x360 -> 1280x720 baselines (all strictly from 640x360 inputs)
+                    z_nn, v_nn = upsample_depth_2x_nearest(z_map, v_map)
+                    vm_nn = (v_nn != 0) & mask2 & np.isfinite(z_nn) & (z_nn > 0)
+                    nn_mae_mm = float(np.mean(np.abs(z_nn[vm_nn] - gt_z_2x[vm_nn]) * 1000.0))
+
+                    z_bl, v_bl = upsample_depth_2x_bilinear(z_map, v_map)
+                    vm_bl = (v_bl != 0) & mask2 & np.isfinite(z_bl) & (z_bl > 0)
+                    bl_mae_mm = float(np.mean(np.abs(z_bl[vm_bl] - gt_z_2x[vm_bl]) * 1000.0))
+
+                    z_jbu1, v_jbu1 = upsample_depth_2x_joint_luma(z_map, v_map, l1_bicubic_2x)
+                    vm_jbu1 = (v_jbu1 != 0) & mask2 & np.isfinite(z_jbu1) & (z_jbu1 > 0)
+                    jbu1_mae_mm = float(np.mean(np.abs(z_jbu1[vm_jbu1] - gt_z_2x[vm_jbu1]) * 1000.0))
+
+                    # P4 2x super-resolution evaluation reconstructed strictly from the 640x360 sequence
+                    if z_seq is not None and v_seq is not None and c_seq is not None:
+                        z_2x, v_2x, _ = reconstruct_p4_multiframe_superres_2x(
+                            z_seq, v_seq, c_seq, low_res_luma_seq, tx_scales, fx1, baseline_m
+                        )
+                    else:
+                        z_2x, v_2x = z_jbu1, v_jbu1
                     vm2 = (v_2x != 0) & mask2 & np.isfinite(z_2x) & (z_2x > 0)
                     z2_err_mm = np.abs(z_2x[vm2] - gt_z_2x[vm2]) * 1000.0
                     return {
@@ -739,7 +1010,11 @@ def evaluate_synthetic_translation_sequences(cpu_backend: SlangCpuRefinementBack
                         "bad_1_0px_pct": float(np.mean(d_err > 1.0) * 100.0),
                         "depth_mae_mm": float(np.mean(z_err_mm)),
                         "valid_coverage_pct": float(np.mean(vm[mask1]) * 100.0),
+                        "single_frame_nearest_2x_depth_mae_mm": nn_mae_mm,
+                        "single_frame_bilinear_2x_depth_mae_mm": bl_mae_mm,
+                        "single_frame_joint_bilateral_lowres_luma_2x_depth_mae_mm": jbu1_mae_mm,
                         "superres_2x_depth_mae_mm": float(np.mean(z2_err_mm)),
+                        "superres_2x_uses_ground_truth_2x_luma": False,
                     }
 
                 tier_metrics = {
@@ -752,8 +1027,20 @@ def evaluate_synthetic_translation_sequences(cpu_backend: SlangCpuRefinementBack
                         res_p0["completed_validity"][:n1].reshape(h1, w1),
                     ),
                     "realsense_ema_temporal": _eval_tier(res_ema["depth"], res_ema["valid"]),
-                    "daxa_temporal_p1_p2": _eval_tier(p12_state["depth"], p12_state["validity"]),
-                    "temporal_cost_refinement_p3_p4": _eval_tier(p34_state["depth"], p34_state["validity"]),
+                    "daxa_temporal_p1_p2": _eval_tier(
+                        p12_state["depth"],
+                        p12_state["validity"],
+                        z_seq=p12_z_seq,
+                        v_seq=p12_v_seq,
+                        c_seq=p12_c_seq,
+                    ),
+                    "temporal_cost_refinement_p3_p4": _eval_tier(
+                        p34_state["depth"],
+                        p34_state["validity"],
+                        z_seq=p34_z_seq,
+                        v_seq=p34_v_seq,
+                        c_seq=p34_c_seq,
+                    ),
                 }
         results[sname] = tier_metrics
     return results
@@ -891,13 +1178,16 @@ def evaluate_moving_object_disocclusion_sequence(cpu_backend: SlangCpuRefinement
         )
         p3_promoted_total += int(np.sum(p34_state["promoted_stereo_pixels"]))
 
-        # Audit provenance honesty: no historical-only fill (`age_ns > 0` or `source_id != frame_idx + 1`) may carry `PROVENANCE_STEREO`
+        # Audit provenance honesty:
+        # - No historical-only fill (`age_ns > 0` or `source_id != frame_idx + 1`) may carry `PROVENANCE_STEREO`
+        # - Every `PROVENANCE_FUSED` pixel must have `count >= 2` and `oldest_age_ns > 0`
         for st in (p12_state, p34_state):
             v_st = st["validity"] != 0
             bad_prov = v_st & (
                 ((st["age_ns"] > 0) & (st["provenance"] == PROVENANCE_STEREO))
                 | ((st["source_ids"] != (frame_idx + 1)) & (st["provenance"] == PROVENANCE_STEREO))
                 | ((st["provenance"] == PROVENANCE_REPROJECTED) & (st["age_ns"] <= 0))
+                | ((st["provenance"] == PROVENANCE_FUSED) & ((st["count"] < 2) | (st["oldest_age_ns"] <= 0)))
             )
             provenance_violations += int(np.sum(bad_prov))
 
@@ -1167,7 +1457,9 @@ def evaluate_zed2_sequence_and_gpu_audit(work_dir: Path) -> dict[str, Any]:
         ov_zncc = v_map & last_zncc_valid & np.isfinite(d_map)
         zncc_mae = float(np.mean(np.abs(d_map[ov_zncc] - last_zncc_disp[ov_zncc])))
 
-        fresh_stereo_pct = float(np.mean(v_map & (prov_map == PROVENANCE_STEREO)) * 100.0)
+        single_stereo_pct = float(np.mean(v_map & (prov_map == PROVENANCE_STEREO)) * 100.0)
+        fused_stereo_pct = float(np.mean(v_map & (prov_map == PROVENANCE_FUSED)) * 100.0)
+        fresh_stereo_pct = single_stereo_pct + fused_stereo_pct
         planar_pct = float(np.mean(v_map & (prov_map == PROVENANCE_PLANAR_INFERRED)) * 100.0)
         reproj_pct = float(
             np.mean(v_map & ((prov_map == PROVENANCE_REPROJECTED) | (prov_map == PROVENANCE_TEMPORAL_PLANAR_INFERRED)))
@@ -1185,16 +1477,27 @@ def evaluate_zed2_sequence_and_gpu_audit(work_dir: Path) -> dict[str, Any]:
         zed_tier_summaries[tname] = {
             "total_valid_coverage_pct": total_valid_pct,
             "fresh_stereo_coverage_pct": fresh_stereo_pct,
+            "single_frame_stereo_only_coverage_pct": single_stereo_pct,
+            "fused_multiframe_stereo_coverage_pct": fused_stereo_pct,
             "planar_inferred_coverage_pct": planar_pct,
             "historical_reprojected_coverage_pct": reproj_pct,
             "independent_zncc_mae_px": zncc_mae,
             "temporal_depth_jitter_median_std_mm": jitter_mm,
         }
 
-    # Memory footprint comparison (1280x720, 2 slots, 11 output planes + z + owner + counters + params)
-    # Per pixel per eye: 4+4+4+4+8+8+32+4+8+4+4 = 84 bytes output + 8 bytes z/owner = 92 bytes * 2 slots = 184 bytes
-    full_two_eye_bytes = 2 * (w * h * 2 * 92 + 64 + 472)
-    left_eye_only_bytes = 2 * (w * h * 1 * 92 + 64 + 472)
+    # Native Vulkan GPU temporal stage timings (p50/p95/p99), full-chain latency, and native GPU wake ghosting
+    temporal_bench_bin = ROOT / "build" / "ros-daxa-native" / "daxa_temporal_contracts"
+    native_gpu_bench_res = subprocess.run(
+        [str(temporal_bench_bin), "--benchmark-v12-json"],
+        check=True,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    native_gpu_temporal_bench = json.loads(native_gpu_bench_res.stdout.strip().splitlines()[-1])
+
+    full_two_eye_bytes = int(native_gpu_temporal_bench["requested_full_bytes"])
+    left_eye_only_bytes = int(native_gpu_temporal_bench["requested_left_only_bytes"])
 
     return {
         "zed2_5frame_tier_comparison": zed_tier_summaries,
@@ -1203,7 +1506,17 @@ def evaluate_zed2_sequence_and_gpu_audit(work_dir: Path) -> dict[str, Any]:
             "v11_p0_continuous_subpixel_combined_gpu_ms": gpu_p0_report["gpu_combined_queue_span_ms"],
             "v11_single_frame_match_gpu_ms": gpu_v11_report["gpu_guided_match_ms"],
             "v11_p0_continuous_subpixel_match_gpu_ms": gpu_p0_report["gpu_guided_match_ms"],
+            "temporal_clear_gpu_ms": native_gpu_temporal_bench["temporal_clear_gpu_ms"],
+            "temporal_z_gpu_ms": native_gpu_temporal_bench["temporal_z_gpu_ms"],
+            "temporal_owner_gpu_ms": native_gpu_temporal_bench["temporal_owner_gpu_ms"],
+            "temporal_fuse_gpu_ms": native_gpu_temporal_bench["temporal_fuse_gpu_ms"],
+            "temporal_total_gpu_ms": native_gpu_temporal_bench["temporal_total_gpu_ms"],
+            "refinement_p0_gpu_ms": native_gpu_temporal_bench["refinement_p0_gpu_ms"],
+            "refinement_v13_adaptive_tiles_gpu_ms": native_gpu_temporal_bench["refinement_v13_adaptive_tiles_gpu_ms"],
+            "full_chain_p0_plus_temporal_gpu_ms": native_gpu_temporal_bench["full_chain_p0_plus_temporal_gpu_ms"],
+            "full_chain_v13_plus_temporal_gpu_ms": native_gpu_temporal_bench["full_chain_v13_plus_temporal_gpu_ms"],
         },
+        "native_gpu_moving_object_wake_test": native_gpu_temporal_bench["native_gpu_wake_test"],
         "temporal_gpu_memory_optimization_1280x720": {
             "baseline_two_eye_bytes": full_two_eye_bytes,
             "baseline_two_eye_mb": round(full_two_eye_bytes / (1024.0 * 1024.0), 2),
