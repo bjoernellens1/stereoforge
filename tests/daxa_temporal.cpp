@@ -1,4 +1,5 @@
 #include <stereoforge/detail/daxa_temporal_state.hpp>
+#include <stereoforge/daxa_temporal_wip_adapters.hpp>
 #include <iostream>
 #include <stereoforge/daxa_view.hpp>
 #include <limits>
@@ -52,10 +53,15 @@ static void gpu_contracts(){
         check(rb1.depth.size()==12*10&&rb1.provenance.size()==12*10);
         out1={};ref_frame={};coarse={};temporal_left.collect();ref.collect();depth.collect();
         auto coarse2=depth.enqueue(rsource(2));auto ref_frame2=ref.process(coarse2);
-        auto out2=temporal_left.process(ref_frame2,pose_for(2),true);out2.wait();
+        WipDummyRigPoseAdapter wip_pose{{0.001,0.0,0.0}};
+        WipDummyMultiPairStereoRingAdapter wip_ring(temporal_left,4);
+        WipDummyGpuSuperRes2xAdapter wip_sr2x;
+        auto out2=wip_ring.process(ref_frame2,wip_pose.pose_for(*rsource(2)),true);out2.wait();
+        auto sr2=wip_sr2x.wrap(out2);
+        check(sr2.is_wip_dummy()&&sr2.superres_width==24&&sr2.superres_height==20&&wip_ring.buffered_pair_count()==1);
         auto rb2=temporal_left.readback(out2);
         check(rb2.counters.arithmetic_faults==0);
-        out2={};ref_frame2={};coarse2={};temporal_left.collect();ref.collect();depth.collect();
+        sr2={};out2={};ref_frame2={};coarse2={};temporal_left.collect();ref.collect();depth.collect();
         check(temporal_left.completed_source_retirements()==2);
     }
     check(context->validation_errors.load()==0);context->close();check(context->validation_errors.load()==0);
@@ -76,6 +82,7 @@ int main(int argc,char** argv){try{
     capture.frame_id=4;capture.host_ingress_timestamp_ns=4;pose.timestamp_ns=4;check(state.prepare(capture,pose,c.max_age_ns).warp);capture.device_identity="new";capture.frame_id=0;capture.host_ingress_timestamp_ns=0;pose.timestamp_ns=0;check(state.prepare(capture,pose,c.max_age_ns).epoch);
     capture.device_identity="unknown";reject([&]{state.prepare(capture,pose,c.max_age_ns);});capture.device_identity="new";capture.host_ingress_timestamp_ns=UINT64_MAX;reject([&]{state.prepare(capture,std::nullopt,c.max_age_ns);});state.reset();check(!state.accepted&&!state.has_pose&&state.device.capacity()>=65536);
     DaxaTemporal::Frame empty;reject([&]{empty.observations();});reject([&]{empty.ancestry();});reject([&]{empty.wait();});reject([&]{empty.ready();});reject([&]{empty.timings();});auto copied=empty;copied=copied;copied=std::move(copied);check(!copied);
+    {WipDummyRigPoseAdapter wip_pose{{0.002,0.0,0.0}};CaptureFrame cf;cf.frame_id=10;cf.host_ingress_timestamp_ns=100;cf.device_identity="zed2";cf.host_clock_domain="steady";auto p10=wip_pose.pose_for(cf);check(wip_pose.is_wip_dummy()&&p10.world_from_rig[3]==0.0);cf.frame_id=12;cf.host_ingress_timestamp_ns=200;auto p12=wip_pose.pose_for(cf);check(std::abs(p12.world_from_rig[3]-0.004)<1e-12);check(WipDummyMultiPairStereoRingAdapter::is_wip_dummy()&&WipDummyGpuSuperRes2xAdapter::is_wip_dummy());}
     if(argc>1&&std::string_view(argv[1])=="--gpu")gpu_contracts();
     std::cout<<"Temporal CPU admission contracts passed\n";return 0;
 }catch(std::exception const& e){std::cerr<<e.what()<<'\n';return 1;}}

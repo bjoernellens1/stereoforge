@@ -22,6 +22,11 @@ from benchmarks.temporal_supersampling_v12 import (
     upsample_depth_2x_joint_luma,
 )
 from benchmarks.visual_accuracy_audit_v9 import gpu_env
+from stereoforge.temporal_wip_adapters import (
+    WipDummyGpuSuperRes2xAdapter,
+    WipDummyLivePoseAdapter,
+    WipDummyMultiPairStereoRingAdapter,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -211,3 +216,41 @@ def test_gpu_daxa_temporal_and_refinement_v12_contracts() -> None:
     bin_path = ROOT / "build" / "ros-daxa-native" / "daxa_temporal_contracts"
     res = subprocess.run([str(bin_path), "--gpu"], env=gpu_env(), capture_output=True, text=True, check=False)
     assert res.returncode == 0, res.stderr
+
+
+def test_wip_dummy_adapters_and_documentation() -> None:
+    """Verify explicit WIP dummy adapters for live VIO/IMU poses, P3 multi-pair ring, and P4 GPU 2x super-res."""
+    doc_path = ROOT / "docs" / "TEMPORAL_SUPERSAMPLING_WIP_ADAPTERS.md"
+    hpp_path = ROOT / "include" / "stereoforge" / "daxa_temporal_wip_adapters.hpp"
+    assert doc_path.exists() and "WORK IN PROGRESS (DUMMY ADAPTERS)" in doc_path.read_text(encoding="utf-8")
+    assert hpp_path.exists() and "WIP_DUMMY_POSE_ADAPTER_NO_LIVE_VIO_IMU" in hpp_path.read_text(encoding="utf-8")
+
+    pose_adapter = WipDummyLivePoseAdapter(step_translation_m=(0.001, 0.0, 0.0))
+    assert pose_adapter.IS_WIP_DUMMY is True
+    p0 = pose_adapter.pose_for_frame(frame_id=10, timestamp_ns=100_000_000)
+    p2 = pose_adapter.pose_for_frame(frame_id=12, timestamp_ns=133_333_333)
+    assert p0["is_wip_dummy"] is True
+    assert p0["tx_m"] == pytest.approx(0.0)
+    assert p2["tx_m"] == pytest.approx(0.002)
+
+    ring_adapter = WipDummyMultiPairStereoRingAdapter(capacity=3)
+    assert ring_adapter.IS_WIP_DUMMY is True
+    dummy_img = np.zeros((8, 8), dtype=np.uint8)
+    for fid in range(5):
+        out = ring_adapter.push_and_run_p3(fid, dummy_img, dummy_img, p0, lambda: {"ok": True})
+    assert ring_adapter.buffered_pair_count == 3
+    assert out["wip_adapter_metadata"]["is_wip_dummy"] is True
+    assert out["wip_adapter_metadata"]["status"] == "WIP_DUMMY_CURRENT_PAIR_CENSUS_ONLY_NO_HISTORICAL_IMAGE_RING"
+
+    sr_adapter = WipDummyGpuSuperRes2xAdapter()
+    assert sr_adapter.IS_WIP_DUMMY is True
+    sr_out = sr_adapter.reconstruct_2x(
+        upsample_depth_2x_joint_luma,
+        np.ones((8, 12), dtype=np.float32),
+        np.ones((8, 12), dtype=np.uint32),
+        np.zeros((16, 24), dtype=np.uint8),
+    )
+    assert sr_out["is_wip_dummy"] is True
+    assert sr_out["status"] == "WIP_DUMMY_HOST_PROTOTYPE_ONLY_NO_GPU_2X_SHADER"
+    assert sr_out["grid_shape"] == (16, 24)
+
