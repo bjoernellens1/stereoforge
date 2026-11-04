@@ -8,6 +8,7 @@ and publishes both raw metric depth (32FC1) and colorized/RGB-registered views.
 """
 from __future__ import annotations
 
+import array
 import os
 import struct
 import subprocess
@@ -21,6 +22,8 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import Image
+
+cv2.setNumThreads(2)
 
 RS_HELPER_CODE = r"""
 import sys, struct, time
@@ -86,33 +89,38 @@ COLORMAPS = {
 }
 
 
-def build_natural_color_3d_lut() -> np.ndarray:
-    """Precompute a 64x64x64 3D RGB lookup table for ZED 2 natural color restoration."""
-    grid = np.linspace(0.0, 1.0, 64, dtype=np.float32)
-    rr, gg, bb = np.meshgrid(grid, grid, grid, indexing="ij")
-    rgb = np.stack([rr, gg, bb], axis=-1).reshape(64, 64 * 64, 3)
-
-    rgb_lifted = np.power(np.clip(rgb, 0.0, 1.0), 0.78)
-    lum = 0.299 * rgb_lifted[:, :, 0] + 0.587 * rgb_lifted[:, :, 1] + 0.114 * rgb_lifted[:, :, 2]
-    w_mid = np.clip((lum - 0.08) / 0.20, 0.0, 1.0)[:, :, None]
-    wb_gains = np.array([0.95, 1.00, 1.18], dtype=np.float32)[None, None, :]
-    rgb_wb = rgb_lifted * (1.0 + w_mid * (wb_gains - 1.0))
-    rgb_wb = rgb_wb / (1.0 + 0.16 * np.maximum(0.0, rgb_wb - 0.75))
-    bgr_u8 = (np.clip(rgb_wb[:, :, ::-1], 0.0, 1.0) * 255.0).astype(np.uint8)
-    hsv = cv2.cvtColor(bgr_u8, cv2.COLOR_BGR2HSV).astype(np.float32)
-    h, s = hsv[:, :, 0], hsv[:, :, 1]
-    warm_weight = np.exp(-0.5 * ((h - 22.0) / 10.0) ** 2)
-    hsv[:, :, 1] = np.clip(s * 0.90 * (1.0 - 0.32 * warm_weight), 0.0, 255.0)
-    nat_rgb = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2RGB)
-    return nat_rgb.reshape(64, 64, 64, 3)
+def build_natural_color_1d_lut() -> np.ndarray:
+    """Precompute a 256x1x3 1D per-channel RGB lookup table for fast OpenCV AVX2 cv2.LUT."""
+    x = np.arange(256, dtype=np.float32) / 255.0
+    lifted = np.power(x, 0.78)
+    gains = np.array([0.96, 1.00, 1.14], dtype=np.float32)
+    chans = []
+    for g in gains:
+        v = lifted * g
+        v = v / (1.0 + 0.16 * np.maximum(0.0, v - 0.75))
+        chans.append(np.clip(v * 255.0, 0.0, 255.0).astype(np.uint8))
+    return np.stack(chans, axis=-1).reshape(256, 1, 3)
 
 
-NATURAL_LUT_64 = build_natural_color_3d_lut()
+def build_rgb_colormap_luts() -> dict[str, np.ndarray]:
+    """Precompute 256x1x3 RGB colormaps (inverted so 1=near/warm, 255=far/cool, 0=invalid dark gray)."""
+    ramp = np.arange(255, -1, -1, dtype=np.uint8).reshape(256, 1)
+    luts: dict[str, np.ndarray] = {}
+    for name, cid in COLORMAPS.items():
+        bgr = cv2.applyColorMap(ramp, cid)
+        rgb = np.ascontiguousarray(bgr[:, :, ::-1])
+        rgb[0] = (20, 20, 20)
+        luts[name] = rgb
+    return luts
 
 
-def restore_zed2_natural_rgb(rgba: np.ndarray) -> np.ndarray:
-    q = rgba[:, :, :3] >> 2
-    return NATURAL_LUT_64[q[:, :, 0], q[:, :, 1], q[:, :, 2]]
+NATURAL_LUT_1D = build_natural_color_1d_lut()
+RGB_COLORMAP_LUTS = build_rgb_colormap_luts()
+
+
+def restore_zed2_natural_rgb(rgba: np.ndarray, dst: np.ndarray | None = None) -> np.ndarray:
+    rgb = cv2.cvtColor(rgba, cv2.COLOR_RGBA2RGB, dst=dst)
+    return cv2.LUT(rgb, NATURAL_LUT_1D, dst=rgb)
 
 
 def stylize_depth_rgb(
@@ -123,21 +131,24 @@ def stylize_depth_rgb(
     alpha: float,
     vmin: float,
     vmax: float,
-) -> tuple[np.ndarray, np.ndarray]:
-    cmap_id = COLORMAPS.get(cmap_name.lower(), cv2.COLORMAP_TURBO)
-    valid = np.isfinite(depth_m) & (depth_m > 0.20)
-    norm = np.clip((np.where(valid, depth_m, vmin) - vmin) / max(vmax - vmin, 0.05), 0.0, 1.0)
-    u8 = (255.0 * (1.0 - norm)).astype(np.uint8)
-    col_bgr = cv2.applyColorMap(u8, cmap_id)
-    col_rgb = np.ascontiguousarray(col_bgr[:, :, ::-1])
-    col_rgb[~valid] = (20, 20, 20)
+    dst_col: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray | None]:
+    cmap_lut = RGB_COLORMAP_LUTS.get(cmap_name.lower(), RGB_COLORMAP_LUTS["turbo"])
+    z_floor = max(vmin, 0.22)
+    span = max(vmax - z_floor, 0.05)
+    scale = 254.0 / span
+    offset = 1.0 - z_floor * scale
 
-    if base_rgb is not None and register_rgb and base_rgb.shape[:2] == depth_m.shape:
+    # Single AVX2 pass: NaN and <= z_floor saturate to 0; [z_floor, vmax] -> [1, 255]
+    u8 = cv2.addWeighted(depth_m, scale, depth_m, 0.0, offset, dtype=cv2.CV_8U)
+    col_rgb = cv2.applyColorMap(u8, cmap_lut, dst=dst_col)
+
+    if register_rgb and base_rgb is not None and base_rgb.shape[:2] == depth_m.shape:
         blended = cv2.addWeighted(base_rgb, 1.0 - alpha, col_rgb, alpha, 0.0)
         reg_rgb = base_rgb.copy()
-        reg_rgb[valid] = blended[valid]
+        cv2.copyTo(blended, u8, reg_rgb)
     else:
-        reg_rgb = col_rgb
+        reg_rgb = None
     return col_rgb, reg_rgb
 
 
@@ -152,7 +163,7 @@ class DualCameraDepthBridgeNode(Node):
 
         qos = QoSProfile(
             history=HistoryPolicy.KEEP_LAST,
-            depth=5,
+            depth=1,
             reliability=ReliabilityPolicy.BEST_EFFORT,
             durability=DurabilityPolicy.VOLATILE,
         )
@@ -169,6 +180,7 @@ class DualCameraDepthBridgeNode(Node):
 
         self.latest_zed_nat_rgb: np.ndarray | None = None
         self.pending_rs: tuple[int, np.ndarray, np.ndarray, np.ndarray] | None = None
+        self.msg_pool: dict[str, tuple[Image, np.ndarray]] = {}
         self.lock = threading.Lock()
 
         self.create_subscription(Image, "/stereoforge/rectified_rgb", self.on_zed_rgb, qos)
@@ -184,6 +196,23 @@ class DualCameraDepthBridgeNode(Node):
         zmax = float(self.get_parameter("z_max_m").value)
         return cmap, reg, alpha, zmin, zmax
 
+    def get_pooled_rgb_msg(self, key: str, header: Any, h: int, w: int) -> tuple[Image, np.ndarray]:
+        entry = self.msg_pool.get(key)
+        if entry is None or entry[0].height != h or entry[0].width != w:
+            msg = Image()
+            msg.height = h
+            msg.width = w
+            msg.encoding = "rgb8"
+            msg.is_bigendian = 0
+            msg.step = w * 3
+            buf = array.array("B", bytes(h * w * 3))
+            msg._data = buf
+            view = np.frombuffer(buf, dtype=np.uint8).reshape(h, w, 3)
+            entry = (msg, view)
+            self.msg_pool[key] = entry
+        entry[0].header = header
+        return entry
+
     @staticmethod
     def make_rgb_msg(header: Any, rgb: np.ndarray) -> Image:
         h, w, _ = rgb.shape
@@ -194,30 +223,47 @@ class DualCameraDepthBridgeNode(Node):
         msg.encoding = "rgb8"
         msg.is_bigendian = 0
         msg.step = w * 3
-        msg.data = np.ascontiguousarray(rgb).tobytes()
+        buf = array.array("B")
+        buf.frombytes(np.ascontiguousarray(rgb).tobytes())
+        msg._data = buf
         return msg
 
     def on_zed_rgb(self, msg: Image) -> None:
-        raw_rgba = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width, 4)
-        nat_rgb = restore_zed2_natural_rgb(raw_rgba)
-        self.latest_zed_nat_rgb = nat_rgb
-        self.pub_zed_rgb_nat.publish(self.make_rgb_msg(msg.header, nat_rgb))
+        need_nat = (
+            self.pub_zed_rgb_nat.get_subscription_count() > 0
+            or self.pub_zed_d_reg.get_subscription_count() > 0
+            or self.pub_zed_dc_reg.get_subscription_count() > 0
+        )
+        if not need_nat:
+            return
+        raw_rgba = np.frombuffer(msg._data, dtype=np.uint8).reshape(msg.height, msg.width, 4)
+        out_msg, out_view = self.get_pooled_rgb_msg("zed_nat", msg.header, msg.height, msg.width)
+        restore_zed2_natural_rgb(raw_rgba, dst=out_view)
+        self.latest_zed_nat_rgb = out_view
+        if self.pub_zed_rgb_nat.get_subscription_count() > 0:
+            self.pub_zed_rgb_nat.publish(out_msg)
+
+    def _publish_stylized_zed_depth(self, msg: Image, pool_key: str, pub_col: Any, pub_reg: Any) -> None:
+        need_col = pub_col.get_subscription_count() > 0
+        need_reg = pub_reg.get_subscription_count() > 0
+        if not need_col and not need_reg:
+            return
+        d_m = np.frombuffer(msg._data, dtype=np.float32).reshape(msg.height, msg.width)
+        cmap, reg, alpha, zmin, zmax = self.params()
+        out_msg, out_view = self.get_pooled_rgb_msg(pool_key, msg.header, msg.height, msg.width)
+        _, reg_rgb = stylize_depth_rgb(
+            d_m, self.latest_zed_nat_rgb, cmap, reg and need_reg, alpha, zmin, zmax, dst_col=out_view
+        )
+        if need_col:
+            pub_col.publish(out_msg)
+        if need_reg and reg_rgb is not None:
+            pub_reg.publish(self.make_rgb_msg(msg.header, reg_rgb))
 
     def on_zed_depth(self, msg: Image) -> None:
-        d_m = np.frombuffer(msg.data, dtype=np.float32).reshape(msg.height, msg.width)
-        nat_rgb = self.latest_zed_nat_rgb
-        cmap, reg, alpha, zmin, zmax = self.params()
-        pure_rgb, reg_rgb = stylize_depth_rgb(d_m, nat_rgb, cmap, reg, alpha, zmin, zmax)
-        self.pub_zed_d_col.publish(self.make_rgb_msg(msg.header, pure_rgb))
-        self.pub_zed_d_reg.publish(self.make_rgb_msg(msg.header, reg_rgb))
+        self._publish_stylized_zed_depth(msg, "zed_d_col", self.pub_zed_d_col, self.pub_zed_d_reg)
 
     def on_zed_depth_completed(self, msg: Image) -> None:
-        d_m = np.frombuffer(msg.data, dtype=np.float32).reshape(msg.height, msg.width)
-        nat_rgb = self.latest_zed_nat_rgb
-        cmap, reg, alpha, zmin, zmax = self.params()
-        pure_rgb, reg_rgb = stylize_depth_rgb(d_m, nat_rgb, cmap, reg, alpha, zmin, zmax)
-        self.pub_zed_dc_col.publish(self.make_rgb_msg(msg.header, pure_rgb))
-        self.pub_zed_dc_reg.publish(self.make_rgb_msg(msg.header, reg_rgb))
+        self._publish_stylized_zed_depth(msg, "zed_dc_col", self.pub_zed_dc_col, self.pub_zed_dc_reg)
 
     def enqueue_rs(self, ts_ns: int, d_raw_m: np.ndarray, d_al_m: np.ndarray, c_rgba: np.ndarray) -> None:
         with self.lock:
@@ -235,21 +281,31 @@ class DualCameraDepthBridgeNode(Node):
         d_msg.header.stamp.sec = int(ts_ns // 1_000_000_000)
         d_msg.header.stamp.nanosec = int(ts_ns % 1_000_000_000)
         d_msg.header.frame_id = "stereoforge_camera"
-        d_msg.height = h
-        d_msg.width = w
-        d_msg.encoding = "32FC1"
-        d_msg.is_bigendian = 0
-        d_msg.step = w * 4
-        d_msg.data = d_raw_m.tobytes()
-        self.pub_rs_depth.publish(d_msg)
+        if self.pub_rs_depth.get_subscription_count() > 0:
+            d_msg.height = h
+            d_msg.width = w
+            d_msg.encoding = "32FC1"
+            d_msg.is_bigendian = 0
+            d_msg.step = w * 4
+            d_msg.data = d_raw_m.tobytes()
+            self.pub_rs_depth.publish(d_msg)
 
-        c_rgb = np.ascontiguousarray(c_rgba[:, :, :3])
-        self.pub_rs_rgb.publish(self.make_rgb_msg(d_msg.header, c_rgb))
-        cmap, reg, alpha, zmin, zmax = self.params()
-        pure_rgb, _ = stylize_depth_rgb(d_raw_m, None, cmap, False, alpha, zmin, zmax)
-        _, reg_rgb = stylize_depth_rgb(d_al_m, c_rgb, cmap, reg, alpha, zmin, zmax)
-        self.pub_rs_d_col.publish(self.make_rgb_msg(d_msg.header, pure_rgb))
-        self.pub_rs_d_reg.publish(self.make_rgb_msg(d_msg.header, reg_rgb))
+        rs_rgb_msg, rs_rgb_view = self.get_pooled_rgb_msg("rs_rgb", d_msg.header, h, w)
+        cv2.cvtColor(c_rgba, cv2.COLOR_RGBA2RGB, dst=rs_rgb_view)
+        if self.pub_rs_rgb.get_subscription_count() > 0:
+            self.pub_rs_rgb.publish(rs_rgb_msg)
+        need_col = self.pub_rs_d_col.get_subscription_count() > 0
+        need_reg = self.pub_rs_d_reg.get_subscription_count() > 0
+        if need_col or need_reg:
+            cmap, reg, alpha, zmin, zmax = self.params()
+            if need_col:
+                rs_col_msg, rs_col_view = self.get_pooled_rgb_msg("rs_d_col", d_msg.header, h, w)
+                stylize_depth_rgb(d_raw_m, None, cmap, False, alpha, zmin, zmax, dst_col=rs_col_view)
+                self.pub_rs_d_col.publish(rs_col_msg)
+            if need_reg:
+                _, reg_rgb = stylize_depth_rgb(d_al_m, rs_rgb_view, cmap, reg, alpha, zmin, zmax)
+                if reg_rgb is not None:
+                    self.pub_rs_d_reg.publish(self.make_rgb_msg(d_msg.header, reg_rgb))
 
 
 def read_exact(stream: Any, n: int) -> bytes:

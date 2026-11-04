@@ -23,7 +23,7 @@ Visualization Manager:
     - Class: rviz_default_plugins/Image
       Enabled: true
       Image Topic:
-        Depth: 5
+        Depth: 1
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Best Effort
@@ -36,7 +36,7 @@ Visualization Manager:
     - Class: rviz_default_plugins/Image
       Enabled: true
       Image Topic:
-        Depth: 5
+        Depth: 1
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Best Effort
@@ -49,7 +49,7 @@ Visualization Manager:
     - Class: rviz_default_plugins/Image
       Enabled: true
       Image Topic:
-        Depth: 5
+        Depth: 1
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Best Effort
@@ -62,7 +62,7 @@ Visualization Manager:
     - Class: rviz_default_plugins/Image
       Enabled: true
       Image Topic:
-        Depth: 5
+        Depth: 1
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Best Effort
@@ -75,7 +75,7 @@ Visualization Manager:
     - Class: rviz_default_plugins/Image
       Enabled: true
       Image Topic:
-        Depth: 5
+        Depth: 1
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Best Effort
@@ -86,9 +86,9 @@ Visualization Manager:
       Normalize Range: false
       Transport Hint: raw
     - Class: rviz_default_plugins/Image
-      Enabled: true
+      Enabled: false
       Image Topic:
-        Depth: 5
+        Depth: 1
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Best Effort
@@ -99,9 +99,9 @@ Visualization Manager:
       Normalize Range: true
       Transport Hint: raw
     - Class: rviz_default_plugins/Image
-      Enabled: true
+      Enabled: false
       Image Topic:
-        Depth: 5
+        Depth: 1
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Best Effort
@@ -113,9 +113,9 @@ Visualization Manager:
       Normalize Range: false
       Transport Hint: raw
     - Class: rviz_default_plugins/Image
-      Enabled: true
+      Enabled: false
       Image Topic:
-        Depth: 5
+        Depth: 1
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Best Effort
@@ -127,9 +127,9 @@ Visualization Manager:
       Normalize Range: false
       Transport Hint: raw
     - Class: rviz_default_plugins/Image
-      Enabled: true
+      Enabled: false
       Image Topic:
-        Depth: 5
+        Depth: 1
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Best Effort
@@ -140,9 +140,9 @@ Visualization Manager:
       Normalize Range: false
       Transport Hint: raw
     - Class: rviz_default_plugins/Image
-      Enabled: true
+      Enabled: false
       Image Topic:
-        Depth: 5
+        Depth: 1
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Best Effort

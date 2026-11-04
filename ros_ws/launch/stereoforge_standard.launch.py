@@ -236,7 +236,7 @@ def generate_launch_description():
             description="Replay directory; required when source=replay.",
         ),
         DeclareLaunchArgument("capture_fps", default_value="60"),
-        DeclareLaunchArgument("depth_rate", default_value="adaptive"),
+        DeclareLaunchArgument("depth_rate", default_value="60"),
         DeclareLaunchArgument(
             "mode",
             default_value="depth-rgb",

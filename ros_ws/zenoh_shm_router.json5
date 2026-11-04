@@ -1,5 +1,15 @@
 {
   mode: "router",
+  listen: {
+    endpoints: [
+      "tcp/localhost:7447"
+    ]
+  },
+  scouting: {
+    multicast: {
+      enabled: false
+    }
+  },
   transport: {
     shared_memory: {
       enabled: false

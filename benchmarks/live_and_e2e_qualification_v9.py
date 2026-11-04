@@ -147,7 +147,7 @@ def find_verified_zed2_hidraw(sysfs_hidraw_root: Path = Path("/sys/class/hidraw"
                 txt = uevent.read_text().upper() if uevent.exists() else ""
             except OSError:
                 continue
-            if "2B03:0000F780" in txt or "2B03:F780" in txt:
+            if any(tag in txt for tag in ("2B03:0000F780", "2B03:F780", "2B03:0000F781", "2B03:F781")):
                 dev_node = dev_root / cand.name
                 if dev_node.exists():
                     matches.append(dev_node)
@@ -162,7 +162,7 @@ def ensure_zed2_camera_active(
     dev_root: Path = Path("/dev"),
 ) -> dict[str, Any]:
     """Wake/reset the ZED 2 MCU + OV580 video bridge via HID feature report [0x21, 0xE1]
-    only after verifying single-device Stereolabs VID:PID (2B03:F780). Never suppresses open/ioctl errors."""
+    only after verifying single-device Stereolabs VID:PID (2B03:F780/F781). Never suppresses open/ioctl errors."""
     uvc_status_path = Path("/sys/bus/usb/devices/2-1.3/power/runtime_status")
     video0 = dev_root / "video0"
     if (
@@ -195,13 +195,14 @@ def ensure_zed2_camera_active(
     try:
         fcntl.ioctl(fd, hidiocsfeature_2, bytearray([0x21, 0xE1]))
     except OSError as exc:
-        return {
-            "action": "hidraw_ioctl_failed",
-            "status": "error",
-            "hidraw_device": str(hidraw_dev),
-            "errno": exc.errno,
-            "error": str(exc),
-        }
+        if exc.errno != 32:  # EPIPE (32) is expected when the ZED 2 MCU resets immediately
+            return {
+                "action": "hidraw_ioctl_failed",
+                "status": "error",
+                "hidraw_device": str(hidraw_dev),
+                "errno": exc.errno,
+                "error": str(exc),
+            }
     finally:
         os.close(fd)
 
