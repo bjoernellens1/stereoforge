@@ -1,10 +1,11 @@
 struct Feature {float u,v,x,y,z;uint valid;};
 struct Track {float px,py,pz,cx,cy,cz,pu,pv,cu,cv;uint valid,pad;};
 struct Parameters {
-    uint64_t current_image,previous_image,depth,validity,provenance,previous_features,current_features,tracks;
+    uint64_t current_image,previous_image,depth,validity,provenance,previous_features,current_features,tracks,source_ids,ages;
     uint width,height,columns,rows,has_previous;
     float fx,fy,cx,cy;
     float rig_from_rect[9];
+    uint2 source_id;
 };
 struct Push {uint64_t parameters;};
 [[vk::push_constant]] Push pc;
@@ -23,6 +24,7 @@ bool metric(float2 uv,out float3 point) {
     for(uint k=0;k<4;++k) {
         uint i=(q.y+int(k/2))*p.width+q.x+k%2;
         uint prov=((uint*)p.provenance)[i];float z=((float*)p.depth)[i];
+        if(any(((uint2*)p.source_ids)[i]!=p.source_id)||any(((uint2*)p.ages)[i]!=uint2(0,0)))return false;
         if(((uint*)p.validity)[i]==0||(prov!=1&&prov!=5)||!isfinite(z)||z<.1||z>10)return false;
         depths[k]=z;
     }

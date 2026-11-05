@@ -5,6 +5,7 @@ struct TemporalParameters {
     uint width;uint height;uint warp;uint capacity;uint max_reuses;
     uint2 max_age;uint2 elapsed;float tolerance;float confidence_floor;
     float intrinsics[8];float transforms[32];
+    uint64_t pair_parameters;uint64_t current_images[2];uint pair_count;float baseline_m;uint require_pair_support;
 };
 bool temporal_normal(float z){return isfinite(z)&&z>=asfloat(0x00800000);}
 bool temporal_less(uint2 a,uint2 b){return a.y<b.y||(a.y==b.y&&a.x<b.x);}
@@ -32,7 +33,8 @@ bool temporal_project(TemporalParameters p,uint t,bool count,out uint target,out
     uint local=uint(v)*p.width+uint(u);if(((uint*)p.support[eye])[local]==0)return false;target=eye*n+local;
     if(count)temporal_counter(p,6);return true;
 }
-void temporal_clear(TemporalParameters p,uint t){uint eyes=(p.capacity&128u)!=0?1u:2u,n=eyes*p.width*p.height;if(t<n){((uint*)p.zbuffer)[t]=0x7f800000;((uint*)p.owners)[t]=0xffffffff;}if(t<10)((uint*)p.counters)[t]=0;}
+#include "temporal_pairs.slang"
+void temporal_clear(TemporalParameters p,uint t){uint eyes=(p.capacity&128u)!=0?1u:2u,n=eyes*p.width*p.height;if(t<n){((uint*)p.zbuffer)[t]=0x7f800000;((uint*)p.owners)[t]=0xffffffff;}if(t<12)((uint*)p.counters)[t]=0;}
 void temporal_splat_z(TemporalParameters p,uint t){uint eyes=(p.capacity&128u)!=0?1u:2u;if(t>=eyes*p.width*p.height)return;uint target;float z;if(temporal_project(p,t,true,target,z))InterlockedMin(((uint*)p.zbuffer)[target],asuint(z));}
 void temporal_splat_owner(TemporalParameters p,uint t){uint eyes=(p.capacity&128u)!=0?1u:2u;if(t>=eyes*p.width*p.height)return;uint target;float z;if(temporal_project(p,t,false,target,z)&&((uint*)p.zbuffer)[target]==asuint(z))InterlockedMin(((uint*)p.owners)[target],t);}
 void temporal_fuse(TemporalParameters p,uint t){
@@ -46,7 +48,7 @@ void temporal_fuse(TemporalParameters p,uint t){
         else if(!isfinite(c)||c<0||c>1||!ok_prov||(sid.y&0x80000000)!=0||(a.y&0x80000000)!=0){temporal_counter(p,3);current=false;}
         else{depth=z;confidence=c;valid=1;provenance=prov;selected=sid;age=a;oldest=a;ids[0]=sid;count=1;origin=1u<<prov;}
     }
-    uint owner=((uint*)p.owners)[t];if(owner!=0xffffffff){temporal_counter(p,7);float hz=asfloat(((uint*)p.zbuffer)[t]);float hc=((float*)p.history[1])[owner];uint hcount=((uint*)p.history[7])[owner];uint hre=((uint*)p.history[9])[owner]+1;uint2 ha,ho;temporal_add_age(((uint2*)p.history[5])[owner],p.elapsed,ha);temporal_add_age(((uint2*)p.history[8])[owner],p.elapsed,ho);
+    uint owner=((uint*)p.owners)[t];if(owner!=0xffffffff&&(p.require_pair_support==0||temporal_pairs_confirm(p,t,asfloat(((uint*)p.zbuffer)[t])))){temporal_counter(p,7);float hz=asfloat(((uint*)p.zbuffer)[t]);float hc=((float*)p.history[1])[owner];uint hcount=((uint*)p.history[7])[owner];uint hre=((uint*)p.history[9])[owner]+1;uint2 ha,ho;temporal_add_age(((uint2*)p.history[5])[owner],p.elapsed,ha);temporal_add_age(((uint2*)p.history[8])[owner],p.elapsed,ho);
         uint max_disp=(p.capacity>>16)>0u?(p.capacity>>16):128u;
         int max_d_search=int(max_disp)-2;
         uint eye=t/n,loc=t%n,x=loc%p.width,y=loc/p.width,row_base=eye*n;

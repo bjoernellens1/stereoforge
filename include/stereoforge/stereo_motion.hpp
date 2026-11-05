@@ -11,7 +11,7 @@ struct StereoMetricTrack {
     // Standard deviation of the point difference in metres, before residual fitting.
     double sigma_m = 0.005;
 };
-enum class StereoMotionStatus { Tracked, InsufficientTracks, InvalidInput, NoConsensus, Degenerate };
+enum class StereoMotionStatus { Tracked, InsufficientTracks, InvalidInput, NoConsensus, Degenerate, InsufficientImageSupport, AmbiguousMotion };
 struct StereoMotionConfig {
     std::size_t max_tracks = 1024, min_inliers = 24, hypotheses = 256;
     double min_inlier_fraction = 0.65, max_residual_m = 0.03;
@@ -31,5 +31,9 @@ struct StereoMotionResult {
     std::vector<std::size_t> inliers;
     double rms_m = 0;
 };
+bool stereo_rigid_transform(std::array<double,16> const&,double tolerance=1e-9);
 StereoMotionResult estimate_stereo_motion(std::span<StereoMetricTrack const>, StereoMotionConfig const& = {});
+// Diagnostic rigid-body search: min_inliers is absolute; the majority fraction
+// does not designate a camera motion. Metric and degeneracy gates are retained.
+StereoMotionResult estimate_stereo_consensus(std::span<StereoMetricTrack const>,StereoMotionConfig const&);
 }

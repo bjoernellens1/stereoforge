@@ -11,14 +11,15 @@ namespace stereoforge {
 namespace {
 void require(bool value,char const* message) {if(!value)throw std::invalid_argument(message);}
 struct Parameters {
-    uint64_t current_image=0,previous_image=0,depth=0,validity=0,provenance=0,previous_features=0,current_features=0,tracks=0;
+    uint64_t current_image=0,previous_image=0,depth=0,validity=0,provenance=0,previous_features=0,current_features=0,tracks=0,source_ids=0,ages=0;
     uint32_t width=0,height=0,columns=0,rows=0,has_previous=0;
     float fx=0,fy=0,cx=0,cy=0;
     std::array<float,9> rig_from_rect{};
+    std::array<uint32_t,2> source_id{};
 };
 struct Feature {float u,v,x,y,z;uint32_t valid;};
 struct Track {float px,py,pz,cx,cy,cz,pu,pv,cu,cv;uint32_t valid,pad;};
-static_assert(sizeof(Parameters)==136&&offsetof(Parameters,rig_from_rect)==100&&sizeof(Feature)==24&&sizeof(Track)==48);
+static_assert(sizeof(Parameters)==160&&offsetof(Parameters,rig_from_rect)==116&&sizeof(Feature)==24&&sizeof(Track)==48);
 std::vector<uint32_t> shader(char const* entry) {
     std::ifstream file(std::filesystem::path(SF_DAXA_VO_SPIRV_DIRECTORY)/(std::string("daxa-vo-")+entry+".spv"),std::ios::binary|std::ios::ate);
     require(bool(file),"missing offline VO shader");auto size=file.tellg();require(size>0&&size%4==0,"invalid VO SPIRV size");
@@ -61,7 +62,7 @@ struct DaxaStereoVo::Impl {
 DaxaStereoVo::DaxaStereoVo(std::shared_ptr<DaxaFoundation> context,DaxaObservationFrame const& prototype,DaxaStereoVoConfig config) {
     require(context&&context->device.get()&&bool(prototype),"VO needs resident observation and context");
     require(prototype.context_id()==reinterpret_cast<uintptr_t>(context->device.get()),"foreign VO context");
-    config.motion.validate();require(config.columns>0&&config.rows>0&&uint64_t(config.columns)*config.rows<=config.motion.max_tracks,"invalid bounded VO grid");
+    config.motion.validate();config.guard.validate();require(config.columns>0&&config.rows>0&&uint64_t(config.columns)*config.rows<=config.motion.max_tracks,"invalid bounded VO grid");
     require(config.max_ingress_gap_ns>0&&config.max_ingress_gap_ns<=200000000,"VO history age must be at most 200ms");
     auto maps=prototype.calibration();require(maps&&maps->geometry.has_value(),"VO requires native metric rig geometry");
     require(prototype.width()>=config.columns*8&&prototype.height()>=config.rows*8,"VO grid too dense for image support");
@@ -88,21 +89,30 @@ DaxaStereoVoResult DaxaStereoVo::process(DaxaObservationFrame const& input) {
     require(bool(input)&&input.context_id()==reinterpret_cast<uintptr_t>(e.context->device.get()),"foreign VO observation context");
     require(input.calibration()==e.maps&&input.width()==e.constants.width&&input.height()==e.constants.height,"VO calibration/grid mismatch");
     auto src=input.source();require(bool(src),"VO observation has no exact source");
-    require(!src->device_identity.empty()&&src->device_identity!="unknown"&&!src->host_clock_domain.empty()&&src->host_clock_domain!="unknown","VO requires known device and ingress clock");
     auto image=input.image(DaxaObservationImage::RectifiedLeft);require(image.width()==input.width()&&image.height()==input.height(),"VO RGB registration mismatch");
+    auto identity_for=[&](CaptureFrame const& frame) {
+        require(frame.calibration_identity==e.maps->original_identity,"VO capture/calibration identity mismatch");
+        StereoFrameIdentity id{frame.frame_id,frame.camera_timestamp_ns,frame.host_ingress_timestamp_ns,
+            frame.device_identity,e.maps->original_identity,e.maps->rectified_identity,e.config.rig_session_identity,
+            frame.camera_clock_domain,frame.host_clock_domain,{}};
+        id.validate();return id;
+    };
+    DaxaStereoVoResult result;result.source=identity_for(*src);
     if(e.previous_source) {
         auto const& prev=*e.previous_source;
         bool same=prev.device_identity==src->device_identity&&prev.host_clock_domain==src->host_clock_domain&&prev.camera_clock_domain==src->camera_clock_domain;
         require(!same||(src->frame_id>prev.frame_id&&src->host_ingress_timestamp_ns>prev.host_ingress_timestamp_ns),"duplicate/late VO source");
-        if(!same||src->host_ingress_timestamp_ns-prev.host_ingress_timestamp_ns>e.config.max_ingress_gap_ns)e.previous_source={};
+        bool acquisition_reversed=src->camera_clock_domain!="unknown"&&src->camera_clock_domain!="unspecified"&&!src->camera_clock_domain.empty()&&
+            prev.camera_timestamp_ns&&src->camera_timestamp_ns<=prev.camera_timestamp_ns;
+        if(!same||acquisition_reversed||src->host_ingress_timestamp_ns-prev.host_ingress_timestamp_ns>e.config.max_ingress_gap_ns)e.previous_source={};
+        else result.previous_source=identity_for(prev);
     }
-    DaxaStereoVoResult result;result.source_frame_id=src->frame_id;result.previous_frame_id=e.previous_source?e.previous_source->frame_id:0;
-    result.acquisition_timestamp_ns=src->camera_timestamp_ns;result.ingress_timestamp_ns=src->host_ingress_timestamp_ns;
-    result.acquisition_clock=src->camera_clock_domain;result.ingress_clock=src->host_clock_domain;
     auto& d=e.context->device;auto p=e.constants;
     p.current_image=d.device_address(image.buffer()).value();p.previous_image=d.device_address(e.previous_image).value();
     p.depth=d.device_address(input.buffer(DaxaObservationPlane::Depth)).value();p.validity=d.device_address(input.buffer(DaxaObservationPlane::Validity)).value();p.provenance=d.device_address(input.buffer(DaxaObservationPlane::Provenance)).value();
     p.previous_features=d.device_address(e.previous_features).value();p.current_features=d.device_address(e.current_features).value();p.tracks=d.device_address(e.tracks).value();p.has_previous=bool(e.previous_source);
+    p.source_ids=d.device_address(input.buffer(DaxaObservationPlane::SourceIds)).value();p.ages=d.device_address(input.buffer(DaxaObservationPlane::AgeNs)).value();
+    p.source_id={uint32_t(src->frame_id),uint32_t(src->frame_id>>32)};
     std::memcpy(d.buffer_host_address(e.parameters).value(),&p,sizeof(p));
     auto n=std::size_t(p.columns)*p.rows;auto before=d.latest_queue_submit_index(daxa::QUEUE_MAIN);
     e.pending_source=input;
@@ -127,12 +137,20 @@ DaxaStereoVoResult DaxaStereoVo::process(DaxaObservationFrame const& input) {
     // bounded CPU allocation or solve fails. Never pair them with old metadata.
     e.previous_source=src;
     std::vector<StereoMetricTrack> points;points.reserve(n);
+    std::vector<StereoImageTrack> pixels;pixels.reserve(n);
     std::vector<Track> records(n);
     std::memcpy(records.data(),d.buffer_host_address(e.readback).value(),n*sizeof(Track));
     for(std::size_t i=0;i<n;++i)if(records[i].valid) {
         auto const& t=records[i];points.push_back({{t.px,t.py,t.pz},{t.cx,t.cy,t.cz},.005});
+        pixels.push_back({{double(t.pu)/double(p.width-1),double(t.pv)/double(p.height-1)},{double(t.cu)/double(p.width-1),double(t.cv)/double(p.height-1)}});
     }
     result.tracked_features=points.size();result.motion=estimate_stereo_motion(points,e.config.motion);
+    result.guard=guard_stereo_motion(points,pixels,result.motion,e.config.motion,e.config.guard);
+    if(result.motion.status==StereoMotionStatus::Tracked&&e.config.guard.enabled&&result.guard.status!=StereoMotionGuardStatus::Accepted) {
+        result.motion.status=result.guard.status==StereoMotionGuardStatus::MultipleMotions?StereoMotionStatus::AmbiguousMotion:
+            (result.guard.status==StereoMotionGuardStatus::InsufficientImageSupport?StereoMotionStatus::InsufficientImageSupport:StereoMotionStatus::InvalidInput);
+        result.motion.current_from_previous={};result.motion.covariance={};result.motion.inliers.clear();
+    }
     return result;
 }
 }

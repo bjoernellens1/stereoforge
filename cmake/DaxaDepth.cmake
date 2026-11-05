@@ -43,4 +43,5 @@ if(BUILD_TESTING)
   set_tests_properties(daxa_depth_gpu_contracts PROPERTIES LABELS "vulkan;hardware;daxa")
 endif()
 
+include("${CMAKE_CURRENT_LIST_DIR}/DaxaStereoHistory.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/DaxaTemporal.cmake")

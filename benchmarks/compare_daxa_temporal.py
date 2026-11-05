@@ -23,7 +23,7 @@ SCHEMA='stereoforge.temporal.sequence.v1'
 PLANES={'depth.f32':('depth','<f4',1),'confidence.f32':('confidence','<f4',1),'validity.u32':('valid','<u4',1),'provenance.u32':('provenance','<u4',1),'source_ids.i64':('source_ids','<i8',1),'age_ns.i64':('age_ns','<i8',1),'contributor_ids.i64':('ancestry_ids','<i8',4),'contributor_count.u32':('count','<u4',1),'oldest_age_ns.i64':('oldest_age_ns','<i8',1),'reuse.u32':('reuse','<u4',1),'origin_mask.u32':('origin_mask','<u4',1)}
 FRESH_NAMES=('depth','confidence','validity','provenance','source_ids','age_ns')
 NATIVE_SOURCE_FILES=('apps/daxa_temporal_fixture.cpp','include/stereoforge/daxa_temporal.hpp','src/daxa_temporal.cpp','include/stereoforge/daxa_observation.hpp','src/daxa_observation.cpp','include/stereoforge/daxa_calibration.hpp','src/daxa_calibration.cpp','src/daxa_view_calibration.cpp','src/daxa_view.cpp','python/stereoforge/shaders/daxa/temporal.slang','python/stereoforge/shaders/ops/temporal.slang','CMakeLists.txt')
-SOURCE_FILES=NATIVE_SOURCE_FILES+('cmake/DaxaTemporal.cmake','benchmarks/compare_daxa_temporal.py','benchmarks/temporal_known_motion_oracle.py')
+SOURCE_FILES=NATIVE_SOURCE_FILES+('include/stereoforge/stereo_motion_guard.hpp','src/stereo_motion_guard.cpp','python/stereoforge/shaders/ops/temporal_pairs.slang','cmake/DaxaStereoHistory.cmake','include/stereoforge/daxa_stereo_history.hpp','src/daxa_stereo_history.cpp','include/stereoforge/stereo_trajectory.hpp','src/stereo_trajectory.cpp','include/stereoforge/stereo_motion.hpp','src/stereo_motion.cpp','cmake/DaxaTemporal.cmake','benchmarks/compare_daxa_temporal.py','benchmarks/temporal_known_motion_oracle.py')
 WORK_KEYS=dict(history_scanned='source_pixels_scanned',history_eligible='eligible_history_candidates',history_projected='projected_history_candidates',history_winners='visible_history_pixels',filled='history_fill_pixels',fused='fused_pixels')
 
 
@@ -96,7 +96,7 @@ def parse_pose(row):
 def load_sequence(path):
     path=Path(path);data=base.strict_json(path.read_text())
     if data.get('schema')!=SCHEMA or data.get('float_profile') not in ('exact_rational','general_float') or data.get('plane_layout')!=layout():raise ValueError('sequence schema/float/dtype layout differs')
-    cfg=normalized_config(data['config']);g=data['geometry'];width=oracle.integer(g['width'],'width');height=oracle.integer(g['height'],'height');shape=(2,height,width)
+    normalized_config(data['config']);g=data['geometry'];width=oracle.integer(g['width'],'width');height=oracle.integer(g['height'],'height');shape=(2,height,width)
     support=integer_array(g['support'],shape,'support',0,1).astype(bool)
     oracle.Geometry(g['intrinsics'],g['eye_to_rig'],support)
     if g.get('profile') not in ('native_depth_compatible','diagnostic_only'):raise ValueError('geometry profile required')

@@ -1,14 +1,18 @@
 #pragma once
 #include <stereoforge/daxa_depth.hpp>
 #include <stereoforge/daxa_refinement.hpp>
+#include <stereoforge/stereo_trajectory.hpp>
 #include <optional>
 #include <string_view>
 namespace stereoforge {
+class DaxaStereoHistory;
 struct DaxaTemporalConfig {
     unsigned slots=2,max_contributors=4,max_reuses=4,max_disparity=128;
     int64_t max_age_ns=200000000;
     float relative_depth_tolerance=.03f,confidence_floor=.05f;
     bool inverse_depth_fusion=false,disocclusion_guard=false,temporal_stereo_research=false,left_eye_only=false;
+    bool multi_pair_research=false; // Requires explicit odometry research; no default promotion.
+    bool odometry_research=false; // Explicit opt-in; unqualified native VO otherwise uses fresh stereo.
     void validate()const;
 };
 class DaxaLeftObservationFrame {
@@ -36,7 +40,7 @@ public:
 };
 struct DaxaTimedRigPose {
     std::array<double,16> world_from_rig{};
-    int64_t timestamp_ns=0;
+    int64_t timestamp_ns=0; // Exact ingress association token, not an acquisition-time claim.
     std::string_view clock_domain;
     void validate(CaptureFrame const&)const;
 };
@@ -48,6 +52,7 @@ struct DaxaTemporalTiming {
 struct DaxaTemporalCounters {
     uint32_t fresh_domain_rejected=0,history_input_domain_rejected=0,projected_domain_rejected=0,arithmetic_faults=0;
     uint32_t history_scanned=0,history_eligible=0,history_projected=0,history_winners=0,filled=0,fused=0;
+    uint32_t pair_checks=0,pair_rejections=0;
 };
 struct DaxaTemporalReadback {
     std::vector<float> depth,confidence;
@@ -71,10 +76,13 @@ public:
         DaxaObservationFrame observations()const;DaxaLeftObservationFrame left_observations()const;DaxaObservationAncestryView ancestry()const;
         DaxaTemporalTiming timings()const;
     };
-    DaxaTemporal(std::shared_ptr<DaxaFoundation>,DaxaDepthPipeline::Frame const& prototype,DaxaTemporalConfig={});
-    DaxaTemporal(std::shared_ptr<DaxaFoundation>,DaxaRefinement::Frame const& prototype,DaxaTemporalConfig={});
+    // An injected history has one writer (this engine) and may have other GPU readers.
+    DaxaTemporal(std::shared_ptr<DaxaFoundation>,DaxaDepthPipeline::Frame const& prototype,DaxaTemporalConfig={},std::shared_ptr<DaxaStereoHistory> history={});
+    DaxaTemporal(std::shared_ptr<DaxaFoundation>,DaxaRefinement::Frame const& prototype,DaxaTemporalConfig={},std::shared_ptr<DaxaStereoHistory> history={});
     Frame process(DaxaDepthPipeline::Frame const&,std::optional<DaxaTimedRigPose> const&);
     Frame process(DaxaRefinement::Frame const&,std::optional<DaxaTimedRigPose> const&,bool use_completed=false);
+    Frame process_odometry(DaxaDepthPipeline::Frame const&,StereoWorldPose const&);
+    Frame process_odometry(DaxaRefinement::Frame const&,StereoWorldPose const&,bool use_completed=false);
     // Call collect before upstream capture/upload; can_process only checks admission.
     size_t collect();bool can_process()const;void reset();
     DaxaTemporalReadback readback(Frame const&)const; // Explicit diagnostic transfer/wait boundary.

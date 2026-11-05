@@ -140,6 +140,16 @@ bool covariance(std::span<StereoMetricTrack const> points, std::span<std::size_t
     return invert_normal(info,out);
 }
 }
+bool stereo_rigid_transform(std::array<double,16> const& t,double tolerance) {
+    if(!std::isfinite(tolerance)||tolerance<=0||tolerance>1e-3||
+       !std::all_of(t.begin(),t.end(),[](double v){return std::isfinite(v);})||t[12]!=0||t[13]!=0||t[14]!=0||t[15]!=1)return false;
+    for(unsigned i=0;i<3;++i)for(unsigned j=0;j<3;++j) {
+        double dot=0;for(unsigned k=0;k<3;++k)dot+=t[k*4+i]*t[k*4+j];
+        if(std::abs(dot-double(i==j))>tolerance)return false;
+    }
+    double det=t[0]*(t[5]*t[10]-t[6]*t[9])-t[1]*(t[4]*t[10]-t[6]*t[8])+t[2]*(t[4]*t[9]-t[5]*t[8]);
+    return std::abs(det-1)<=tolerance;
+}
 void StereoMotionConfig::validate() const {
     if(max_tracks<3||max_tracks>4096||min_inliers<3||min_inliers>max_tracks||hypotheses==0||hypotheses>4096||
        !std::isfinite(min_inlier_fraction)||min_inlier_fraction<=.5||min_inlier_fraction>1||
@@ -148,7 +158,7 @@ void StereoMotionConfig::validate() const {
        !std::isfinite(min_spread_m)||min_spread_m<1e-6||min_spread_m>10)
         throw std::invalid_argument("invalid bounded stereo motion configuration");
 }
-StereoMotionResult estimate_stereo_motion(std::span<StereoMetricTrack const> points, StereoMotionConfig const& cfg) {
+static StereoMotionResult estimate_motion(std::span<StereoMetricTrack const> points,StereoMotionConfig const& cfg,bool majority) {
     cfg.validate();StereoMotionResult result;
     if(points.size()>cfg.max_tracks) {result.status=StereoMotionStatus::InvalidInput;return result;}
     for(auto const& p:points) {
@@ -175,7 +185,7 @@ StereoMotionResult estimate_stereo_motion(std::span<StereoMetricTrack const> poi
     }
     if(!geometric_fit) {result.status=StereoMotionStatus::Degenerate;return result;}
     result.status=StereoMotionStatus::NoConsensus;
-    auto required=std::max(cfg.min_inliers,std::size_t(std::ceil(cfg.min_inlier_fraction*points.size())));
+    auto required=majority?std::max(cfg.min_inliers,std::size_t(std::ceil(cfg.min_inlier_fraction*points.size()))):cfg.min_inliers;
     for(unsigned iteration=0;iteration<8;++iteration) {
         if(best.ids.size()<required) return result;
         if(!fit(points,best.ids,cfg,cfg.min_spread_m,pose)) {result.status=StereoMotionStatus::Degenerate;return result;}
@@ -190,4 +200,7 @@ StereoMotionResult estimate_stereo_motion(std::span<StereoMetricTrack const> poi
     }
     return result;
 }
+StereoMotionResult estimate_stereo_motion(std::span<StereoMetricTrack const> points,StereoMotionConfig const& cfg){return estimate_motion(points,cfg,true);}
+StereoMotionResult estimate_stereo_consensus(std::span<StereoMetricTrack const> points,StereoMotionConfig const& cfg){return estimate_motion(points,cfg,false);}
+
 }
