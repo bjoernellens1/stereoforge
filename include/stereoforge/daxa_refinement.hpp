@@ -6,6 +6,8 @@ struct DaxaRefinementConfig {
     unsigned slots=2,radius=4,disparities=128,min_margin=1;
     float prior_confidence_floor=.05f,max_coarse_span=2.f,lr_tolerance=1.f;
     bool subpixel=false;
+    // Explicit photometric refinement requires subpixel; ultra-fast refines the left eye.
+    // It remains available when adaptive search is enabled.
     bool continuous_subpixel=false;
     bool adaptive_tiles=false;
     unsigned min_disparity_bound=0,max_disparity_bound=0;

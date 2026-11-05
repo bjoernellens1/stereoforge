@@ -30,6 +30,37 @@ static std::vector<uint32_t> resident_words(std::shared_ptr<DaxaFoundation> cons
     auto command=recorder.complete_current_commands();device.submit_commands({.command_lists={&command,1}});device.wait_idle();
     std::vector<uint32_t> words(bytes/4);std::memcpy(words.data(),device.buffer_host_address(host).value(),bytes);return words;
 }
+// The explicit continuous option must run in adaptive ultra-fast mode too.
+// RGB is ray-rendered from an independent known fractional-disparity plane;
+// ground-truth depth is only an assertion, never an estimator input.
+static void gpu_continuous_adaptive(){
+    auto context=std::make_shared<DaxaFoundation>(true);
+    {
+        constexpr float truth=1.55f;auto low=maps_custom(128,96,1),high=maps_custom(128,96,2);
+        auto cap=std::make_shared<CaptureFrame>();cap->source_width=2560;cap->height=720;cap->stride_bytes=5120;cap->frame_id=301;
+        cap->calibration_identity="raw720";cap->device_identity="continuous-ray-plane";cap->host_clock_domain="steady";cap->host_ingress_timestamp_ns=301;
+        cap->packed_yuyv.assign(2560*720*2,128);
+        for(unsigned eye=0;eye<2;++eye)for(unsigned y=0;y<720;++y)for(unsigned x=0;x<1280;++x){
+            auto const& camera=low.geometry->original.eyes[eye];
+            double wx=(double(x)-camera.cx)/camera.fx*double(truth)+(eye?low.geometry->original.right_to_left[3]:0),wy=(double(y)-camera.cy)/camera.fy*double(truth);
+            double u=wx*160+127.5,v=wy*160+95.5;
+            cap->packed_yuyv[(y*2560+eye*1280+x)*2]=uint8_t(128+38*std::sin(.31*u)+31*std::cos(.23*v)+28*std::sin(.17*u+.21*v)+18*std::cos(.45*u-.13*v));
+        }
+        CaptureLease source=cap;DaxaDepthConfig dc{{128,96,32,4,8,32,true},1,2,32};DaxaDepthPipeline depth(low,dc,context,source);DaxaPreprocess full(high,2,context);
+        auto coarse=depth.enqueue(source);auto frame=full.enqueue(source);
+        DaxaRefinementConfig cfg;cfg.disparities=64;cfg.radius=2;cfg.subpixel=true;cfg.borrow_full_frame=true;cfg.ortho_hybrid=true;cfg.fast_mode=true;cfg.ultra_fast=true;cfg.adaptive_tiles=true;cfg.selective_repair=true;
+        DaxaRefinement off(context,coarse,frame,cfg);auto a=off.process(coarse,frame);auto before=off.readback(a);
+        cfg.continuous_subpixel=true;DaxaRefinement on(context,coarse,frame,cfg);auto b=on.process(coarse,frame);auto after=on.readback(b);
+        size_t n=size_t(high.width)*high.height,correct_before=0,correct_after=0;
+        check(before.raw_disparity.size()==2*n&&after.raw_disparity.size()==2*n);
+        if(std::memcmp(before.raw_disparity.data(),after.raw_disparity.data(),n*sizeof(float))==0)throw std::runtime_error("continuous subpixel request ignored in adaptive ultra-fast mode");
+        for(size_t i=0;i<n;++i){correct_before+=before.metric_validity[i]&&std::abs(before.depth[i]-truth)<=.0155f;correct_after+=after.metric_validity[i]&&std::abs(after.depth[i]-truth)<=.0155f;}
+        std::cout<<"continuous adaptive correct before "<<correct_before<<" after "<<correct_after<<'\n';
+        check(correct_after>correct_before);
+        a={};b={};off.collect();on.collect();coarse={};frame={};full.collect_completed_sources();depth.collect();
+    }
+    context->close();check(!context->validation_errors&&!context->validation_warnings);
+}
 static void gpu_4x_ortho_hybrid_and_repair(){
     auto context=std::make_shared<DaxaFoundation>(true);
     {
@@ -237,4 +268,4 @@ static void raw_full_gpu(){
     }
     context->close();check(!context->validation_errors&&!context->validation_warnings);
 }
-int main(int argc,char** argv){try{DaxaRefinementConfig c;c.validate();for(unsigned n:{0u,1u,4u}){auto bad=c;bad.slots=n;reject([&]{bad.validate();});}for(unsigned n:{0u,1u,3u,16u}){auto bad=c;bad.radius=n;reject([&]{bad.validate();});}for(unsigned n:{0u,1u,129u}){auto bad=c;bad.disparities=n;reject([&]{bad.validate();});}auto bad=c;bad.min_margin=0;reject([&]{bad.validate();});bad=c;bad.prior_confidence_floor=std::numeric_limits<float>::quiet_NaN();reject([&]{bad.validate();});auto low=maps(1),high=maps(2),high4x=maps(4);validate_daxa_refinement_geometry(low,high);validate_daxa_refinement_geometry(low,high4x);auto wrong=high;wrong.original_identity="different";reject([&]{validate_daxa_refinement_geometry(low,wrong);});wrong=high;wrong.geometry->original.eyes[0].cx+=.1;reject([&]{validate_daxa_refinement_geometry(low,wrong);});wrong=high;wrong.maps[0][10]+=.1;reject([&]{validate_daxa_refinement_geometry(low,wrong);});DaxaDepthConfig dc{{6,5,3,4}};dc.right_reference_mode=DaxaRightReferenceMode::IndependentLocalCensus;reject([&]{dc.validate();});DaxaRefinement::Frame empty;reject([&]{empty.observations();});reject([&]{empty.wait();});reject([&]{empty.ready();});auto copy=empty;copy=copy;copy=std::move(copy);check(!copy);if(argc>1&&std::string_view(argv[1])=="--gpu"){gpu();raw_full_gpu();gpu_4x_ortho_hybrid_and_repair();}std::cout<<"Refinement CPU admission contracts passed\n";return 0;}catch(std::exception const& e){std::cerr<<e.what()<<'\n';return 1;}}
+int main(int argc,char** argv){try{DaxaRefinementConfig c;c.validate();for(unsigned n:{0u,1u,4u}){auto bad=c;bad.slots=n;reject([&]{bad.validate();});}for(unsigned n:{0u,1u,3u,16u}){auto bad=c;bad.radius=n;reject([&]{bad.validate();});}for(unsigned n:{0u,1u,129u}){auto bad=c;bad.disparities=n;reject([&]{bad.validate();});}auto bad=c;bad.min_margin=0;reject([&]{bad.validate();});bad=c;bad.prior_confidence_floor=std::numeric_limits<float>::quiet_NaN();reject([&]{bad.validate();});auto low=maps(1),high=maps(2),high4x=maps(4);validate_daxa_refinement_geometry(low,high);validate_daxa_refinement_geometry(low,high4x);auto wrong=high;wrong.original_identity="different";reject([&]{validate_daxa_refinement_geometry(low,wrong);});wrong=high;wrong.geometry->original.eyes[0].cx+=.1;reject([&]{validate_daxa_refinement_geometry(low,wrong);});wrong=high;wrong.maps[0][10]+=.1;reject([&]{validate_daxa_refinement_geometry(low,wrong);});DaxaDepthConfig dc{{6,5,3,4}};dc.right_reference_mode=DaxaRightReferenceMode::IndependentLocalCensus;reject([&]{dc.validate();});DaxaRefinement::Frame empty;reject([&]{empty.observations();});reject([&]{empty.wait();});reject([&]{empty.ready();});auto copy=empty;copy=copy;copy=std::move(copy);check(!copy);if(argc>1&&std::string_view(argv[1])=="--gpu"){gpu_continuous_adaptive();gpu();raw_full_gpu();gpu_4x_ortho_hybrid_and_repair();}std::cout<<"Refinement CPU admission contracts passed\n";return 0;}catch(std::exception const& e){std::cerr<<e.what()<<'\n';return 1;}}

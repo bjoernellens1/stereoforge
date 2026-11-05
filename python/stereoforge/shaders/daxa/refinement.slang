@@ -320,7 +320,7 @@ void match(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=
                 offset=denominator!=0?clamp(numerator/denominator,-1.f,1.f):0.f;
                 applied=true;
             }
-            if((!ultra&&((p.subpixel&32u)!=0||precision_pixel||coarse_planar_pixel))||(ultra&&(p.subpixel&32u)!=0&&!adaptive_tiles)){
+            if((p.subpixel&32u)!=0||(!ultra&&(precision_pixel||coarse_planar_pixel))){
                 int s_dir=eye!=0?1:-1;
                 int xr=int(x)+s_dir*int(winner);
                 if(x>=2u&&x+2u<p.width&&y>=1u&&y+1u<p.height&&xr>=2&&xr+2<int(p.width)){
