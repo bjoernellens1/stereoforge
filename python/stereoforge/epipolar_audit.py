@@ -55,31 +55,33 @@ def _subpixel_dy(left_gray: np.ndarray, right_gray: np.ndarray, pl: np.ndarray, 
     return out, np.isfinite(out)
 
 
-def audit_epipolar(left_gray: np.ndarray, right_gray: np.ndarray, max_features: int = 4000, max_abs_dy: float = 3.0) -> EpipolarReport:
-    """Match features between rectified grey images and summarise vertical disparity."""
+def epipolar_samples(left_gray: np.ndarray, right_gray: np.ndarray, max_features: int = 4000, max_abs_dy: float = 3.0) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Sub-pixel (left xy, vertical disparity dy, horizontal disparity dx) samples from matched features."""
     orb = cv2.ORB_create(nfeatures=max_features, fastThreshold=10)
     kl, dl = orb.detectAndCompute(left_gray, None)
     kr, dr = orb.detectAndCompute(right_gray, None)
+    empty = np.zeros((0, 2)), np.zeros(0), np.zeros(0)
     if dl is None or dr is None:
-        return EpipolarReport(0, float("nan"), float("nan"), np.full((3, 3), np.nan), float("nan"))
-    pairs = cv2.BFMatcher(cv2.NORM_HAMMING).knnMatch(dl, dr, k=2)
+        return empty
     pts_l, pts_r = [], []
-    for pair in pairs:
+    for pair in cv2.BFMatcher(cv2.NORM_HAMMING).knnMatch(dl, dr, k=2):
         if len(pair) == 2 and pair[0].distance < 0.75 * pair[1].distance:
             pts_l.append(kl[pair[0].queryIdx].pt)
             pts_r.append(kr[pair[0].trainIdx].pt)
     pl, pr = np.asarray(pts_l, np.float64).reshape(-1, 2), np.asarray(pts_r, np.float64).reshape(-1, 2)
-    dy = pr[:, 1] - pl[:, 1]
-    dx = pl[:, 0] - pr[:, 0]  # disparity (left x minus right x)
+    dy, dx = pr[:, 1] - pl[:, 1], pl[:, 0] - pr[:, 0]
     keep = (np.abs(dy) < max_abs_dy) & (dx > 0)
     pl, dy, dx = pl[keep], dy[keep], dx[keep]
     dy_sub, ok = _subpixel_dy(left_gray, right_gray, pl, dy, dx)
-    pl, dy, dx = pl[ok], dy_sub[ok], dx[ok]
+    return pl[ok], dy_sub[ok], dx[ok]
+
+
+def summarize_samples(pl: np.ndarray, dy: np.ndarray, dx: np.ndarray, shape: tuple[int, int]) -> EpipolarReport:
     if len(dy) < 30:
         return EpipolarReport(int(len(dy)), float("nan"), float("nan"), np.full((3, 3), np.nan), float("nan"))
     med = float(np.median(dy))
     mad = float(np.median(np.abs(dy - med)))
-    h, w = left_gray.shape
+    h, w = shape
     grid = np.full((3, 3), np.nan)
     gx = np.minimum((pl[:, 0] * 3 / w).astype(int), 2)
     gy = np.minimum((pl[:, 1] * 3 / h).astype(int), 2)
@@ -89,3 +91,22 @@ def audit_epipolar(left_gray: np.ndarray, right_gray: np.ndarray, max_features: 
             if sel.sum() >= 10:
                 grid[iy, ix] = np.median(dy[sel])
     return EpipolarReport(int(len(dy)), med, 1.4826 * mad, grid, float(np.median(dx)))
+
+
+def audit_epipolar(left_gray: np.ndarray, right_gray: np.ndarray, **kwargs) -> EpipolarReport:
+    """Match features between rectified grey images and summarise vertical disparity."""
+    return summarize_samples(*epipolar_samples(left_gray, right_gray, **kwargs), left_gray.shape)
+
+
+def fit_dy_plane(pl: np.ndarray, dy: np.ndarray, shape: tuple[int, int], iters: int = 5) -> np.ndarray:
+    """Robust (iteratively re-weighted) fit dy(x,y) = a + b*(x-w/2)/w + c*(y-h/2)/h; returns (a, b, c) in pixels."""
+    h, w = shape
+    design = np.stack([np.ones(len(dy)), (pl[:, 0] - w / 2) / w, (pl[:, 1] - h / 2) / h], axis=1)
+    weights = np.ones(len(dy))
+    coef = np.zeros(3)
+    for _ in range(iters):
+        coef = np.linalg.lstsq(design * weights[:, None], dy * weights, rcond=None)[0]
+        res = dy - design @ coef
+        scale = max(1.4826 * np.median(np.abs(res)), 1e-3)
+        weights = 1.0 / np.maximum(1.0, np.abs(res) / (2.0 * scale))
+    return coef
