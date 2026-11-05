@@ -8,6 +8,7 @@ Panels:
         - /ZED 2 Rectified RGB (Natural)1
         - /ZED 2 Depth Measured (Colorized)1
         - /ZED 2 Depth Completed v9.3 (Colorized)1
+        - /ZED 2 Depth Person-Refined (Colorized)1
         - /RealSense D435i RGB1
         - /RealSense D435i Depth (Colorized)1
       Splitter Ratio: 0.5
@@ -57,6 +58,19 @@ Visualization Manager:
       Max Value: 1
       Min Value: 0
       Name: ZED 2 Depth Completed v9.3 (Colorized)
+      Normalize Range: false
+      Transport Hint: raw
+    - Class: rviz_default_plugins/Image
+      Enabled: true
+      Image Topic:
+        Depth: 1
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /stereoforge/depth_person_colorized
+      Max Value: 1
+      Min Value: 0
+      Name: ZED 2 Depth Person-Refined (Colorized)
       Normalize Range: false
       Transport Hint: raw
     - Class: rviz_default_plugins/Image

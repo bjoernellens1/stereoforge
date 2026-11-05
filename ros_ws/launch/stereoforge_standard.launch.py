@@ -95,6 +95,7 @@ def _launch_standard(context):
             "zenoh_session_config",
             "rviz_config",
             "with_realsense",
+            "person_refine",
         )
     }
     if values["pipeline"] != "full-sgm" and not values["coarse_manifest"]:
@@ -181,6 +182,14 @@ def _launch_standard(context):
             output="screen",
         ),
     ]
+    if _as_bool(values["person_refine"]):
+        processes.append(
+            ExecuteProcess(
+                cmd=[sys.executable, str(repo_root / "scripts" / "person_depth_refiner.py")],
+                additional_env=publisher_env,
+                output="screen",
+            )
+        )
     if _as_bool(values["with_realsense"]):
         processes.append(
             ExecuteProcess(
@@ -329,6 +338,11 @@ def generate_launch_description():
             "rviz_config",
             default_value=str(repo_root / "ros_ws" / "rviz" / "stereoforge.rviz"),
             description="RViz display configuration.",
+        ),
+        DeclareLaunchArgument(
+            "person_refine",
+            default_value="false",
+            description="Run the segmentation-guided person depth refiner (/stereoforge/depth_person*).",
         ),
         DeclareLaunchArgument(
             "with_realsense",

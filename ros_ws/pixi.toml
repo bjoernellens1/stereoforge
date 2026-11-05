@@ -27,3 +27,6 @@ qt-main = "*"
 vulkan-validation-layers = "*"
 wayland = "*"
 xorg-libx11 = "*"
+
+[pypi-dependencies]
+onnxruntime = ">=1.31.1, <2"
