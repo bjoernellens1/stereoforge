@@ -18,6 +18,18 @@ template<class F>void reject(F f){try{f();}catch(std::invalid_argument const&){r
 static DaxaRectification maps(unsigned scale){DaxaRectification c;c.eye_width=24;c.source_height=20;c.stride_bytes=96;c.width=6*scale;c.height=5*scale;c.original_identity="raw";c.rectified_identity=scale==1?"coarse":"target";DaxaRectifiedGeometry g;g.original_identity=c.original_identity;g.rectified_identity=c.rectified_identity;for(auto& eye:g.original.eyes)eye={24,20,8,8,7,5,{}};for(auto& eye:g.rectified.eyes)eye={c.width,c.height,4.*scale,4.*scale,2.5*scale-0.5,1.5*scale-0.5,{}};g.original.right_to_left=g.rectified.right_to_left={1,0,0,.1,0,1,0,0,0,0,1,0,0,0,0,1};g.R1=g.R2={1,0,0,0,1,0,0,0,1};double f=4.*scale,cx=2.5*scale-0.5,cy=1.5*scale-0.5;g.P1={f,0,cx,0,0,f,cy,0,0,0,1,0};g.P2={f,0,cx,-f*.1,0,f,cy,0,0,0,1,0};c.geometry=g;for(unsigned eye=0;eye<2;++eye)for(unsigned y=0;y<c.height;++y)for(unsigned x=0;x<c.width;++x){c.maps[eye*2].push_back(float((x-cx)/f*8+7));c.maps[eye*2].back()=std::clamp(c.maps[eye*2].back(),0.f,22.f);c.maps[eye*2+1].push_back(float((y-cy)/f*8+5));c.maps[eye*2+1].back()=std::clamp(c.maps[eye*2+1].back(),0.f,18.f);}return c;}
 static CaptureLease source(unsigned id){auto c=std::make_shared<CaptureFrame>();c->source_width=48;c->height=20;c->stride_bytes=96;c->frame_id=id;c->calibration_identity="raw";c->device_identity="refinement-contract";c->host_clock_domain="steady";c->host_ingress_timestamp_ns=id;c->packed_yuyv.resize(1920);for(unsigned i=0;i<1920;++i)c->packed_yuyv[i]=uint8_t(i*17);return c;}
 static DaxaRectification maps_custom(unsigned cw,unsigned ch,unsigned scale){DaxaRectification c;c.eye_width=1280;c.source_height=720;c.stride_bytes=5120;c.width=cw*scale;c.height=ch*scale;c.original_identity="raw720";c.rectified_identity=scale==1?"coarse320":"target1280";DaxaRectifiedGeometry g;g.original_identity=c.original_identity;g.rectified_identity=c.rectified_identity;for(auto& eye:g.original.eyes)eye={1280,720,1040.,1040.,639.5,359.5,{}};for(auto& eye:g.rectified.eyes)eye={c.width,c.height,260.*scale,260.*scale,cw*0.5*scale-0.5,ch*0.5*scale-0.5,{}};g.original.right_to_left=g.rectified.right_to_left={1,0,0,.12,0,1,0,0,0,0,1,0,0,0,0,1};g.R1=g.R2={1,0,0,0,1,0,0,0,1};double f=260.*scale,cx=cw*0.5*scale-0.5,cy=ch*0.5*scale-0.5;g.P1={f,0,cx,0,0,f,cy,0,0,0,1,0};g.P2={f,0,cx,-f*.12,0,f,cy,0,0,0,1,0};c.geometry=g;for(unsigned eye=0;eye<2;++eye){c.maps[eye*2].resize(c.width*c.height);c.maps[eye*2+1].resize(c.width*c.height);for(unsigned y=0;y<c.height;++y)for(unsigned x=0;x<c.width;++x){c.maps[eye*2][y*c.width+x]=float((x-cx)/f*1040.+639.5);c.maps[eye*2+1][y*c.width+x]=float((y-cy)/f*1040.+359.5);}}return c;}
+static std::vector<uint32_t> resident_words(std::shared_ptr<DaxaFoundation> const& context,daxa::BufferId source,size_t offset,size_t bytes){
+    auto& device=context->device;daxa::BufferInfo info{.size=bytes,.name="resident observation test export"};
+    auto memory=device.create_memory({.requirements=context->coherent_readback_requirements(info),.flags=daxa::MemoryFlagBits::HOST_ACCESS_RANDOM});
+    auto host=device.create_buffer_from_memory_block({.buffer_info=info,.memory_block=memory});
+    struct Cleanup{daxa::Device& device;daxa::BufferId buffer;~Cleanup(){device.destroy_buffer(buffer);device.collect_garbage();}}cleanup{device,host};
+    auto recorder=device.create_command_recorder({.name="resident observation test copy"});
+    recorder.pipeline_barrier({.src_access=daxa::AccessConsts::COMPUTE_SHADER_WRITE,.dst_access=daxa::AccessConsts::TRANSFER_READ});
+    recorder.copy_buffer_to_buffer({.src_buffer=source,.dst_buffer=host,.src_offset=offset,.size=bytes});
+    recorder.pipeline_barrier({.src_access=daxa::AccessConsts::TRANSFER_WRITE,.dst_access=daxa::AccessConsts::HOST_READ});
+    auto command=recorder.complete_current_commands();device.submit_commands({.command_lists={&command,1}});device.wait_idle();
+    std::vector<uint32_t> words(bytes/4);std::memcpy(words.data(),device.buffer_host_address(host).value(),bytes);return words;
+}
 static void gpu_4x_ortho_hybrid_and_repair(){
     auto context=std::make_shared<DaxaFoundation>(true);
     {
@@ -34,7 +46,10 @@ static void gpu_4x_ortho_hybrid_and_repair(){
         DaxaRefinement stage(context,coarse,full,rcfg);
         auto out=stage.process(coarse,full);
         out.wait();
+        const auto measured_timing=out.timings();
         auto rb=stage.readback(out);
+        check(out.timings().start_tick==measured_timing.start_tick);
+        check(out.timings().end_tick==measured_timing.end_tick);
         check(rb.disparity.size()==2*24*20&&rb.depth.size()==2*24*20);
         out={};full={};coarse={};stage.collect();full_pre.collect_completed_sources();depth.collect();
 
@@ -67,6 +82,42 @@ static void gpu_4x_ortho_hybrid_and_repair(){
         DaxaPreprocess full720(high720,2,context);
         auto c720=depth720.enqueue(in720);
         auto f720=full720.enqueue(in720);
+        // Diagnostics must observe the retained fast result, including fused
+        // LR/metric and planar completion, without changing its GPU buffers or
+        // original timestamps. Non-diagnostic export never reads skipped writes.
+        for(bool adaptive:{false,true})for(bool planar:{false,true}){
+            DaxaRefinementConfig fast;fast.disparities=128;fast.borrow_full_frame=true;
+            fast.ortho_hybrid=true;fast.fast_mode=true;fast.ultra_fast=true;
+            fast.adaptive_tiles=adaptive;fast.selective_repair=true;fast.planar_recovery=planar;
+            DaxaRefinement engine(context,c720,f720,fast);
+            auto retained=engine.process(c720,f720);retained.wait();
+            const auto timing=retained.timings();
+            const size_t pixels=1280*720;
+            // Read actual resident storage, before host-side canonicalization.
+            auto right_depth=resident_words(context,retained.buffer(DaxaRefinementPlane::Depth),pixels*4,pixels*4);
+            auto right_validity=resident_words(context,retained.buffer(DaxaRefinementPlane::MetricValidity),pixels*4,pixels*4);
+            auto right_ids=resident_words(context,retained.buffer(DaxaRefinementPlane::SourceIds),pixels*8,pixels*8);
+            check(std::all_of(right_depth.begin(),right_depth.end(),[](auto x){return x==0x7fc00000u;}));
+            check(std::all_of(right_validity.begin(),right_validity.end(),[](auto x){return x==0u;}));
+            check(std::all_of(right_ids.begin(),right_ids.end(),[](auto x){return x==UINT32_MAX;}));
+            auto before=engine.readback(retained,false);
+            check(!before.diagnostics_available&&before.reason.empty());
+            auto diagnostic=engine.readback(retained);
+            check(diagnostic.diagnostics_available&&diagnostic.diagnostic_equivalence_checked);
+            check(diagnostic.reason.size()==2*1280*720&&diagnostic.measured_eyes==1);
+            auto after=engine.readback(retained,false);
+            auto same=[](auto const& a,auto const& b){return a.size()==b.size()&&std::memcmp(a.data(),b.data(),a.size()*sizeof(a[0]))==0;};
+#define PRESERVED(name) check(same(before.name,diagnostic.name)&&same(before.name,after.name))
+            PRESERVED(disparity);PRESERVED(confidence);PRESERVED(validity);PRESERVED(depth);
+            PRESERVED(metric_confidence);PRESERVED(metric_validity);PRESERVED(provenance);
+            PRESERVED(source_ids);PRESERVED(age_ns);PRESERVED(raw_disparity);PRESERVED(raw_validity);
+            PRESERVED(completed_depth);PRESERVED(completed_confidence);PRESERVED(completed_validity);
+            PRESERVED(completed_provenance);PRESERVED(completed_source_ids);PRESERVED(completed_age_ns);
+#undef PRESERVED
+            check(retained.timings().start_tick==timing.start_tick&&retained.timings().end_tick==timing.end_tick);
+            check(std::count(before.metric_validity.begin(),before.metric_validity.begin()+1280*720,1u)>100);
+            check(std::count(diagnostic.metric_validity.begin()+1280*720,diagnostic.metric_validity.end(),1u)==0);
+        }
         for(bool fast_flag:{false,true}){
             DaxaRefinementConfig base_cfg;base_cfg.disparities=128;base_cfg.borrow_full_frame=true;base_cfg.ortho_hybrid=true;base_cfg.fast_mode=fast_flag;base_cfg.selective_repair=false;
             DaxaRefinementConfig rep_cfg=base_cfg;rep_cfg.selective_repair=true;

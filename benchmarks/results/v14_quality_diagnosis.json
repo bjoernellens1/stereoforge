@@ -1,0 +1,573 @@
+{
+  "schema": "stereoforge.v14.quality_diagnosis.v1",
+  "status": "development_only_no_promotion",
+  "source_commit": "706c0558f135cc5f5e36aaa5e5c9616778133062",
+  "full_report": {
+    "path": "/home/bjoern/stereoforge_quality_evidence/2026-11-05-baseline-final/report.json",
+    "sha256": "1e0ba56eb90fed8aebefb6379198ff7ab992d9f25ac7714439f417ef8516e5fd"
+  },
+  "calibration_sha256": {
+    "/home/bjoern/git/stereoforge-quality-baseline/configs/cameras/zed2/fixtures/SN26041639-fixture/manifest.json": "16a15055515c2eac5d3e357a69ad8162759c5b060a732b6b195031f19d0ac344",
+    "/home/bjoern/git/stereoforge-quality-baseline/configs/cameras/zed2/fixtures/SN26041639-fixture/original-calibration.json": "40ed5e0bce10cb535e5c252c6e028d2a34b374d9f8af6a08161fffbb750d9390",
+    "/home/bjoern/git/stereoforge-quality-baseline/configs/cameras/zed2/fixtures/SN26041639-fixture/rectified-calibration.json": "4332fa3ce0b0c8f7176bbe11f9024a55cf32ad7962b8b6d5987e3068ed7d2b00",
+    "/home/bjoern/git/stereoforge-quality-baseline/configs/cameras/zed2/fixtures/SN26041639-fixture/maps/left_x.f32": "46d99a5caf2b35133464a26bd1b846cd23cd87e43fde8d5a27d9bfaf6e4e331f",
+    "/home/bjoern/git/stereoforge-quality-baseline/configs/cameras/zed2/fixtures/SN26041639-fixture/maps/left_y.f32": "2653730d506f787fc952191b87d6c15e475760fc442be5953040f33fef1d1de8",
+    "/home/bjoern/git/stereoforge-quality-baseline/configs/cameras/zed2/fixtures/SN26041639-fixture/maps/right_x.f32": "3dc13e89509cefaca761a75dba49c0823705e65b6b6a1b21070d258141bd8285",
+    "/home/bjoern/git/stereoforge-quality-baseline/configs/cameras/zed2/fixtures/SN26041639-fixture/maps/right_y.f32": "5a4720d1a70cb2c2ea30e99132e8e96a9c9ea28416beac694a8081211758a738",
+    "/home/bjoern/git/stereoforge-quality-baseline/artifacts/depth-video/v8-review-milestone/fixtures/zed2_320x180/manifest.json": "36fcd75bd490e6825b17a783d6891d748c8e860817e18ba54ad6ae0bc3475bb1",
+    "/home/bjoern/git/stereoforge-quality-baseline/artifacts/depth-video/v8-review-milestone/fixtures/zed2_320x180/original-calibration.json": "40ed5e0bce10cb535e5c252c6e028d2a34b374d9f8af6a08161fffbb750d9390",
+    "/home/bjoern/git/stereoforge-quality-baseline/artifacts/depth-video/v8-review-milestone/fixtures/zed2_320x180/rectified-calibration.json": "000f085ab5d2525d429787a9496beb3469f0be74c25639edf17bc7cef067f8f8",
+    "/home/bjoern/git/stereoforge-quality-baseline/artifacts/depth-video/v8-review-milestone/fixtures/zed2_320x180/maps/left_x.f32": "9d4028a03981e8e6b4e47a79a5bddc32d4a3d94264f43889c009e98ea1390870",
+    "/home/bjoern/git/stereoforge-quality-baseline/artifacts/depth-video/v8-review-milestone/fixtures/zed2_320x180/maps/left_y.f32": "75f69be79cc89dd80f41812b20621483501c1cdef71a17bcd84cd4110986273c",
+    "/home/bjoern/git/stereoforge-quality-baseline/artifacts/depth-video/v8-review-milestone/fixtures/zed2_320x180/maps/right_x.f32": "a73f14ecf6f67ff908bd9adde98eb28d817383b80854330b2dd188b8beb400fd",
+    "/home/bjoern/git/stereoforge-quality-baseline/artifacts/depth-video/v8-review-milestone/fixtures/zed2_320x180/maps/right_y.f32": "a82ac9031da64e3aabe2cf2fd0ae8e36937d4e9fe3d5794fa87b0e23caebbbc4"
+  },
+  "cpu_library_sha256": "dcf8d1fd37d9d6d240f54581b9e7681b04c5bd5c92c30ff4344833be0f84f118",
+  "targets": {
+    "range_m": [
+      0.5,
+      3.0
+    ],
+    "tau_floor_m": 0.01,
+    "tau_relative": 0.01,
+    "reference_uncertainty_fraction": 0.3333333333333333,
+    "max_bad_2px_regression_percentage_points": 0.25,
+    "live_unique_fps_min": 30,
+    "live_gpu_p95_ms_max": 33.3,
+    "live_ingress_publication_p95_ms_max": 100,
+    "microbenchmark_gpu_ms_max": 4.167,
+    "promotion": "paired scene-level confidence intervals; no supported catastrophic/halo/false-fill increase"
+  },
+  "command": "PYTHONPATH=python:benchmarks:. .venv/bin/python -m benchmarks.physical_depth_v14.quality_baseline --corpus ~/stereoforge_corpus --scenes S1_target_0.5m S2_white_wall S3_person_white_wall --indices 0 74 149 --cpu --out OUTPUT",
+  "native_fast_diagnostic_equivalence": "unqualified",
+  "absolute_correct_completeness": null,
+  "sdk_alignment_probe": {
+    "status": "verified_installed_sdk_software_device",
+    "sdk_version": "2.58.1.10581",
+    "sdk_binaries_sha256": {
+      "pyrealsense2.cpython-313-x86_64-linux-gnu.so": "39ac9da409e4fa7f50abc33f42c9e56a24963112df734b6f957e5e3ec68cd289"
+    },
+    "aligned_depth_units": [
+      1000
+    ],
+    "depth_scale_m": 0.001,
+    "native_depth_z_m": 1.0,
+    "transformed_color_z_m": 1.100000023841858,
+    "conclusion": "align transfers native depth Z to color pixels; do not deproject as color Z",
+    "physical_accuracy_qualified": false,
+    "probe_source_sha256": "3d7158fb60326f026bad60470582a8585def600c2550ce0e6cf5daa8d709fb52"
+  },
+  "qualification_blockers": [
+    "all 13 legacy scenes lack mounting-session identity",
+    "native RS depth/factory/timestamps/IR absent in legacy recordings",
+    "surveyed dense support and uncertainty unavailable",
+    "clock offset/drift/uncertainty unqualified",
+    "no independent held-out scene groups or rooms qualified",
+    "native fast diagnostic rerun equivalence unqualified"
+  ],
+  "scenes": {
+    "S1_target_0.5m": {
+      "indices": [
+        0,
+        74,
+        149
+      ],
+      "recording_sha256": "52841f592bfba1504876fd3b86b2d6f2f268724a87159abaf241cc8a47c0230a",
+      "audit": {
+        "rig_session": null,
+        "split": "development",
+        "absolute_reference_qualified": false,
+        "dynamic_reference_available": false,
+        "missing_reference_evidence": [
+          "native_depth",
+          "factory_geometry",
+          "device_timestamps",
+          "ir",
+          "survey",
+          "clock_qualification",
+          "rig_session"
+        ],
+        "tape_m_unqualified": 0.5,
+        "legacy_aligned_depth": true,
+        "reference_status": "unqualified; independent geometry and clock validation required"
+      },
+      "rectification": [
+        {
+          "matches": 1382,
+          "median_dy_px": -0.36893463134765625,
+          "robust_rms_dy_px": 0.32029191284179687
+        },
+        {
+          "matches": 1394,
+          "median_dy_px": -0.33837890625,
+          "robust_rms_dy_px": 0.29040735168457027
+        },
+        {
+          "matches": 1500,
+          "median_dy_px": -0.3329925537109375,
+          "robust_rms_dy_px": 0.28674247741699216
+        }
+      ],
+      "modes": {
+        "independent_reference_d128": {
+          "mean_measured_coverage_pct": 52.0376880787037,
+          "correct_completeness": null,
+          "first_failure_pixel_totals": {
+            "out_of_image": 0,
+            "range_boundary": 381365,
+            "ambiguous": 1,
+            "lr_failed": 944696,
+            "metric_rejected": 0,
+            "unattributed": 1438738
+          },
+          "artifacts": [
+            {
+              "file": "S1_target_0.5m-0-independent_reference_d128.npz",
+              "sha256": "08ab0ee9f11ca47527782bc440bcb944f93e3f84b5d5192ff80da80134550e27"
+            },
+            {
+              "file": "S1_target_0.5m-74-independent_reference_d128.npz",
+              "sha256": "5af2224a07a5d1fd7d266f24742ba0e48f70ba91e96e81280c0d9eb76bb17d15"
+            },
+            {
+              "file": "S1_target_0.5m-149-independent_reference_d128.npz",
+              "sha256": "7d67bd6b9e2b49b461da0ac7ac5fbc5ae5e61fe3db0ed9148d2f0e8b2e6e395a"
+            }
+          ]
+        },
+        "independent_reference_d256": {
+          "mean_measured_coverage_pct": 63.57957175925926,
+          "correct_completeness": null,
+          "first_failure_pixel_totals": {
+            "out_of_image": 0,
+            "range_boundary": 176857,
+            "ambiguous": 1,
+            "lr_failed": 830094,
+            "metric_rejected": 0,
+            "unattributed": 1757848
+          },
+          "artifacts": [
+            {
+              "file": "S1_target_0.5m-0-independent_reference_d256.npz",
+              "sha256": "87167c27caea2a8abc4b52c91ba570aca35d6e16e4817e9086bec5d778e103d6"
+            },
+            {
+              "file": "S1_target_0.5m-74-independent_reference_d256.npz",
+              "sha256": "cf06ae0ee86068e93b03618dcac00346c9bfe5b863244a27573693373e41737f"
+            },
+            {
+              "file": "S1_target_0.5m-149-independent_reference_d256.npz",
+              "sha256": "09d81ac78c8bdc09d378ece0a796870a7207ee2118bafc2fce265ff7f3a1ec35"
+            }
+          ]
+        },
+        "live_cpu": {
+          "mean_measured_coverage_pct": 10.654984085648149,
+          "correct_completeness": null,
+          "first_failure_pixel_totals": {
+            "support_failure": 23952,
+            "raw_match_rejected": 1844817,
+            "lr_rejected": 601385,
+            "metric_rejected": 57,
+            "unattributed": 294589
+          },
+          "artifacts": [
+            {
+              "file": "S1_target_0.5m-0-live_cpu.npz",
+              "sha256": "c961c1929c279e4c9491bca49e42fa122809cd163266304a67a261ce8e37d322"
+            },
+            {
+              "file": "S1_target_0.5m-74-live_cpu.npz",
+              "sha256": "f9716ac5b33e7f87795886eefd71baf5cc66f9b3ae32e58881bb175e8ae764bd"
+            },
+            {
+              "file": "S1_target_0.5m-149-live_cpu.npz",
+              "sha256": "d09993b86ce4d00ffdcc47d031777777ab63407b96f480951e5648c28c11fd6f"
+            }
+          ]
+        },
+        "full_cpu": {
+          "mean_measured_coverage_pct": 33.41547309027778,
+          "correct_completeness": null,
+          "first_failure_pixel_totals": {
+            "support_failure": 23952,
+            "raw_match_rejected": 840322,
+            "lr_rejected": 976651,
+            "metric_rejected": 4,
+            "unattributed": 923871
+          },
+          "artifacts": [
+            {
+              "file": "S1_target_0.5m-0-full_cpu.npz",
+              "sha256": "de19b6b2a4ffdb3e4c19c050ea4057ce8b1854f1a44ac69a8a6eaef24b688bbe"
+            },
+            {
+              "file": "S1_target_0.5m-74-full_cpu.npz",
+              "sha256": "f18e4015ec4264a9e5fac3c9f271529339b6b9783aa2b4afd47dd3c477a19cb1"
+            },
+            {
+              "file": "S1_target_0.5m-149-full_cpu.npz",
+              "sha256": "04aff6746914db85c9373dea2e7e760e1b926494d424ae1da0dc4fc2d36e1e71"
+            }
+          ]
+        }
+      }
+    },
+    "S2_white_wall": {
+      "indices": [
+        0,
+        74,
+        149
+      ],
+      "recording_sha256": "a75713ec4016be80d38a29db1c4dec72240483ecbe2eab715973283e9c343c9a",
+      "audit": {
+        "rig_session": null,
+        "split": "development",
+        "absolute_reference_qualified": false,
+        "dynamic_reference_available": false,
+        "missing_reference_evidence": [
+          "native_depth",
+          "factory_geometry",
+          "device_timestamps",
+          "ir",
+          "survey",
+          "clock_qualification",
+          "rig_session"
+        ],
+        "tape_m_unqualified": null,
+        "legacy_aligned_depth": true,
+        "reference_status": "unqualified; independent geometry and clock validation required"
+      },
+      "rectification": [
+        {
+          "matches": 459,
+          "median_dy_px": -0.3421630859375,
+          "robust_rms_dy_px": 0.2329231201171875
+        },
+        {
+          "matches": 442,
+          "median_dy_px": -0.3391571044921875,
+          "robust_rms_dy_px": 0.23606767272949217
+        },
+        {
+          "matches": 474,
+          "median_dy_px": -0.336944580078125,
+          "robust_rms_dy_px": 0.24328430786132813
+        }
+      ],
+      "modes": {
+        "independent_reference_d128": {
+          "mean_measured_coverage_pct": 74.8591579861111,
+          "correct_completeness": null,
+          "first_failure_pixel_totals": {
+            "out_of_image": 0,
+            "range_boundary": 65506,
+            "ambiguous": 97,
+            "lr_failed": 629491,
+            "metric_rejected": 0,
+            "unattributed": 2069706
+          },
+          "artifacts": [
+            {
+              "file": "S2_white_wall-0-independent_reference_d128.npz",
+              "sha256": "ce662ea959c5b378273b346553850c2c533cf63634add15b23a60da43a9aad1a"
+            },
+            {
+              "file": "S2_white_wall-74-independent_reference_d128.npz",
+              "sha256": "884bbcfb43b7ab5b86252522457868dac0b5a51e51bd94e807d9c38a9acc5ae9"
+            },
+            {
+              "file": "S2_white_wall-149-independent_reference_d128.npz",
+              "sha256": "32febc655be6b026673c0eef6b30821ce2b7cd9289cef970522bcb85d71607d8"
+            }
+          ]
+        },
+        "independent_reference_d256": {
+          "mean_measured_coverage_pct": 74.99851707175925,
+          "correct_completeness": null,
+          "first_failure_pixel_totals": {
+            "out_of_image": 0,
+            "range_boundary": 57725,
+            "ambiguous": 16,
+            "lr_failed": 633500,
+            "metric_rejected": 0,
+            "unattributed": 2073559
+          },
+          "artifacts": [
+            {
+              "file": "S2_white_wall-0-independent_reference_d256.npz",
+              "sha256": "8aeb49faea6b063585e2c24521b2b6d9cb69bbb699c755ac154c2c07c36be19c"
+            },
+            {
+              "file": "S2_white_wall-74-independent_reference_d256.npz",
+              "sha256": "c6092ba08e192bb93753d2333de99d715c2b317d34053f68a353089b7974dd05"
+            },
+            {
+              "file": "S2_white_wall-149-independent_reference_d256.npz",
+              "sha256": "b24ee524919a6e79790d5b6c0b30005ec28506bab7d4ee085bee91979151a10f"
+            }
+          ]
+        },
+        "live_cpu": {
+          "mean_measured_coverage_pct": 13.089156539351853,
+          "correct_completeness": null,
+          "first_failure_pixel_totals": {
+            "support_failure": 23952,
+            "raw_match_rejected": 1648235,
+            "lr_rejected": 730709,
+            "metric_rejected": 15,
+            "unattributed": 361889
+          },
+          "artifacts": [
+            {
+              "file": "S2_white_wall-0-live_cpu.npz",
+              "sha256": "c356bee44e4254e01ab62b71cdaa082dd131c4a1d9f98c8e83d7119308b900fb"
+            },
+            {
+              "file": "S2_white_wall-74-live_cpu.npz",
+              "sha256": "6400b0a91cbb2f78c43dbef1df59c3104b1441d2d460d268aafc7ab96d7fcda2"
+            },
+            {
+              "file": "S2_white_wall-149-live_cpu.npz",
+              "sha256": "683cf76358a063319e0493fdf2759588977833dd3f403d9b7c0d5a6ea8dae646"
+            }
+          ]
+        },
+        "full_cpu": {
+          "mean_measured_coverage_pct": 35.61443865740741,
+          "correct_completeness": null,
+          "first_failure_pixel_totals": {
+            "support_failure": 23952,
+            "raw_match_rejected": 800880,
+            "lr_rejected": 955291,
+            "metric_rejected": 9,
+            "unattributed": 984668
+          },
+          "artifacts": [
+            {
+              "file": "S2_white_wall-0-full_cpu.npz",
+              "sha256": "763b9e8c194a40266e14d1878c0842fcd4bc2f9d46859a225ae9703c83bb587c"
+            },
+            {
+              "file": "S2_white_wall-74-full_cpu.npz",
+              "sha256": "6d988c584629d0800b0bdc275142085a530238383e5d1c11ba62a78627ece12a"
+            },
+            {
+              "file": "S2_white_wall-149-full_cpu.npz",
+              "sha256": "9cc0f2012f0b60e65e65e64371e0017f51a47c47622eb9bb557e2cbbcecbe3b6"
+            }
+          ]
+        }
+      }
+    },
+    "S3_person_white_wall": {
+      "indices": [
+        0,
+        74,
+        149
+      ],
+      "recording_sha256": "f91afa58c45301ef0a5430a430b68087fd058e46867f2b784087ffafc5437382",
+      "audit": {
+        "rig_session": null,
+        "split": "development",
+        "absolute_reference_qualified": false,
+        "dynamic_reference_available": false,
+        "missing_reference_evidence": [
+          "native_depth",
+          "factory_geometry",
+          "device_timestamps",
+          "ir",
+          "survey",
+          "clock_qualification",
+          "rig_session"
+        ],
+        "tape_m_unqualified": null,
+        "legacy_aligned_depth": true,
+        "reference_status": "unqualified; independent geometry and clock validation required"
+      },
+      "rectification": [
+        {
+          "matches": 406,
+          "median_dy_px": -0.4269561767578125,
+          "robust_rms_dy_px": 0.2884618011474609
+        },
+        {
+          "matches": 406,
+          "median_dy_px": -0.394927978515625,
+          "robust_rms_dy_px": 0.2801366546630859
+        },
+        {
+          "matches": 372,
+          "median_dy_px": -0.41339111328125,
+          "robust_rms_dy_px": 0.2970131744384765
+        }
+      ],
+      "modes": {
+        "independent_reference_d128": {
+          "mean_measured_coverage_pct": 78.87279369212962,
+          "correct_completeness": null,
+          "first_failure_pixel_totals": {
+            "out_of_image": 0,
+            "range_boundary": 53027,
+            "ambiguous": 9,
+            "lr_failed": 531089,
+            "metric_rejected": 0,
+            "unattributed": 2180675
+          },
+          "artifacts": [
+            {
+              "file": "S3_person_white_wall-0-independent_reference_d128.npz",
+              "sha256": "8f4c7c3409d590be511a069142ad2e7dca265789990e41f9d09ea8924ebffec5"
+            },
+            {
+              "file": "S3_person_white_wall-74-independent_reference_d128.npz",
+              "sha256": "c3724ba29488da4e18001d374762dc7dc1ade3c6676e87a722ac733385b02f8e"
+            },
+            {
+              "file": "S3_person_white_wall-149-independent_reference_d128.npz",
+              "sha256": "47e2061308764dbdeb007198984313a44c5d515b193ee102ae78c8fccb5358fa"
+            }
+          ]
+        },
+        "independent_reference_d256": {
+          "mean_measured_coverage_pct": 78.54488570601852,
+          "correct_completeness": null,
+          "first_failure_pixel_totals": {
+            "out_of_image": 0,
+            "range_boundary": 51882,
+            "ambiguous": 5,
+            "lr_failed": 541304,
+            "metric_rejected": 0,
+            "unattributed": 2171609
+          },
+          "artifacts": [
+            {
+              "file": "S3_person_white_wall-0-independent_reference_d256.npz",
+              "sha256": "1a55ef9621e9726aeec8602433af363d51ab6a7ee79d1632295ffea78aee434d"
+            },
+            {
+              "file": "S3_person_white_wall-74-independent_reference_d256.npz",
+              "sha256": "0b3e5c6ac27c4ac41de9653a82fae900ab9605aa84d6253fe0e71c88fdc791e3"
+            },
+            {
+              "file": "S3_person_white_wall-149-independent_reference_d256.npz",
+              "sha256": "965c467621eaa9b2644e128e4fde9fde8b343f7240568653edfe4355b45ce4a4"
+            }
+          ]
+        },
+        "live_cpu": {
+          "mean_measured_coverage_pct": 13.967339409722223,
+          "correct_completeness": null,
+          "first_failure_pixel_totals": {
+            "support_failure": 23952,
+            "raw_match_rejected": 1632936,
+            "lr_rejected": 721716,
+            "metric_rejected": 27,
+            "unattributed": 386169
+          },
+          "artifacts": [
+            {
+              "file": "S3_person_white_wall-0-live_cpu.npz",
+              "sha256": "15da50618293748c3455d2a9dc1f8c757bf567153a77a7d321a4cca043a4d09d"
+            },
+            {
+              "file": "S3_person_white_wall-74-live_cpu.npz",
+              "sha256": "ca15487d095ac6be415065819354a63a75dff49c4f95773ee15a4d57bcc2b3bc"
+            },
+            {
+              "file": "S3_person_white_wall-149-live_cpu.npz",
+              "sha256": "0515d93f485c23bb04d90b0f08ef04a4cdfee9ca21c919d244a145999d8c7c1b"
+            }
+          ]
+        },
+        "full_cpu": {
+          "mean_measured_coverage_pct": 38.37004484953704,
+          "correct_completeness": null,
+          "first_failure_pixel_totals": {
+            "support_failure": 23952,
+            "raw_match_rejected": 749655,
+            "lr_rejected": 930311,
+            "metric_rejected": 27,
+            "unattributed": 1060855
+          },
+          "artifacts": [
+            {
+              "file": "S3_person_white_wall-0-full_cpu.npz",
+              "sha256": "d824cd9544a839124b3062f608a92c69e809b5430da2d4a35a972278c12961f6"
+            },
+            {
+              "file": "S3_person_white_wall-74-full_cpu.npz",
+              "sha256": "405aad54438e9779806ba801a79e6d126d77de06fea18b1bcffa02b81a6dae4e"
+            },
+            {
+              "file": "S3_person_white_wall-149-full_cpu.npz",
+              "sha256": "7a6c8c030e9061861d72791f8476548868c7dbd1350f16720386e35d5ded0ad2"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "verification": {
+    "full_pytest": {
+      "passed": 3556,
+      "skipped": 165,
+      "failed": 1
+    },
+    "gpu_marked_pytest": {
+      "passed": 54,
+      "skipped": 2,
+      "deselected": 3665,
+      "failed": 1
+    },
+    "failed_test": "tests/test_milestone_v9_audit.py::test_v9_gpu_hardware_execution_ortho_hybrid_and_selective_repair",
+    "required_gate_ms": 4.167,
+    "artifact_hash_and_mask_rechecks": 36,
+    "commit_and_push": "withheld: repository rule requires passing suites before every commit",
+    "2026-11-05-pytest-final.log": {
+      "path": "/home/bjoern/stereoforge_quality_evidence/2026-11-05-pytest-final.log",
+      "sha256": "03fbb116e2821450fea0582cd34570960eb13485c56d579ee30059caa28bcf3a"
+    },
+    "2026-11-05-pytest-gpu-final.log": {
+      "path": "/home/bjoern/stereoforge_quality_evidence/2026-11-05-pytest-gpu-final.log",
+      "sha256": "bf5a018ea223d748c63c4145b419f73b2e8c51baf67d1d1637a41894a626574c"
+    },
+    "2026-11-05-alignment-semantics.json": {
+      "path": "/home/bjoern/stereoforge_quality_evidence/2026-11-05-alignment-semantics.json",
+      "sha256": "64957a0875496638e1807741ee0d9a3c92ee2554c1867d32f66a31301ae672dd"
+    },
+    "2026-11-05-corpus-inventory.json": {
+      "path": "/home/bjoern/stereoforge_quality_evidence/2026-11-05-corpus-inventory.json",
+      "sha256": "10c1eb4f6e2039d6d0454ece792ddde35514407ca7b5de19461699d0ee38d88e"
+    },
+    "native_ctest": {
+      "passed": 57,
+      "failed": 0,
+      "log": "/home/bjoern/stereoforge_quality_evidence/2026-11-05-ctest-final.log",
+      "sha256": "062d59768b1c894b08b422ce60c98823ffdb283ab12c33ad1b84a6a1b6ec7854"
+    }
+  },
+  "microbenchmark_diagnosis": {
+    "summary_path": "/home/bjoern/stereoforge_quality_evidence/2026-11-05-microbenchmark/summary.json",
+    "summary_sha256": "888f6539359f22fa90dd8da829e7632f1f8fd613dc9cfb6ed637a8042b7cccd3",
+    "fresh_gpu_p50_ms": [
+      18.813105132728577,
+      17.99487047674942
+    ],
+    "existing_gpu_p50_ms": [
+      18.272317629776,
+      18.99052222740555
+    ],
+    "shader_identities_match": true,
+    "all_30_plane_parity_passed": true,
+    "coarse_gpu_p50_ms": [
+      13.976715933357237,
+      14.22695138381195,
+      14.701653323375703,
+      12.690071292606355
+    ],
+    "isolated_hardware_qualified": false,
+    "user_gpu_clients_left_running": true,
+    "conclusion": "failure reproduced in existing and fresh binaries with matching shader identities; coarse interval dominates; no causal attribution of interference"
+  }
+}

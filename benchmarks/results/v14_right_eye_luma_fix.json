@@ -1,0 +1,48 @@
+{
+  "schema": "stereoforge.right_eye_luma_fix.v1",
+  "cause": "adaptive match pointers already address one eye, but six luma reads used stereo-global t; right eye read past its image",
+  "fix": "use eye-local i for adaptive boundary luma and neighbors; Census planes retain stereo-global t",
+  "failure": {
+    "ablation_report": "/home/bjoern/stereoforge_quality_evidence/2026-11-05-live-family-ablations/report.json",
+    "exit_code": 139,
+    "core_pid": 2428835,
+    "raw_disparity_tail_dependence": 219,
+    "raw_validity_tail_dependence": 194
+  },
+  "regression": {
+    "name": "test_adaptive_right_matching_cannot_read_past_eye_local_luma",
+    "red_log": "/tmp/right-luma-regression-red.log",
+    "green_log": "/tmp/right-luma-regression-green.log",
+    "focused_log": "/tmp/right-luma-focused.log",
+    "focused_passed": 53,
+    "focused_skipped": 5,
+    "focused_deselected": 2
+  },
+  "source_sha256": {
+    "python/stereoforge/shaders/daxa/refinement.slang": "00596623491addef4fdd5b1b8c7ece6b7c5889c3a488ada74a40716939746dda",
+    "tests/test_slang_cpu_backend_v10.py": "43a8cf461a3fce3b31f40bcf76135380ad85fce7beac71f925d832f17985caf2"
+  },
+  "native_build": "passed",
+  "full_reverification": {
+    "directory": "/home/bjoern/stereoforge_quality_evidence/2026-11-05-right-luma-verification",
+    "ctest": {
+      "passed": 57,
+      "failed": 0
+    },
+    "full_pytest": {
+      "passed": 3581,
+      "skipped": 170,
+      "failed": 1
+    },
+    "gpu_pytest": {
+      "passed": 54,
+      "skipped": 2,
+      "failed": 1
+    },
+    "remaining_failure": "preserved4.167ms microbenchmark under protected shared GPU load",
+    "full_pytest_gpu_p50_ms": 20.520589373931884,
+    "commit_push": "withheld"
+  },
+  "absolute_accuracy_qualified": false,
+  "promotion": "withheld"
+}

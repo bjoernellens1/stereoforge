@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Phase 2 prototype: reference-quality full-resolution stereo (numpy/OpenCV, slow but exact) with uncertainty.
+"""Full-resolution single-pair references, without coarse-prior locking.
 
-Design (see implementation_plan.md): no coarse-prior locking; cost = normalised ZSAD + gradient SAD over the whole
-disparity range; 8-path SGM with image-gradient-adaptive P2; two-way left-right check with occlusion map;
-continuous sub-pixel from a parabola on the *aggregated* cost; per-pixel sigma_d from cost-curve curvature.
-This is the algorithmic reference to be validated against physical metrics before porting to the GPU.
+Compare normalized photometric/gradient and Census costs, 4/8 SGM paths and
+explicit subpixel fits on identical inputs. Both eyes are independently matched.
+Curvature and uniqueness are diagnostics, not calibrated absolute uncertainty.
+Physical quality must be established before any production promotion.
 """
 from __future__ import annotations
 
@@ -26,8 +26,13 @@ class Params:
     p2_min: float = 3.0
     edge_tau: float = 12.0  # luma step at which P2 is halved
     lr_tol: float = 1.0
-    uniqueness: float = 0.0  # optional min relative gap best vs second-best; sigma already expresses ambiguity
+    uniqueness: float = 0.0  # minimum relative gap to the nonadjacent second-best cost
     texture_scale: float = 10.0  # local luma std at which the data term is at half weight
+    matching_cost: str = 'normalized'  # normalized photometric/gradient or 5x5 Census
+    paths: int = 8
+    subpixel: str = 'equiangular'  # explicit cost-fit ablation; no calibrated sigma
+    lr_sampling: str = 'nearest'
+    lr_max_jump: float = 1.0  # maximum right disparity change across contributing taps
 
 
 def _prep(gray: np.ndarray, win: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -38,15 +43,37 @@ def _prep(gray: np.ndarray, win: int) -> tuple[np.ndarray, np.ndarray, np.ndarra
 
 
 def cost_volume(left: np.ndarray, right: np.ndarray, p: Params) -> np.ndarray:
-    """Left-reference cost volume (H, W, D): 0.7 * boxed normalised ZSAD + 0.3 * boxed gradient SAD (clipped)."""
+    """Left-reference (H,W,D) normalized photometric/gradient or Census costs.
+
+    Census uses 24 comparisons, scaled to [0,20] with the full 5x5 window
+    required in both images. Its border is unavailable rather than reflected.
+    """
+    h, w = left.shape
+    vol = np.full((h, w, p.disparities), BIG, np.float32)
+    if p.matching_cost == 'census':
+        descriptors = []
+        for gray in (left, right):
+            census = np.zeros((h, w), np.uint32)
+            center = gray[2:h-2, 2:w-2]
+            if h >= 5 and w >= 5:
+                for dy in range(-2, 3):
+                    for dx in range(-2, 3):
+                        if dx or dy:
+                            census[2:h-2, 2:w-2] <<= 1
+                            census[2:h-2, 2:w-2] |= gray[2+dy:h-2+dy, 2+dx:w-2+dx] < center
+            descriptors.append(census)
+        popcount = np.array([i.bit_count() for i in range(256)], np.uint8)
+        for d in range(min(p.disparities, max(0, w-4))):
+            xor = np.ascontiguousarray(descriptors[0][2:h-2, 2+d:w-2] ^ descriptors[1][2:h-2, 2:w-2-d])
+            counts = popcount[xor.view(np.uint8).reshape(*xor.shape, 4)].sum(axis=-1)
+            vol[2:h-2, 2+d:w-2, d] = counts * (20. / 24.)
+        return vol
     lz, lg, lsd = _prep(left, p.zsad_window)
     rz, rg, _ = _prep(right, p.zsad_window)
     # Down-weight the data term where the left patch carries no texture so smoothness (not noise) decides there.
     texture = np.clip(cv2.boxFilter(lsd, -1, (9, 9)) / (cv2.boxFilter(lsd, -1, (9, 9)) + p.texture_scale), 0.15, 1.0)
     gl = cv2.Sobel(lg, cv2.CV_32F, 1, 0, ksize=3) / 8.0
     gr = cv2.Sobel(rg, cv2.CV_32F, 1, 0, ksize=3) / 8.0
-    h, w = left.shape
-    vol = np.full((h, w, p.disparities), BIG, np.float32)
     for d in range(p.disparities):
         if d >= w:
             break
@@ -72,7 +99,7 @@ def _step(prev: np.ndarray, cost: np.ndarray, p1: float, p2: np.ndarray) -> np.n
 
 
 def aggregate(vol: np.ndarray, gray: np.ndarray, p: Params) -> np.ndarray:
-    """8-path SGM with gradient-adaptive P2; returns summed aggregated cost (H, W, D) float32."""
+    """4/8-path SGM with gradient-adaptive P2; summed (H,W,D) float32."""
     h, w, d = vol.shape
     g = gray.astype(np.float32)
     # P2 per path step depends on the luma step along the path direction.
@@ -102,6 +129,8 @@ def aggregate(vol: np.ndarray, gray: np.ndarray, p: Params) -> np.ndarray:
                 prev = _step(prev, vol[y], p.p1, p2_of(np.abs(g[y] - g[py])))
             total[y] += prev
             py = y
+    if p.paths == 4:
+        return total
     # diagonals: predecessor at (y - sy, x - sx)
     for sy in (1, -1):
         for sx in (1, -1):
@@ -129,9 +158,10 @@ def aggregate(vol: np.ndarray, gray: np.ndarray, p: Params) -> np.ndarray:
 
 
 def subpixel_and_sigma(agg: np.ndarray, p: Params) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Winner-take-all with parabola refinement on the aggregated cost.
+    """Winner-take-all with explicit equiangular, parabolic or no refinement.
 
-    Returns (disparity, sigma_d, curvature, uniqueness_ratio). sigma_d = 1/sqrt(curvature_per_cost_unit) scaled later by calibration.
+    Returns (disparity, curvature, uniqueness_ratio, minimum_cost).
+    Curvature is a diagnostic; it is not calibrated absolute uncertainty.
     """
     h, w, d = agg.shape
     wta = agg.argmin(axis=2)
@@ -140,9 +170,12 @@ def subpixel_and_sigma(agg: np.ndarray, p: Params) -> tuple[np.ndarray, np.ndarr
     cm = agg[rows, cols, np.clip(wta - 1, 0, d - 1)]
     cp = agg[rows, cols, np.clip(wta + 1, 0, d - 1)]
     denom = cm - 2 * c0 + cp
-    # Equiangular (V-shaped) interpolation: the matching cost is SAD-like, a parabola would pull estimates to integers.
+    # Equiangular fits a V-shaped cost; parabola is a separate tested hypothesis.
     slope = np.maximum(cm, cp) - c0
-    off = np.where(slope > 1e-6, 0.5 * (cm - cp) / np.maximum(slope, 1e-6), 0.0)
+    fit_denom = denom if p.subpixel == 'parabolic' else slope
+    off = np.where(fit_denom > 1e-6, 0.5 * (cm - cp) / np.maximum(fit_denom, 1e-6), 0.0)
+    if p.subpixel == 'none':
+        off.fill(0)
     off = np.clip(off, -0.5, 0.5)
     interior = (wta > 0) & (wta < d - 1)
     disp = np.where(interior, wta + off, wta.astype(np.float32)).astype(np.float32)
@@ -157,17 +190,55 @@ def subpixel_and_sigma(agg: np.ndarray, p: Params) -> tuple[np.ndarray, np.ndarr
     return disp, curv, uniq, c0.astype(np.float32)
 
 
-def right_disparity_from_left_volume(agg: np.ndarray) -> np.ndarray:
-    """WTA right-reference disparity from the left-reference aggregated volume: C_R(x_r, d) = C_L(x_r + d, d)."""
-    h, w, d = agg.shape
-    right = np.full((h, w, d), np.inf, np.float32)
-    for k in range(d):
-        right[:, : w - k, k] = agg[:, k:, k]
-    return right.argmin(axis=2).astype(np.float32)
+def sample_right_disparity(left, right, right_valid, *, mode='nearest', max_jump=1.):
+    """Sample independent right evidence at x-d, without clipping correspondences.
+
+    Linear sampling requires every contributing tap to be reliable and finite,
+    with no disparity jump greater than max_jump. Exact integers need one tap.
+    Returns sampled disparity, sample validity, in-image and discontinuity masks.
+    """
+    left, right, right_valid = np.asarray(left), np.asarray(right), np.asarray(right_valid, bool)
+    if left.ndim != 2 or left.shape != right.shape or right.shape != right_valid.shape or min(left.shape) < 1:
+        raise ValueError('LR sampling requires equal nonempty stereo grids')
+    if mode not in ('nearest', 'linear') or not np.isfinite(max_jump) or max_jump < 0:
+        raise ValueError('invalid LR sampling mode or disparity jump')
+    h, w = left.shape
+    coordinate = np.arange(w)[None, :] - left
+    inside = np.isfinite(coordinate) & (coordinate >= 0) & (coordinate <= w-1)
+    safe = np.where(inside, coordinate, 0.)  # safe indexing never grants support
+    rows = np.arange(h)[:, None]
+    edge = np.zeros(left.shape, dtype=bool)
+    if mode == 'nearest':
+        ix = np.rint(safe).astype(np.intp)
+        sampled = right[rows, ix]
+        supported = inside & right_valid[rows, ix] & np.isfinite(sampled)
+    else:
+        lo = np.floor(safe).astype(np.intp)
+        hi = np.minimum(lo+1, w-1)
+        fraction = safe-lo
+        interpolate = fraction != 0
+        a, b = right[rows, lo], right[rows, hi]
+        va, vb = right_valid[rows, lo] & np.isfinite(a), right_valid[rows, hi] & np.isfinite(b)
+        a = np.where(va, a, 0.)
+        b = np.where(vb, b, 0.)
+        edge = inside & interpolate & va & vb & (np.abs(a-b) > max_jump)
+        supported = inside & va & (~interpolate | vb) & ~edge
+        sampled = a + fraction*(b-a)
+    return np.where(supported, sampled, np.nan), supported, inside, edge
 
 
 def estimate(left: np.ndarray, right: np.ndarray, p: Params | None = None, timings: dict | None = None) -> dict[str, np.ndarray]:
     p = p or Params()
+    if (left.ndim != 2 or left.shape != right.shape or min(left.shape) < 2
+            or not np.isfinite(left).all() or not np.isfinite(right).all()):
+        raise ValueError("stereo inputs must be finite, equal-sized grayscale images")
+    if not isinstance(p.disparities, int) or p.disparities < 4:
+        raise ValueError("reference requires at least four disparities")
+    if p.paths not in (4, 8) or p.matching_cost not in ('normalized', 'census') or p.subpixel not in ('equiangular', 'parabolic', 'none'):
+        raise ValueError('invalid path count, matching cost or subpixel fit')
+    if (p.lr_sampling not in ('nearest', 'linear') or not np.isfinite(p.lr_max_jump)
+            or p.lr_max_jump < 0 or not np.isfinite(p.lr_tol) or p.lr_tol < 0):
+        raise ValueError('invalid LR sampling configuration')
     t0 = time.perf_counter()
     vol = cost_volume(left, right, p)
     t1 = time.perf_counter()
@@ -175,14 +246,37 @@ def estimate(left: np.ndarray, right: np.ndarray, p: Params | None = None, timin
     del vol
     t2 = time.perf_counter()
     disp, curv, uniq, cmin = subpixel_and_sigma(agg, p)
-    disp_r = right_disparity_from_left_volume(agg)
     del agg
-    h, w = disp.shape
-    xs = np.arange(w)[None, :].repeat(h, 0)
-    xr = np.clip(np.round(xs - disp).astype(int), 0, w - 1)
-    lr_diff = np.abs(disp - disp_r[np.arange(h)[:, None], xr])
-    valid = (lr_diff <= p.lr_tol) & (uniq > p.uniqueness) & (disp > 0.5)
+    # Swapping AND mirroring makes positive x_left-x_right disparity a
+    # positive disparity in right-reference coordinates. Aggregate afresh in
+    # the right image: reindexing left path costs is correlated evidence.
+    right_ref, left_target = right[:, ::-1], left[:, ::-1]
+    right_volume = cost_volume(right_ref, left_target, p)
+    right_agg = aggregate(right_volume, right_ref, p)
+    del right_volume
+    right_disp, _, right_uniq, _ = subpixel_and_sigma(right_agg, p)
+    right_valid = ((right_uniq > p.uniqueness) & (right_disp > .5)
+                   & (right_disp < p.disparities - 1))[:, ::-1].copy()
+    support = np.ones(left.shape, dtype=bool)
+    if p.matching_cost == 'census':
+        support[:2] = support[-2:] = False
+        support[:, :2] = support[:, -2:] = False
+        right_valid &= support
+    disp_r = right_disp[:, ::-1].copy()
+    right_correspondence = np.arange(left.shape[1])[None, :] + disp_r
+    right_valid &= np.isfinite(right_correspondence) & (right_correspondence >= 0) & (right_correspondence <= left.shape[1]-1)
+    del right_agg
+    sampled, right_supported, in_image, discontinuity = sample_right_disparity(
+        disp, disp_r, right_valid, mode=p.lr_sampling, max_jump=p.lr_max_jump)
+    lr_diff = np.where(right_supported, np.abs(disp-sampled), np.inf)
+    boundary = (disp <= 0.5) | (disp >= p.disparities - 1)
+    ambiguous = uniq <= p.uniqueness
+    valid = support & in_image & ~boundary & ~ambiguous & (lr_diff <= p.lr_tol)
     occluded = (lr_diff > p.lr_tol) & (disp > 0.5)
     if timings is not None:
-        timings.update(cost_s=t1 - t0, aggregate_s=t2 - t1, post_s=time.perf_counter() - t2)
-    return {"disparity": disp, "valid": valid, "occluded": occluded, "curvature": curv, "uniqueness": uniq, "cost": cmin, "lr_diff": lr_diff}
+        timings.update(cost_s=t1 - t0, aggregate_s=t2 - t1, post_and_right_s=time.perf_counter() - t2)
+    return {"disparity": disp, "right_disparity": disp_r, "right_validity": right_valid, "valid": valid,
+            "occluded": occluded, "curvature": curv, "uniqueness": uniq,
+            "cost": cmin, "lr_diff": lr_diff, "out_of_image": ~in_image,
+            "range_boundary": boundary, "ambiguous": ambiguous, "support": support,
+            "lr_discontinuity": discontinuity, "lr_support_failure": in_image & ~right_supported & ~discontinuity}

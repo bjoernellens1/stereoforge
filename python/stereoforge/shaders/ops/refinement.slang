@@ -6,7 +6,7 @@
 #define SF_PRECISE precise
 #endif
 // Integer diagnostics are a stable wire contract. NaN is canonical on invalid outputs.
-static const uint REF_NO_PRIOR=1,REF_LOW_CONFIDENCE=2,REF_PRIOR_SPAN=4,REF_NONFINITE=8,REF_OUTSIDE=16,REF_UNSUPPORTED=32,REF_TOO_FEW=64,REF_AMBIGUOUS=128,REF_RESTRICTED=256,REF_GLOBAL=512,REF_MISSING_SUBPIXEL=1024,REF_LR_FAILED=2048;
+static const uint REF_NO_PRIOR=1,REF_LOW_CONFIDENCE=2,REF_PRIOR_SPAN=4,REF_NONFINITE=8,REF_OUTSIDE=16,REF_UNSUPPORTED=32,REF_TOO_FEW=64,REF_AMBIGUOUS=128,REF_RESTRICTED=256,REF_GLOBAL=512,REF_MISSING_SUBPIXEL=1024,REF_LR_FAILED=2048,REF_FULL_SEARCH=4096,REF_SEARCH_UNCONFIRMED=8192,REF_PHOTOMETRIC=16384;
 float refinement_invalid(){return asfloat(0x7fc00000);}
 uint refinement_census(uint* gray,uint width,uint x,uint y){uint centre=gray[y*width+x],bits=0,bit=0;[unroll]for(int dy=-2;dy<=2;++dy)[unroll]for(int dx=-2;dx<=2;++dx){if(dx==0&&dy==0)continue;bits|=uint(gray[uint(int(y)+dy)*width+uint(int(x)+dx)]<centre)<<(bit++);}const int2 sym[8]={int2(0,1),int2(0,-1),int2(1,0),int2(-1,0),int2(0,2),int2(0,-2),int2(2,0),int2(-2,0)};[unroll]for(uint k=0;k<8;++k){int2 d=sym[k];bits|=uint(gray[uint(int(y)+d.x)*width+uint(int(x)+d.y)]<gray[uint(int(y)-d.x)*width+uint(int(x)-d.y)])<<(24u+k);}return bits;}
 uint refinement_thermo8(uint v){uint c=min(v,8u);return (1u<<c)-1u;}

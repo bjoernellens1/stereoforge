@@ -1,0 +1,254 @@
+{
+  "schema": "stereoforge.selective_search_study.v1",
+  "scope": "opt-in research controls; defaults unchanged; no physical qualification",
+  "promotion": "withheld: nominal cohort bad2 regressions exceed0.25percentage points; no scene-level CI or physical qualification",
+  "analytic_report": {
+    "path": "/home/bjoern/stereoforge_quality_evidence/2026-11-05-selective-search-retained-analytic/report.json",
+    "sha256": "356f0756442b20f14dcbbda56c304cf672e78707b37259c5a69d74356b8e3a9e"
+  },
+  "pixel_rates": {
+    "path": "/home/bjoern/stereoforge_quality_evidence/2026-11-05-selective-search-retained-analytic/pixel-rates.json",
+    "sha256": "ba6210b0b94097c2cdae1b89423e273cd0cc20bc83c873cfcad74f134ba35148"
+  },
+  "recorded_report": {
+    "path": "/home/bjoern/stereoforge_quality_evidence/2026-11-05-selective-search-recorded/report.json",
+    "sha256": "eefe81b65cb9cfbba3f7c55b4ce289a9ac4d786d73d67172497be7a17df053a3"
+  },
+  "recorded_agreement": {
+    "path": "/home/bjoern/stereoforge_quality_evidence/2026-11-05-selective-search-recorded/agreement.json",
+    "sha256": "a60d8a746ef53a43071c39cc384c955aae5d13b78977c5795cf3b4eb945d3a55"
+  },
+  "first_prototype_report": {
+    "path": "/home/bjoern/stereoforge_quality_evidence/2026-11-05-selective-search-analytic/report.json",
+    "sha256": "e93c33399081a9ee216ddf6e310547a690e2e232895404dda776bb0a101afdd4"
+  },
+  "first_prototype_decision": "rejected: extra search discarded prior local proposals and reduced correct completeness to about8%",
+  "modes": {
+    "baseline": {
+      "configuration": {
+        "disparities": 128,
+        "radius": 2,
+        "subpixel": true,
+        "continuous_subpixel": false,
+        "ortho_hybrid": true,
+        "adaptive_tiles": true,
+        "fast_mode": true,
+        "ultra_fast": true,
+        "selective_repair": true,
+        "planar_recovery": true
+      },
+      "correct_completeness_pct": 15.656992399294014,
+      "measured_coverage_pct": 28.174964440860194,
+      "nearest_correct_disparity_excluded_pixels": 174855,
+      "missing_prior_pixels": 113904,
+      "artifact": {
+        "file": "baseline.npz",
+        "sha256": "17a999542c820bd28a9469dfe602ba408e0672450711743630fc537a4c8d2263"
+      }
+    },
+    "search_only": {
+      "configuration": {
+        "disparities": 128,
+        "radius": 2,
+        "subpixel": true,
+        "continuous_subpixel": false,
+        "ortho_hybrid": true,
+        "adaptive_tiles": true,
+        "fast_mode": true,
+        "ultra_fast": true,
+        "selective_repair": true,
+        "planar_recovery": true,
+        "search_fallback": true
+      },
+      "correct_completeness_pct": 19.22099018971932,
+      "measured_coverage_pct": 31.673521865743314,
+      "nearest_correct_disparity_excluded_pixels": 3149,
+      "missing_prior_pixels": 113904,
+      "artifact": {
+        "file": "search_only.npz",
+        "sha256": "89fbb563f63e8b51ebee09eded9f98ba39051a6be30cafce216152158b28d721"
+      }
+    },
+    "ordinal_only": {
+      "configuration": {
+        "disparities": 128,
+        "radius": 2,
+        "subpixel": true,
+        "continuous_subpixel": false,
+        "ortho_hybrid": true,
+        "adaptive_tiles": true,
+        "fast_mode": true,
+        "ultra_fast": true,
+        "selective_repair": true,
+        "planar_recovery": true,
+        "ordinal_census": true
+      },
+      "correct_completeness_pct": 20.63777410370758,
+      "measured_coverage_pct": 35.00867084843434,
+      "nearest_correct_disparity_excluded_pixels": 174855,
+      "missing_prior_pixels": 113904,
+      "artifact": {
+        "file": "ordinal_only.npz",
+        "sha256": "7c7559c2d6a8129643c1ec9305e823198a05e01eaaff857f8960697d50126654"
+      }
+    },
+    "search_and_ordinal": {
+      "configuration": {
+        "disparities": 128,
+        "radius": 2,
+        "subpixel": true,
+        "continuous_subpixel": false,
+        "ortho_hybrid": true,
+        "adaptive_tiles": true,
+        "fast_mode": true,
+        "ultra_fast": true,
+        "selective_repair": true,
+        "planar_recovery": true,
+        "search_fallback": true,
+        "ordinal_census": true
+      },
+      "correct_completeness_pct": 23.001326129760546,
+      "measured_coverage_pct": 37.2240196937006,
+      "nearest_correct_disparity_excluded_pixels": 3364,
+      "missing_prior_pixels": 113904,
+      "artifact": {
+        "file": "search_and_ordinal.npz",
+        "sha256": "417cdb13a4993297a78cf67369bce0d4bb6a4cd06dbcadbbea39af42ea413b8b"
+      }
+    }
+  },
+  "nominal_bad2_regressions": {
+    "search_only": [
+      {
+        "cohort": "region_lowtexture",
+        "population": "support",
+        "delta_percentage_points": 0.5836822738231189
+      },
+      {
+        "cohort": "region_lowtexture",
+        "population": "measured",
+        "delta_percentage_points": 1.1278982676835625
+      },
+      {
+        "cohort": "region_slant",
+        "population": "support",
+        "delta_percentage_points": 0.8948740225890535
+      },
+      {
+        "cohort": "region_slant",
+        "population": "measured",
+        "delta_percentage_points": 1.246429140320422
+      }
+    ],
+    "ordinal_only": [
+      {
+        "cohort": "all",
+        "population": "support",
+        "delta_percentage_points": 0.5464270522772283
+      },
+      {
+        "cohort": "region_edges",
+        "population": "support",
+        "delta_percentage_points": 2.471789360558841
+      },
+      {
+        "cohort": "region_far",
+        "population": "support",
+        "delta_percentage_points": 0.9691015156167131
+      },
+      {
+        "cohort": "region_lowtexture",
+        "population": "support",
+        "delta_percentage_points": 1.199086410354016
+      },
+      {
+        "cohort": "region_lowtexture",
+        "population": "measured",
+        "delta_percentage_points": 2.119188989520339
+      },
+      {
+        "cohort": "region_thin",
+        "population": "support",
+        "delta_percentage_points": 2.1444339325134028
+      }
+    ],
+    "search_and_ordinal": [
+      {
+        "cohort": "all",
+        "population": "support",
+        "delta_percentage_points": 0.5462345806138691
+      },
+      {
+        "cohort": "region_edges",
+        "population": "support",
+        "delta_percentage_points": 2.493283181085438
+      },
+      {
+        "cohort": "region_far",
+        "population": "support",
+        "delta_percentage_points": 0.3502944706506259
+      },
+      {
+        "cohort": "region_lowtexture",
+        "population": "support",
+        "delta_percentage_points": 1.655881233346022
+      },
+      {
+        "cohort": "region_lowtexture",
+        "population": "measured",
+        "delta_percentage_points": 2.416771992686492
+      },
+      {
+        "cohort": "region_near",
+        "population": "support",
+        "delta_percentage_points": 0.5112656798050057
+      },
+      {
+        "cohort": "region_near",
+        "population": "measured",
+        "delta_percentage_points": 0.6864719920514168
+      },
+      {
+        "cohort": "region_slant",
+        "population": "support",
+        "delta_percentage_points": 1.6659426585577761
+      },
+      {
+        "cohort": "region_slant",
+        "population": "measured",
+        "delta_percentage_points": 2.2964466172968105
+      },
+      {
+        "cohort": "region_thin",
+        "population": "support",
+        "delta_percentage_points": 0.8514664143803223
+      }
+    ]
+  },
+  "recorded_frames": 9,
+  "recorded_artifacts": 36,
+  "byte_exact_fast_diagnostics": 36,
+  "default_witness": {
+    "path": "/home/bjoern/stereoforge_quality_evidence/2026-11-05-search-default-witness/after-identity.json",
+    "sha256": "cb586c7e3de266fc9d0609881f6019b4b01282147074c4df4fe2e57ba424ca57"
+  },
+  "verification": {
+    "cpu_controls_passed": 20,
+    "gpu_parity_cases_passed": 4,
+    "native_ctest_passed": 57,
+    "full_pytest_passed": 3597,
+    "full_pytest_skipped": 170,
+    "full_pytest_failed": 1,
+    "gpu_pytest_passed": 57,
+    "gpu_pytest_skipped": 2,
+    "gpu_pytest_failed": 1,
+    "remaining_failure": "preserved4.167ms GPU microbenchmark under protected workload"
+  },
+  "method_codes": {
+    "0": "no candidate pool",
+    "1": "local prior-guided pool",
+    "2": "full-range candidate pool; validity separate",
+    "3": "local pool restored after an unconfirmed full search"
+  },
+  "work_bound": "at most2D Census candidate costs plus at most2 nine-sample photometric confirmations per pixel"
+}

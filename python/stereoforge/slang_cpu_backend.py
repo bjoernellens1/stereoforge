@@ -911,6 +911,13 @@ def _ensure_cpu_library(
     return so_path
 
 
+REFINEMENT_DIAGNOSTIC_NAMES = (
+    "prediction", "prediction_validity", "lower", "upper", "reason", "method",
+    "winner", "best_cost", "second_cost", "supported_candidates",
+    "evaluated_candidates", "subpixel_applied",
+)
+
+
 class SlangCpuRefinementBackend:
     """Executes the `.slang` stereo & refinement pipelines on CPU via `slangc -target cpp`."""
 
@@ -1082,6 +1089,9 @@ class SlangCpuRefinementBackend:
         max_disparity_bound: int = 0,
         ortho_hybrid: bool = True,
         fast_mode: bool = False,
+        diagnostic_writes: bool = False,
+        search_fallback: bool = False,
+        ordinal_census: bool = False,
         ultra_fast: bool = False,
         selective_repair: bool = True,
         planar_recovery: bool = True,
@@ -1104,6 +1114,8 @@ class SlangCpuRefinementBackend:
     ) -> Dict[str, np.ndarray]:
         n = width * height
         n2 = 2 * n
+        if search_fallback and (not ortho_hybrid or not 2 <= disparities <= 256):
+            raise ValueError('search fallback requires hybrid costs and at most256 disparities')
         nt = int(num_threads) if (num_threads is not None and num_threads > 0) else self.num_threads
         luma_buf = np.ascontiguousarray(luma, dtype=np.uint32)
         support_buf = np.ascontiguousarray(support, dtype=np.uint32)
@@ -1157,6 +1169,9 @@ class SlangCpuRefinementBackend:
                 | (16 if ultra_fast else 0)
                 | (32 if continuous_subpixel else 0)
                 | (64 if adaptive_tiles else 0)
+                | (128 if diagnostic_writes else 0)
+                | (256 if search_fallback else 0)
+                | (512 if ordinal_census else 0)
             )
             params.prior_floor = prior_floor
             params.max_span = max_span
@@ -1204,8 +1219,6 @@ class SlangCpuRefinementBackend:
                 outputs[6][:n] = np.where(meas_mask, 1, 0).astype(np.uint32)
 
             raw_result = {
-                "evaluated_candidates": outputs[19],
-                "subpixel_applied": outputs[20],
                 "census": outputs[24],
                 "census_validity": outputs[25],
                 "raw_disparity": outputs[21],
@@ -1224,6 +1237,8 @@ class SlangCpuRefinementBackend:
                 "completed_provenance": completed[3] if planar_recovery else outputs[6],
                 "completed_disparity": completed[6] if planar_recovery else outputs[0],
             }
+            if 2 in stages and (not fast_mode or diagnostic_writes):
+                raw_result.update({name: outputs[plane] for plane, name in enumerate(REFINEMENT_DIAGNOSTIC_NAMES, 9)})
             if borrow_workspace:
                 return raw_result
             return {k: v.copy() for k, v in raw_result.items()}
@@ -1255,6 +1270,9 @@ class SlangCpuRefinementBackend:
         max_disparity_bound: int = 0,
         ortho_hybrid: bool = True,
         fast_mode: bool = True,
+        diagnostic_writes: bool = False,
+        search_fallback: bool = False,
+        ordinal_census: bool = False,
         ultra_fast: bool = True,
         selective_repair: bool = True,
         planar_recovery: bool = True,
@@ -1269,6 +1287,8 @@ class SlangCpuRefinementBackend:
         4. `depth.slang` (`lr_consistency` at coarse scale)
         5. `refinement.slang` (`census` -> `match` -> `lr` -> `metric` -> `planar` at target scale)
         """
+        if search_fallback and (not ortho_hybrid or not 2 <= disparities <= 256):
+            raise ValueError('search fallback requires hybrid costs and at most256 disparities')
         raw_buf = np.ascontiguousarray(raw_yuyv, dtype=np.uint8)
         nt = int(num_threads) if (num_threads is not None and num_threads > 0) else self.num_threads
         ws_key = (eye_width, source_height, width, height, coarse_width, coarse_height)
@@ -1466,6 +1486,9 @@ class SlangCpuRefinementBackend:
                 | (16 if ultra_fast else 0)
                 | (32 if continuous_subpixel else 0)
                 | (64 if adaptive_tiles else 0)
+                | (128 if diagnostic_writes else 0)
+                | (256 if search_fallback else 0)
+                | (512 if ordinal_census else 0)
             )
             ref_p.prior_floor = 0.05
             ref_p.max_span = 2.0
@@ -1529,8 +1552,6 @@ class SlangCpuRefinementBackend:
                 outputs[6][:n_t] = np.where(meas_mask, 1, 0).astype(np.uint32)
 
             raw_result = {
-                "evaluated_candidates": outputs[19],
-                "subpixel_applied": outputs[20],
                 "census": outputs[24],
                 "census_validity": outputs[25],
                 "raw_disparity": outputs[21],
@@ -1556,6 +1577,9 @@ class SlangCpuRefinementBackend:
                 "luma": luma_t,
                 "support": supp_t,
             }
+            # Never expose skipped writes as current-frame reason evidence.
+            if not fast_mode or diagnostic_writes:
+                raw_result.update({name: outputs[plane] for plane, name in enumerate(REFINEMENT_DIAGNOSTIC_NAMES, 9)})
             if borrow_workspace:
                 return raw_result
             return {k: v.copy() for k, v in raw_result.items()}

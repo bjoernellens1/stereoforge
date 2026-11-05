@@ -1,0 +1,212 @@
+{
+  "schema": "stereoforge.v14.fast_diagnostics.v1",
+  "scope": "development counts only; no physical quality promotion",
+  "full_report": {
+    "path": "/home/bjoern/stereoforge_quality_evidence/2026-11-05-fast-diagnostic-qualified/report.json",
+    "sha256": "d12877545348135c13348230cb5efb7e6c822b7f0507287d32d997ac8d89afbb"
+  },
+  "source_snapshot": {
+    "base_commit": "706c0558f135cc5f5e36aaa5e5c9616778133062",
+    "patch_file": "source.patch",
+    "patch_sha256": "66ccec187c63796f2165ddc07e7d0514949fbe8d929746c2c4cab412baf4215d",
+    "source_files_rechecked": 604
+  },
+  "original_baseline_source_snapshot": {
+    "base_commit": "706c0558f135cc5f5e36aaa5e5c9616778133062",
+    "patch_file": "source.patch",
+    "patch_sha256": "05459d0fac425747bac578833740811f751933a0359674bc8a5c2b90984c3a66",
+    "source_files_rechecked": 600,
+    "source_mismatches": []
+  },
+  "native_strategy": "separate instance; identical fast/ultra/adaptive flags plus reason writes; compare every exported output before counters; producer untouched",
+  "native_contract_coverage": {
+    "resolution": [
+      1280,
+      720
+    ],
+    "adaptive_tiles": [
+      false,
+      true
+    ],
+    "planar_recovery": [
+      false,
+      true
+    ],
+    "original_timestamps_preserved": true
+  },
+  "resident_right_metric_qualification": "direct GPU storage test passes before host readback: unavailable ultra-fast right observations initialized once to NaN/invalid; source IDs invalid; no host canonicalization",
+  "absolute_correct_completeness": null,
+  "scenes": {
+    "S1_target_0.5m": {
+      "indices": [
+        0,
+        74,
+        149
+      ],
+      "byte_equivalence_checked": [
+        true,
+        true,
+        true
+      ],
+      "mean_reason_flag_pct": {
+        "no_prior": 15.036458333333332,
+        "low_prior_confidence": 0.0,
+        "prior_span": 3.4019097222222223,
+        "nonfinite_prior": 0.0,
+        "outside_prior": 0.0,
+        "unsupported": 0.0,
+        "too_few_candidates": 18.438368055555557,
+        "ambiguous": 49.153103298611114,
+        "restricted_minimum": 0.0,
+        "global_boundary": 1.2224030671296298,
+        "missing_subpixel": 6.058268229166667,
+        "lr_failed": 21.75144675925926
+      },
+      "live_artifacts": [
+        {
+          "file": "S1_target_0.5m-0-live_cpu.npz",
+          "sha256": "d7e58beefff9e3476bcef4ba6dd7a8e18baf2a0d14d14082e2e4c4b75be01bde"
+        },
+        {
+          "file": "S1_target_0.5m-74-live_cpu.npz",
+          "sha256": "61c8d0ddc04106dc4086a478a5556c137987f3261cbf68a7584d03a951d8b227"
+        },
+        {
+          "file": "S1_target_0.5m-149-live_cpu.npz",
+          "sha256": "1a40950416f600f014ba7d52bbb66f96f4a492b65681e9b7207b4a4b78a1673d"
+        }
+      ]
+    },
+    "S2_white_wall": {
+      "indices": [
+        0,
+        74,
+        149
+      ],
+      "byte_equivalence_checked": [
+        true,
+        true,
+        true
+      ],
+      "mean_reason_flag_pct": {
+        "no_prior": 13.972222222222221,
+        "low_prior_confidence": 0.0,
+        "prior_span": 5.209780092592593,
+        "nonfinite_prior": 0.0,
+        "outside_prior": 0.0,
+        "unsupported": 0.0,
+        "too_few_candidates": 19.182002314814813,
+        "ambiguous": 41.29929832175926,
+        "restricted_minimum": 0.0,
+        "global_boundary": 0.0904224537037037,
+        "missing_subpixel": 10.052408854166666,
+        "lr_failed": 26.429072627314813
+      },
+      "live_artifacts": [
+        {
+          "file": "S2_white_wall-0-live_cpu.npz",
+          "sha256": "c4462f4685a250b2a9d591f7b2b587afa6feeb65303716cb8bd683e3d607b7de"
+        },
+        {
+          "file": "S2_white_wall-74-live_cpu.npz",
+          "sha256": "05e6fad524cf3818fee928eb50f2eedc9bd32d8703e5aaba3f8c165ef144cf16"
+        },
+        {
+          "file": "S2_white_wall-149-live_cpu.npz",
+          "sha256": "48d5598507a1f7e56a5d1f9382fed3d0c26a100eac393e4108f4fe6fb6555f9a"
+        }
+      ]
+    },
+    "S3_person_white_wall": {
+      "indices": [
+        0,
+        74,
+        149
+      ],
+      "byte_equivalence_checked": [
+        true,
+        true,
+        true
+      ],
+      "mean_reason_flag_pct": {
+        "no_prior": 12.905671296296294,
+        "low_prior_confidence": 0.0,
+        "prior_span": 4.395978009259259,
+        "nonfinite_prior": 0.0,
+        "outside_prior": 0.0,
+        "unsupported": 0.0,
+        "too_few_candidates": 17.301649305555557,
+        "ambiguous": 42.626302083333336,
+        "restricted_minimum": 0.0,
+        "global_boundary": 0.022316261574074073,
+        "missing_subpixel": 10.245768229166668,
+        "lr_failed": 26.10380497685185
+      },
+      "live_artifacts": [
+        {
+          "file": "S3_person_white_wall-0-live_cpu.npz",
+          "sha256": "8b53c285feab929f346857f3e9c203ee72e4fd55f79d0ab6e60727c4ef259c62"
+        },
+        {
+          "file": "S3_person_white_wall-74-live_cpu.npz",
+          "sha256": "5b846103cfda0d491030d8800ca867053fcec72c1312e94c355f46984c936488"
+        },
+        {
+          "file": "S3_person_white_wall-149-live_cpu.npz",
+          "sha256": "b028cd289021a2ebba7db507587e72a644924304b1947a16d06e74e396bcd250"
+        }
+      ]
+    }
+  },
+  "corpus_day_tags": {
+    "path": "/home/bjoern/stereoforge_corpus/campaign_tags_2026-11-05.json",
+    "sha256": "7d662733b7314f07b7631d5df345b014a51aebb49cac293eade14ef7849ad807",
+    "mounting_session_status": "unverified",
+    "reference_geometry_available": false
+  },
+  "unchanged_binary_changed_workload_gate": {
+    "report": "/home/bjoern/stereoforge_quality_evidence/2026-11-05-stale-processes-stopped-gate.json",
+    "sha256": "06b2e59dfff31f0597a8f160ebae714e2199d29bdf2f7889c0bffa3a3db3be61",
+    "gpu_p50_ms": 3.2064623181123735,
+    "host_p50_ms": 3.975334,
+    "threshold_ms": 4.167,
+    "context_ablation_jobs_signalled": false,
+    "isolated_hardware_qualified": false
+  },
+  "verification": {
+    "native_ctest": {
+      "passed": 57,
+      "failed": 0,
+      "scope": "57 passed after resident-right setup fix; later Python reference additions do not change native binary"
+    },
+    "full_pytest": {
+      "passed": 3559,
+      "skipped": 165,
+      "failed": 1,
+      "scope": "before resident-right and explicit RS15fps changes; latest full rerun pending"
+    },
+    "remaining_failure": "preserved4.167ms microbenchmark during shared GPU workload",
+    "commit_status": "withheld until required suites pass",
+    "protected_workload": {
+      "pid": 2244346,
+      "cwd": "/home/bjoern/git/sceneweave",
+      "script": "experiments/d3/run_early_prefix.py",
+      "action": "left running",
+      "observation": "historical PID; no action was taken against this workload"
+    },
+    "current_gate_witness": {
+      "path": "/home/bjoern/stereoforge_quality_evidence/2026-11-05-new-diagnostic-gate-witness.json",
+      "sha256": "d350134b18a8dcd3cb619787d1281c6df55d4da92db317c4ab9cacef45adceb8"
+    }
+  },
+  "native_capture_verification": {
+    "path": "/home/bjoern/stereoforge_quality_evidence/2026-11-05-native-capture-verification.json",
+    "sha256": "49d401b5a0d03d27219aedf02cef16d49572dec4c533939157a783da2e1228fb",
+    "absolute_accuracy_qualified": false
+  },
+  "native_reference_geometry": {
+    "path": "/home/bjoern/stereoforge_quality_evidence/2026-11-05-native-reference-geometry-v2/report.json",
+    "sha256": "6e1974e0098c9d699d28beeaf7b51756aa78dcf55870389adac4010e3efdcaca",
+    "absolute_accuracy_qualified": false
+  }
+}

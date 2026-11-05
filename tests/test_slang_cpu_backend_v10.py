@@ -81,6 +81,18 @@ def test_slang_cpu_backend_synthetic_without_vulkan() -> None:
     inferred_err = np.abs(comp_disp[comp_prov == 6] - float(d_true))
     assert float(np.max(inferred_err)) < 0.25
 
+    # A census-only refresh on a different image must not attach the previous
+    # matching pass's reasons or predicted search interval to the new input.
+    census_only = backend.run_pipeline(
+        luma=np.zeros_like(luma), support=support, coarse_disparity=coarse_disp,
+        coarse_confidence=coarse_conf, coarse_validity=coarse_val,
+        width=w, height=h, coarse_width=cw, coarse_height=ch,
+        fx=260., baseline=.12, principal_offset=0., disparities=64,
+        planar_recovery=False, stages=(1,),
+    )
+    assert 'reason' not in census_only and 'prediction' not in census_only
+    assert 'evaluated_candidates' not in census_only and 'subpixel_applied' not in census_only
+
 
 @pytest.mark.gpu
 def test_slang_cpu_backend_bit_exact_parity_with_vulkan_gpu(tmp_path: Path) -> None:
@@ -498,7 +510,8 @@ def test_concurrent_calls_and_generic_vs_native_parity() -> None:
 
 
 @pytest.mark.gpu
-def test_full_camera_to_depth_cpu_vs_vulkan_gpu_parity(tmp_path: Path) -> None:
+@pytest.mark.parametrize('search_fallback,ordinal_census', [(False, False), (True, False), (False, True), (True, True)])
+def test_full_camera_to_depth_cpu_vs_vulkan_gpu_parity(tmp_path: Path, search_fallback, ordinal_census) -> None:
     """Verifies P1/P2 review requirement #5: full-pipeline CPU-versus-Vulkan outputs
     (validity, metric depth, provenance, right-eye behavior, and low-texture/near-field scenes)."""
     if not REFINE_BENCH.exists() or not COARSE_4X_MANIFEST.exists():
@@ -570,6 +583,10 @@ def test_full_camera_to_depth_cpu_vs_vulkan_gpu_parity(tmp_path: Path) -> None:
             "1",
             "--selective-repair",
             "1",
+            "--search-fallback",
+            str(int(search_fallback)),
+            "--ordinal-census",
+            str(int(ordinal_census)),
             "--planar-recovery",
             "1",
             "--planar-min-anchors",
@@ -594,6 +611,9 @@ def test_full_camera_to_depth_cpu_vs_vulkan_gpu_parity(tmp_path: Path) -> None:
         stdout=subprocess.DEVNULL,
     )
     meta = json.loads(out_json.read_text(encoding="utf-8"))
+    assert meta['search_fallback'] is search_fallback
+    assert meta['ordinal_census'] is ordinal_census
+    assert meta['diagnostic_readback']['fast_output_equivalence_checked']
     gpu_comp_val = np.fromfile(f"{dump_prefix}.completed_validity.u32", dtype=np.uint32)[:n0]
     gpu_comp_prov = np.fromfile(f"{dump_prefix}.completed_provenance.u32", dtype=np.uint32)[:n0]
     gpu_comp_disp = np.fromfile(f"{dump_prefix}.completed_disparity.f32", dtype=np.float32)[:n0]
@@ -607,7 +627,7 @@ def test_full_camera_to_depth_cpu_vs_vulkan_gpu_parity(tmp_path: Path) -> None:
     c_maps = (c_mx, c_my, c_mx, c_my)
 
     backend = SlangCpuRefinementBackend(target_isa="native", num_threads=8)
-    cpu_res = backend.run_full_camera_to_depth_pipeline(
+    cpu_configuration = dict(
         raw_yuyv=yuyv.reshape(-1),
         target_maps=t_maps,
         coarse_maps=c_maps,
@@ -630,6 +650,8 @@ def test_full_camera_to_depth_cpu_vs_vulkan_gpu_parity(tmp_path: Path) -> None:
         selective_repair=True,
         planar_recovery=True,
     )
+    cpu_res = backend.run_full_camera_to_depth_pipeline(**cpu_configuration,
+        search_fallback=search_fallback, ordinal_census=ordinal_census)
 
     # Full-pipeline CPU vs Vulkan GPU parity across validity, provenance, disparity, and metric depth
     val_agreement = float(np.mean(cpu_res["completed_validity"][:n0] == gpu_comp_val))
@@ -638,7 +660,18 @@ def test_full_camera_to_depth_cpu_vs_vulkan_gpu_parity(tmp_path: Path) -> None:
     assert prov_agreement >= 0.99998
     v_mask = (cpu_res["completed_validity"][:n0] != 0) & (gpu_comp_val != 0)
     assert int(np.sum(v_mask)) > 650000
-    assert int(np.sum(gpu_comp_prov == 6)) > 5000
+    inferred = int(np.sum(gpu_comp_prov == 6))
+    if not search_fallback and not ordinal_census:
+        assert inferred > 5000  # Retain the original baseline's planar-path gate.
+    else:
+        legacy = backend.run_full_camera_to_depth_pipeline(**cpu_configuration)
+        legacy_prov = legacy['completed_provenance'][:n0]
+        legacy_inferred = int(np.sum(legacy_prov == 6))
+        assert legacy_inferred > 5000
+        assert inferred > 0  # New measurements can replace formerly inferred pixels.
+        if inferred <= 5000:
+            measured_growth = int(np.sum(gpu_comp_prov == 1)) - int(np.sum(legacy_prov == 1))
+            assert measured_growth >= legacy_inferred - inferred
     disp_diff = np.abs(cpu_res["completed_disparity"][:n0][v_mask] - gpu_comp_disp[v_mask])
     depth_diff = np.abs(cpu_res["completed_depth"][:n0][v_mask] - gpu_comp_depth[v_mask])
     assert float(np.mean(disp_diff <= 1e-4)) >= 0.9999
@@ -648,3 +681,75 @@ def test_full_camera_to_depth_cpu_vs_vulkan_gpu_parity(tmp_path: Path) -> None:
     assert np.all(np.isnan(cpu_res["completed_depth"][n0:]))
 
 
+
+
+def test_full_camera_diagnostics_are_present_only_when_written():
+    backend = SlangCpuRefinementBackend()
+    w, h, cw, ch = 32, 24, 8, 6
+    yy, xx = np.mgrid[:h, :w].astype(np.float32)
+    maps = (xx.ravel(), yy.ravel(), xx.ravel(), yy.ravel())
+    cy, cx = np.mgrid[:ch, :cw].astype(np.float32)
+    coarse = tuple(a.ravel() for a in (4 * cx + 1.5, 4 * cy + 1.5, 4 * cx + 1.5, 4 * cy + 1.5))
+    raw = np.zeros((h, w * 2, 2), np.uint8)
+    raw[..., 0] = np.arange(w * 2, dtype=np.uint8)[None, :] * 3
+    raw[..., 1] = 128
+    kwargs = dict(raw_yuyv=raw.ravel(), target_maps=maps, coarse_maps=coarse,
+                  eye_width=w, source_height=h, stride_bytes=w * 4,
+                  width=w, height=h, coarse_width=cw, coarse_height=ch,
+                  fx=20., baseline=.12, principal_offset=0., disparities=16,
+                  planar_recovery=False)
+    diagnostic = backend.run_full_camera_to_depth_pipeline(**kwargs, fast_mode=False, ultra_fast=False)
+    assert 'reason' in diagnostic and diagnostic['reason'].size == 2 * w * h
+    # Flat gradients give no trustworthy prior in this fixture; masks are real writes.
+    assert np.count_nonzero(diagnostic['reason']) > 0
+    assert 'lower' in diagnostic and 'supported_candidates' in diagnostic
+    fast = backend.run_full_camera_to_depth_pipeline(**kwargs, fast_mode=True, ultra_fast=True)
+    assert 'reason' not in fast and 'lower' not in fast
+
+
+def test_fast_camera_diagnostics_preserve_actual_outputs():
+    backend = SlangCpuRefinementBackend()
+    w, h, cw, ch = 64, 48, 16, 12
+    yy, xx = np.mgrid[:h, :w].astype(np.float32)
+    maps = tuple(a.ravel() for a in (xx, yy, xx, yy))
+    cy, cx = np.mgrid[:ch, :cw].astype(np.float32)
+    coarse = tuple(a.ravel() for a in (4 * cx + 1.5, 4 * cy + 1.5, 4 * cx + 1.5, 4 * cy + 1.5))
+    raw = np.full((h, w * 2, 2), 128, np.uint8)
+    luma = ((xx.astype(np.uint32) * 13 + yy.astype(np.uint32) * 7) % 180 + 30).astype(np.uint8)
+    raw[:, :w, 0] = luma
+    raw[:, w:w*2-8, 0] = luma[:, 8:]
+    kwargs = dict(raw_yuyv=raw.ravel(), target_maps=maps, coarse_maps=coarse,
+                  eye_width=w, source_height=h, stride_bytes=w * 4,
+                  width=w, height=h, coarse_width=cw, coarse_height=ch,
+                  fx=40., baseline=.12, principal_offset=0., disparities=16,
+                  fast_mode=True, ultra_fast=True, adaptive_tiles=True, planar_recovery=True)
+    actual = backend.run_full_camera_to_depth_pipeline(**kwargs)
+    diagnostic = backend.run_full_camera_to_depth_pipeline(**kwargs, diagnostic_writes=True)
+    for field in ('disparity', 'validity', 'depth', 'metric_validity', 'provenance',
+                  'completed_depth', 'completed_validity', 'completed_provenance'):
+        np.testing.assert_array_equal(actual[field], diagnostic[field])
+    assert 'reason' not in actual and 'evaluated_candidates' not in actual
+    assert diagnostic['reason'].size == 2 * w * h
+    assert diagnostic['evaluated_candidates'].sum() > 0
+def test_adaptive_right_matching_cannot_read_past_eye_local_luma():
+    """Memory after stereo luma must not influence right-eye adaptive matching."""
+    backend = SlangCpuRefinementBackend()
+    width, height, coarse_width, coarse_height = 64, 40, 16, 10
+    n = width * height
+    rng = np.random.default_rng(27)
+    luma = rng.integers(0, 256, 2 * n, dtype=np.uint32)
+    # A four-disparity coarse span enters adaptive boundary repair in both eyes.
+    prior = np.tile(np.array([2, 6], np.float32), coarse_width * coarse_height)
+    results = []
+    for tail in (np.zeros(n, np.uint32), rng.integers(0, 256, n, dtype=np.uint32)):
+        storage = np.concatenate((luma, tail))
+        results.append(backend.run_pipeline(
+            luma=storage[:2*n], support=np.ones(2*n, np.uint32),
+            coarse_disparity=prior, coarse_confidence=np.ones(prior.size, np.float32),
+            coarse_validity=np.ones(prior.size, np.uint32), width=width, height=height,
+            coarse_width=coarse_width, coarse_height=coarse_height, fx=50., baseline=.12,
+            principal_offset=0., adaptive_tiles=True, ultra_fast=False,
+            planar_recovery=False, stages=(1, 2), num_threads=1))
+    assert np.count_nonzero(results[0]['raw_validity'][n:]) > 10
+    for field in ('raw_disparity', 'raw_validity', 'reason'):
+        np.testing.assert_array_equal(results[0][field], results[1][field], err_msg=field)

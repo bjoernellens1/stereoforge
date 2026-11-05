@@ -24,6 +24,12 @@ struct DaxaRefinementConfig {
     float planar_coarse_lr_tolerance=2.f;
     float planar_patch_luma_tolerance=12.f;
     float planar_max_rmse=.65f;
+    // Explicit diagnostic instance only: retain fast decisions while writing reason planes.
+    bool diagnostic_writes=false;
+    // Experimental bounded full-domain retry for absent or contradicted priors.
+    bool search_fallback=false;
+    // Fine matching descriptor only; coarse matching and aggregation are unchanged.
+    bool ordinal_census=false;
     void validate()const;
 };
 void validate_daxa_refinement_geometry(const DaxaRectification& coarse,const DaxaRectification& target);
@@ -36,6 +42,9 @@ enum class DaxaRefinementPlane:unsigned {
     RawDisparity,RawConfidence,RawValidity,Census,CensusValidity,RectifiedRgb,Luma,Support,RightRectifiedRgb
 };
 struct DaxaRefinementReadback {
+    bool diagnostics_available=false,diagnostic_equivalence_checked=false;
+    // Ultra-fast computes right raw stereo for LR, but does not publish right metric observations.
+    unsigned measured_eyes=2;
     std::vector<float> disparity,confidence,depth,metric_confidence,prediction,raw_disparity,raw_confidence;
     std::vector<uint32_t> validity,metric_validity,provenance,prediction_validity,lower,upper,reason,method,winner,best_cost,second_cost,supported_candidates,evaluated_candidates,subpixel_applied,raw_validity,census,census_validity,luma,support;
     std::array<std::vector<uint32_t>,2> rectified_rgb;
@@ -80,7 +89,9 @@ public:
     Frame process(const DaxaDepthPipeline::Frame&);
     Frame process(const DaxaDepthPipeline::Frame&,const DaxaFrame& full);
     bool can_process()const;size_t collect();
-    DaxaRefinementReadback readback(const Frame&)const;
+    // Readback never reruns or changes the retained producer. Fast diagnostics
+    // use a separate instance and require bit-exact exported-output equivalence.
+    DaxaRefinementReadback readback(const Frame&,bool diagnostics=true)const;
     uint64_t requested_buffer_bytes()const;uint64_t completed_source_retirements()const;
     static std::string shader_directory();static std::string shader_identity();
     static std::string compiler_version();static std::string compiler_sha256();

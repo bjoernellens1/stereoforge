@@ -1,0 +1,40 @@
+{
+  "schema": "stereoforge.quality_software_verification.v1",
+  "scope": "software tests only; no quality candidate promotion or physical/live qualification",
+  "ctest": {
+    "passed": 57,
+    "failed": 0
+  },
+  "pytest": {
+    "passed": 3609,
+    "skipped": 170,
+    "failed": 0
+  },
+  "gpu_pytest": {
+    "passed": 58,
+    "skipped": 2,
+    "failed": 0
+  },
+  "microbenchmark_gate_ms": 4.167,
+  "microbenchmark_gate_passed": true,
+  "protected_jobs_signalled": false,
+  "independent_review": "no Critical/Important code defects; stale README chronology corrected",
+  "logs": {
+    "ctest.log": {
+      "path": "/home/bjoern/stereoforge_quality_evidence/2026-11-05-subpixel-lr-verification/ctest.log",
+      "sha256": "5e989ca5ee1f482d53d5f6659448d8897039dbe250f156cfefdfc4200194ba72"
+    },
+    "pytest.log": {
+      "path": "/home/bjoern/stereoforge_quality_evidence/2026-11-05-subpixel-lr-verification/pytest.log",
+      "sha256": "f10021ceeb4934649d652acf6d287218b5d926a0c74b4919a78233a8099abe26"
+    },
+    "gpu_pytest.log": {
+      "path": "/home/bjoern/stereoforge_quality_evidence/2026-11-05-subpixel-lr-verification/gpu_pytest.log",
+      "sha256": "b85134332202f758a9d7cbe2e3c0e36950f2c33006258172a2de1f4263d3ef88"
+    },
+    "results.json": {
+      "path": "/home/bjoern/stereoforge_quality_evidence/2026-11-05-subpixel-lr-verification/results.json",
+      "sha256": "cbc9edb5af9cd846cbe3f4ede94c0703fc345e2882298ed12eb9846adfad6b5e"
+    }
+  }
+}

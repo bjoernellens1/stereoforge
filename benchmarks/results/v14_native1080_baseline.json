@@ -1,0 +1,78 @@
+{
+  "schema": "stereoforge.native1080_baseline.v1",
+  "report": {
+    "path": "/home/bjoern/stereoforge_quality_evidence/2026-11-05-native1080-baseline/report.json",
+    "sha256": "48078962fbef65122ff69e3d77617650261dd0b3c604d7e985cc46aaa4fea8e5"
+  },
+  "source_files_rechecked": 606,
+  "source_snapshot": {
+    "base_commit": "706c0558f135cc5f5e36aaa5e5c9616778133062",
+    "patch_sha256": "5cbcad1a96cba30e935adcb85f71f2d2ddff4e63125521de979e99c5d959cba3",
+    "search_range_derivation": {
+      "nearest_Z_m": 0.5,
+      "fx": 1062.3114795866672,
+      "baseline_m": 0.11944400000000001,
+      "max_expected_disparity_px": 253.77346473549983,
+      "margin_px": 16,
+      "range_multiple": 32,
+      "disparities": 288
+    },
+    "scope": "native1080 factory rectification; no resizing or absolute geometry qualification"
+  },
+  "mode": {
+    "all_reasons": {
+      "support_failure": 0,
+      "out_of_image": 0,
+      "range_boundary": 82275,
+      "ambiguous": 1596,
+      "lr_failed": 1092763,
+      "metric_rejected": 0
+    },
+    "first_failure": {
+      "support_failure": 0,
+      "out_of_image": 0,
+      "range_boundary": 82275,
+      "ambiguous": 1224,
+      "lr_failed": 1009708,
+      "metric_rejected": 0,
+      "unattributed": 980393
+    },
+    "reason_bits": {
+      "support_failure": 1,
+      "out_of_image": 2,
+      "range_boundary": 4,
+      "ambiguous": 8,
+      "lr_failed": 16,
+      "metric_rejected": 32
+    },
+    "params": {
+      "disparities": 288,
+      "zsad_window": 5,
+      "p1": 2.0,
+      "p2": 14.0,
+      "p2_min": 3.0,
+      "edge_tau": 12.0,
+      "lr_tol": 1.0,
+      "uniqueness": 0.0,
+      "texture_scale": 10.0,
+      "matching_cost": "normalized",
+      "paths": 8,
+      "subpixel": "equiangular"
+    },
+    "measured_pixels": 980393,
+    "measured_coverage_pct": 47.2797550154321,
+    "cpu_wall_s": 36.15438936999999,
+    "correct_completeness": null,
+    "unobserved_reasons": [
+      "rectification_support",
+      "absolute_correctness"
+    ],
+    "artifact": {
+      "file": "native_reference_probe_20261105_1080-0-independent_reference_d288.npz",
+      "sha256": "47cc8b408f2e49187f64ddae14e39c06619bb56bea9deddac166abdbe3319f77"
+    }
+  },
+  "scope": "single development native1080 frame; distinct capture; no720p quality comparison or known support",
+  "promotion": "withheld",
+  "absolute_correct_completeness": null
+}

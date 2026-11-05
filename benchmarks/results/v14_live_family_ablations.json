@@ -1,0 +1,121 @@
+{
+  "schema": "stereoforge.live_family_ablation_summary.v1",
+  "report": {
+    "path": "/home/bjoern/stereoforge_quality_evidence/2026-11-05-live-family-ablations-v2/report.json",
+    "sha256": "0dd7b940d87f6b094925fb92860412b3d81126d6c63f1afb19df4710e0ca28bd"
+  },
+  "agreement": {
+    "path": "/home/bjoern/stereoforge_quality_evidence/2026-11-05-live-family-ablations-v2/agreement.json",
+    "sha256": "77d2e4ba04286d1528b6033aadddc70dc5eb3cbb082b6aca2f33fb6d6a79036a"
+  },
+  "frames": 9,
+  "variants_per_frame": 12,
+  "artifacts_verified": 108,
+  "exact_fast_diagnostic_equivalence_checks": 99,
+  "scope": "three development scenes; independently estimated SGM agreement, no independently known geometry",
+  "absolute_correct_completeness": null,
+  "promotion": "withheld",
+  "configuration_caveats": [
+    "ultra_fast and descriptor flags bundle multiple changes; no isolated causal attribution",
+    "wide_supported_prior expands only where a usable prior exists; not missing-prior fallback",
+    "CPU timing is not live GPU performance; right-eye outputs not scored"
+  ],
+  "variants": {
+    "baseline": {
+      "mean_coverage_pct": 12.574483989197528,
+      "gained_pixels": 0,
+      "gained_with_sgm_reference": 0,
+      "gained_disagree_sgm_gt2px": 0,
+      "gained_sgm_disagreement_pct": null,
+      "lost_pixels": 0
+    },
+    "radius4": {
+      "mean_coverage_pct": 12.10252700617284,
+      "gained_pixels": 35366,
+      "gained_with_sgm_reference": 24295,
+      "gained_disagree_sgm_gt2px": 10849,
+      "gained_sgm_disagreement_pct": 44.65527886396378,
+      "lost_pixels": 74512
+    },
+    "radius8": {
+      "mean_coverage_pct": 11.83403260030864,
+      "gained_pixels": 36476,
+      "gained_with_sgm_reference": 24515,
+      "gained_disagree_sgm_gt2px": 9196,
+      "gained_sgm_disagreement_pct": 37.511727513767084,
+      "lost_pixels": 97892
+    },
+    "independent_right_bundle": {
+      "mean_coverage_pct": 17.758306809413583,
+      "gained_pixels": 630669,
+      "gained_with_sgm_reference": 530710,
+      "gained_disagree_sgm_gt2px": 176217,
+      "gained_sgm_disagreement_pct": 33.20400972282414,
+      "lost_pixels": 200702
+    },
+    "adaptive_off": {
+      "mean_coverage_pct": 36.85041714891975,
+      "gained_pixels": 2083469,
+      "gained_with_sgm_reference": 1680957,
+      "gained_disagree_sgm_gt2px": 721556,
+      "gained_sgm_disagreement_pct": 42.92530980863877,
+      "lost_pixels": 69926
+    },
+    "continuous_subpixel": {
+      "mean_coverage_pct": 12.574483989197528,
+      "gained_pixels": 0,
+      "gained_with_sgm_reference": 0,
+      "gained_disagree_sgm_gt2px": 0,
+      "gained_sgm_disagreement_pct": null,
+      "lost_pixels": 0
+    },
+    "d256": {
+      "mean_coverage_pct": 13.062692901234568,
+      "gained_pixels": 120080,
+      "gained_with_sgm_reference": 90888,
+      "gained_disagree_sgm_gt2px": 28492,
+      "gained_sgm_disagreement_pct": 31.348472845700204,
+      "lost_pixels": 79586
+    },
+    "census_prior_bundle": {
+      "mean_coverage_pct": 2.195601851851852,
+      "gained_pixels": 96015,
+      "gained_with_sgm_reference": 84609,
+      "gained_disagree_sgm_gt2px": 17401,
+      "gained_sgm_disagreement_pct": 20.566370007918778,
+      "lost_pixels": 956881
+    },
+    "repair_off": {
+      "mean_coverage_pct": 12.551576967592593,
+      "gained_pixels": 3673,
+      "gained_with_sgm_reference": 2328,
+      "gained_disagree_sgm_gt2px": 1667,
+      "gained_sgm_disagreement_pct": 71.606529209622,
+      "lost_pixels": 5573
+    },
+    "spatial_off": {
+      "mean_coverage_pct": 12.574483989197528,
+      "gained_pixels": 0,
+      "gained_with_sgm_reference": 0,
+      "gained_disagree_sgm_gt2px": 0,
+      "gained_sgm_disagreement_pct": null,
+      "lost_pixels": 0
+    },
+    "full_dispatch_bundle": {
+      "mean_coverage_pct": 17.758306809413583,
+      "gained_pixels": 630669,
+      "gained_with_sgm_reference": 530710,
+      "gained_disagree_sgm_gt2px": 176217,
+      "gained_sgm_disagreement_pct": 33.20400972282414,
+      "lost_pixels": 200702
+    },
+    "wide_supported_prior": {
+      "mean_coverage_pct": 32.74351369598765,
+      "gained_pixels": 1770171,
+      "gained_with_sgm_reference": 1439161,
+      "gained_disagree_sgm_gt2px": 600591,
+      "gained_sgm_disagreement_pct": 41.732023032864284,
+      "lost_pixels": 97271
+    }
+  }
+}

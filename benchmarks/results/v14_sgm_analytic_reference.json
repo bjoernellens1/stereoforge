@@ -1,0 +1,121 @@
+{
+  "schema": "stereoforge.sgm_analytic_reference_summary.v1",
+  "scope": "one native720p analytic development scene; not physical sensor accuracy",
+  "report": {
+    "path": "/home/bjoern/stereoforge_quality_evidence/2026-11-05-sgm-analytic-reference/report.json",
+    "sha256": "b3654dfafa2757defebd3b61979b36aa3c291dbafa8ea37fd20d03b52c2b066b"
+  },
+  "physical_accuracy_qualified": false,
+  "promotion": "withheld; one synthetic control only",
+  "support_pixels": 519557,
+  "modes": {
+    "normalized_4path": {
+      "params": {
+        "disparities": 256,
+        "zsad_window": 5,
+        "p1": 2.0,
+        "p2": 14.0,
+        "p2_min": 3.0,
+        "edge_tau": 12.0,
+        "lr_tol": 1.0,
+        "uniqueness": 0.0,
+        "texture_scale": 10.0,
+        "matching_cost": "normalized",
+        "paths": 4,
+        "subpixel": "equiangular"
+      },
+      "correct_completeness_pct": 54.5543607342409,
+      "measured_coverage_pct": 74.35411321568182,
+      "bad_1px_pct_of_support": 5.141880486645354,
+      "bad_2px_pct_of_support": 4.734995390303663,
+      "bad_1px_pct_of_measured": 6.915394810412309,
+      "bad_2px_pct_of_measured": 6.368168734080225,
+      "p95_absolute_error_mm": 1001.5715929871153,
+      "artifact": {
+        "file": "normalized_4path.npz",
+        "sha256": "3c4aa9d9591e208f71c4475d9297bfe1ba8d0142d43d4c2d8801bf4163663390"
+      }
+    },
+    "normalized_8path": {
+      "params": {
+        "disparities": 256,
+        "zsad_window": 5,
+        "p1": 2.0,
+        "p2": 14.0,
+        "p2_min": 3.0,
+        "edge_tau": 12.0,
+        "lr_tol": 1.0,
+        "uniqueness": 0.0,
+        "texture_scale": 10.0,
+        "matching_cost": "normalized",
+        "paths": 8,
+        "subpixel": "equiangular"
+      },
+      "correct_completeness_pct": 55.55829293032333,
+      "measured_coverage_pct": 75.46178763831495,
+      "bad_1px_pct_of_support": 4.572549306428361,
+      "bad_2px_pct_of_support": 4.2085853910158075,
+      "bad_1px_pct_of_measured": 6.059423516898898,
+      "bad_2px_pct_of_measured": 5.5771079942968935,
+      "p95_absolute_error_mm": 938.397006765544,
+      "artifact": {
+        "file": "normalized_8path.npz",
+        "sha256": "59e4c492690324132f56bef49b64070cf758b39d30f0fdad564b0f1138eae0e9"
+      }
+    },
+    "census_4path": {
+      "params": {
+        "disparities": 256,
+        "zsad_window": 5,
+        "p1": 2.0,
+        "p2": 14.0,
+        "p2_min": 3.0,
+        "edge_tau": 12.0,
+        "lr_tol": 1.0,
+        "uniqueness": 0.0,
+        "texture_scale": 10.0,
+        "matching_cost": "census",
+        "paths": 4,
+        "subpixel": "parabolic"
+      },
+      "correct_completeness_pct": 32.3598758172828,
+      "measured_coverage_pct": 53.93017512996649,
+      "bad_1px_pct_of_support": 7.97544831462188,
+      "bad_2px_pct_of_support": 6.226843253002077,
+      "bad_1px_pct_of_measured": 14.788471009785937,
+      "bad_2px_pct_of_measured": 11.546120957323035,
+      "p95_absolute_error_mm": 2182.822303682304,
+      "artifact": {
+        "file": "census_4path.npz",
+        "sha256": "47d3529335b2272de57bcd370174b406238a685d81797208bb9e073fd890c9c9"
+      }
+    },
+    "census_8path": {
+      "params": {
+        "disparities": 256,
+        "zsad_window": 5,
+        "p1": 2.0,
+        "p2": 14.0,
+        "p2_min": 3.0,
+        "edge_tau": 12.0,
+        "lr_tol": 1.0,
+        "uniqueness": 0.0,
+        "texture_scale": 10.0,
+        "matching_cost": "census",
+        "paths": 8,
+        "subpixel": "parabolic"
+      },
+      "correct_completeness_pct": 34.10828840723924,
+      "measured_coverage_pct": 56.77760091770489,
+      "bad_1px_pct_of_support": 7.907313345792666,
+      "bad_2px_pct_of_support": 6.143310551104114,
+      "bad_1px_pct_of_measured": 13.926818354396051,
+      "bad_2px_pct_of_measured": 10.819954439442425,
+      "p95_absolute_error_mm": 2083.9069977240993,
+      "artifact": {
+        "file": "census_8path.npz",
+        "sha256": "13beb61039166560837a0a5328b21da5824a40e2ce1391851bc9e83162a393bd"
+      }
+    }
+  }
+}

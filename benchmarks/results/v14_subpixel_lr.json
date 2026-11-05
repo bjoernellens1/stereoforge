@@ -1,0 +1,331 @@
+{
+  "schema": "stereoforge.subpixel_lr_summary.v1",
+  "scope": "one native720p analytic development input; same independent matching maps; no physical qualification",
+  "report": {
+    "path": "/home/bjoern/stereoforge_quality_evidence/2026-11-05-subpixel-lr-study/report.json",
+    "sha256": "6ddcfa11263ea762c1220c771f714c4f31e7a915f4bc95e43ed21af15a234046"
+  },
+  "independent_matching_sha256": "f00ac700ff8bcb30ce05929f0a68703c9455fc1ea8efefa8d44cfb355697773e",
+  "previous_full_control_default_byte_equivalence": true,
+  "default_small_witness_fields": 12,
+  "promotion": "withheld: no scene-level CI, physical support or held-out qualification",
+  "modes": {
+    "nearest_jump1_tol0.25": {
+      "lr_sampling": "nearest",
+      "lr_max_jump": 1.0,
+      "lr_tolerance": 0.25,
+      "correct_completeness_pct": 48.8348727858541,
+      "measured_coverage_pct": 65.4392107122029,
+      "discontinuity_rejections": 0,
+      "artifact": {
+        "file": "nearest_jump1_tol0.25.npz",
+        "sha256": "94c9fe756656cbfcef12c1187be044ab5613cc2fbfe9e81f1f762301fdd3abef"
+      },
+      "edge_halo2px_bad2_pct_of_support": 6.923866201518572,
+      "thin_correct_completeness_pct": 21.28666035950804,
+      "unsupported_stereo_output_pixels": 1501,
+      "nominal_regressions": [
+        {
+          "cohort": "region_edges",
+          "population": "measured",
+          "delta_percentage_points": 2.381907390905546
+        },
+        {
+          "cohort": "region_repeated",
+          "population": "measured",
+          "delta_percentage_points": 2.166586816428662
+        },
+        {
+          "cohort": "region_thin",
+          "population": "measured",
+          "delta_percentage_points": 8.505519244457513
+        }
+      ]
+    },
+    "nearest_jump1_tol0.5": {
+      "lr_sampling": "nearest",
+      "lr_max_jump": 1.0,
+      "lr_tolerance": 0.5,
+      "correct_completeness_pct": 55.01917980125376,
+      "measured_coverage_pct": 74.41570414795682,
+      "discontinuity_rejections": 0,
+      "artifact": {
+        "file": "nearest_jump1_tol0.5.npz",
+        "sha256": "98ca407be63b08202653c3b811e915d6581abd44218c470eb5a50dabb0657534"
+      },
+      "edge_halo2px_bad2_pct_of_support": 9.54648060742869,
+      "thin_correct_completeness_pct": 29.23368022705771,
+      "unsupported_stereo_output_pixels": 1854,
+      "nominal_regressions": [
+        {
+          "cohort": "region_edges",
+          "population": "measured",
+          "delta_percentage_points": 2.0625551132691626
+        },
+        {
+          "cohort": "region_repeated",
+          "population": "measured",
+          "delta_percentage_points": 1.9204364077296106
+        },
+        {
+          "cohort": "region_thin",
+          "population": "measured",
+          "delta_percentage_points": 4.2142212693204435
+        }
+      ]
+    },
+    "nearest_jump1_tol1": {
+      "lr_sampling": "nearest",
+      "lr_max_jump": 1.0,
+      "lr_tolerance": 1.0,
+      "correct_completeness_pct": 55.55829293032333,
+      "measured_coverage_pct": 75.46178763831495,
+      "discontinuity_rejections": 0,
+      "artifact": {
+        "file": "nearest_jump1_tol1.npz",
+        "sha256": "12cb7a1e44388611f3f24ccde39de70a97fd04b741baf0189cf651af9304ff48"
+      },
+      "edge_halo2px_bad2_pct_of_support": 10.547917094192488,
+      "thin_correct_completeness_pct": 36.581520025228635,
+      "unsupported_stereo_output_pixels": 2007,
+      "nominal_regressions": []
+    },
+    "linear_jump0.5_tol0.25": {
+      "lr_sampling": "linear",
+      "lr_max_jump": 0.5,
+      "lr_tolerance": 0.25,
+      "correct_completeness_pct": 48.683397586790285,
+      "measured_coverage_pct": 64.0628458475201,
+      "discontinuity_rejections": 50162,
+      "artifact": {
+        "file": "linear_jump0.5_tol0.25.npz",
+        "sha256": "ce93e9c80ffb10538f552eff2bac060faba8a8893c73b24d002c53350d6b5991"
+      },
+      "edge_halo2px_bad2_pct_of_support": 5.729530063615843,
+      "thin_correct_completeness_pct": 19.962157048249765,
+      "unsupported_stereo_output_pixels": 882,
+      "nominal_regressions": [
+        {
+          "cohort": "region_edges",
+          "population": "measured",
+          "delta_percentage_points": 1.5668323633002785
+        },
+        {
+          "cohort": "region_repeated",
+          "population": "measured",
+          "delta_percentage_points": 1.415153619632619
+        },
+        {
+          "cohort": "region_thin",
+          "population": "measured",
+          "delta_percentage_points": 8.83624473610995
+        }
+      ]
+    },
+    "linear_jump0.5_tol0.5": {
+      "lr_sampling": "linear",
+      "lr_max_jump": 0.5,
+      "lr_tolerance": 0.5,
+      "correct_completeness_pct": 53.35737945980903,
+      "measured_coverage_pct": 70.53181845302825,
+      "discontinuity_rejections": 50162,
+      "artifact": {
+        "file": "linear_jump0.5_tol0.5.npz",
+        "sha256": "37beadfac22775e70fc6f31646f801010ed74274d8c484789b9a84a18a766a17"
+      },
+      "edge_halo2px_bad2_pct_of_support": 8.101785347835008,
+      "thin_correct_completeness_pct": 27.026174708293915,
+      "unsupported_stereo_output_pixels": 1128,
+      "nominal_regressions": [
+        {
+          "cohort": "region_edges",
+          "population": "measured",
+          "delta_percentage_points": 1.1805992814548674
+        },
+        {
+          "cohort": "region_thin",
+          "population": "measured",
+          "delta_percentage_points": 4.311019105901433
+        }
+      ]
+    },
+    "linear_jump0.5_tol1": {
+      "lr_sampling": "linear",
+      "lr_max_jump": 0.5,
+      "lr_tolerance": 1.0,
+      "correct_completeness_pct": 53.618563506987684,
+      "measured_coverage_pct": 71.05033711411838,
+      "discontinuity_rejections": 50162,
+      "artifact": {
+        "file": "linear_jump0.5_tol1.npz",
+        "sha256": "b33e07b142b136f85a95f047929aaae917d998f6e812ccc687cb9485feda37d2"
+      },
+      "edge_halo2px_bad2_pct_of_support": 8.873383952390725,
+      "thin_correct_completeness_pct": 31.283506780195523,
+      "unsupported_stereo_output_pixels": 1241,
+      "nominal_regressions": [
+        {
+          "cohort": "region_thin",
+          "population": "measured",
+          "delta_percentage_points": 1.413188450809507
+        }
+      ]
+    },
+    "linear_jump1_tol0.25": {
+      "lr_sampling": "linear",
+      "lr_max_jump": 1.0,
+      "lr_tolerance": 0.25,
+      "correct_completeness_pct": 48.913016281178,
+      "measured_coverage_pct": 64.43508604445711,
+      "discontinuity_rejections": 43469,
+      "artifact": {
+        "file": "linear_jump1_tol0.25.npz",
+        "sha256": "7caba3f2543deb32fa3e2cbdff623c9d445f8820bc3afbf2ed1fe53f4babdab0"
+      },
+      "edge_halo2px_bad2_pct_of_support": 5.75415555099528,
+      "thin_correct_completeness_pct": 20.498265531378113,
+      "unsupported_stereo_output_pixels": 906,
+      "nominal_regressions": [
+        {
+          "cohort": "region_edges",
+          "population": "measured",
+          "delta_percentage_points": 1.3301294733112172
+        },
+        {
+          "cohort": "region_repeated",
+          "population": "measured",
+          "delta_percentage_points": 1.5394746279867775
+        },
+        {
+          "cohort": "region_thin",
+          "population": "measured",
+          "delta_percentage_points": 8.253244310389558
+        }
+      ]
+    },
+    "linear_jump1_tol0.5": {
+      "lr_sampling": "linear",
+      "lr_max_jump": 1.0,
+      "lr_tolerance": 0.5,
+      "correct_completeness_pct": 53.78216442084314,
+      "measured_coverage_pct": 71.27841603519921,
+      "discontinuity_rejections": 43469,
+      "artifact": {
+        "file": "linear_jump1_tol0.5.npz",
+        "sha256": "c564005e72f30de6c6d8a9c1f0139723e1d3dcd836b59b2933907f8e2944592d"
+      },
+      "edge_halo2px_bad2_pct_of_support": 8.241329776318489,
+      "thin_correct_completeness_pct": 28.192999053926208,
+      "unsupported_stereo_output_pixels": 1155,
+      "nominal_regressions": [
+        {
+          "cohort": "region_edges",
+          "population": "measured",
+          "delta_percentage_points": 0.8559692745537433
+        },
+        {
+          "cohort": "region_thin",
+          "population": "measured",
+          "delta_percentage_points": 3.455213105384491
+        }
+      ]
+    },
+    "linear_jump1_tol1": {
+      "lr_sampling": "linear",
+      "lr_max_jump": 1.0,
+      "lr_tolerance": 1.0,
+      "correct_completeness_pct": 54.07914819740664,
+      "measured_coverage_pct": 71.86468472179183,
+      "discontinuity_rejections": 43469,
+      "artifact": {
+        "file": "linear_jump1_tol1.npz",
+        "sha256": "a181eead4f5d8e689a400bd2625a935b90b4febf16f1a008687e21b6391f1ce7"
+      },
+      "edge_halo2px_bad2_pct_of_support": 9.03344962035707,
+      "thin_correct_completeness_pct": 33.207190160832546,
+      "unsupported_stereo_output_pixels": 1274,
+      "nominal_regressions": [
+        {
+          "cohort": "region_thin",
+          "population": "measured",
+          "delta_percentage_points": 0.29073893475085555
+        }
+      ]
+    },
+    "linear_jump2_tol0.25": {
+      "lr_sampling": "linear",
+      "lr_max_jump": 2.0,
+      "lr_tolerance": 0.25,
+      "correct_completeness_pct": 48.91628829945511,
+      "measured_coverage_pct": 64.444132212635,
+      "discontinuity_rejections": 42902,
+      "artifact": {
+        "file": "linear_jump2_tol0.25.npz",
+        "sha256": "3195ba4d067b647a117d25c40921989c2a6559c8b613a178147420c1b7151dbb"
+      },
+      "edge_halo2px_bad2_pct_of_support": 5.75415555099528,
+      "thin_correct_completeness_pct": 20.52980132450331,
+      "unsupported_stereo_output_pixels": 907,
+      "nominal_regressions": [
+        {
+          "cohort": "region_edges",
+          "population": "measured",
+          "delta_percentage_points": 1.3301294733112172
+        },
+        {
+          "cohort": "region_repeated",
+          "population": "measured",
+          "delta_percentage_points": 1.5394746279867775
+        },
+        {
+          "cohort": "region_thin",
+          "population": "measured",
+          "delta_percentage_points": 8.219583940357627
+        }
+      ]
+    },
+    "linear_jump2_tol0.5": {
+      "lr_sampling": "linear",
+      "lr_max_jump": 2.0,
+      "lr_tolerance": 0.5,
+      "correct_completeness_pct": 53.78909340072408,
+      "measured_coverage_pct": 71.30132016313898,
+      "discontinuity_rejections": 42902,
+      "artifact": {
+        "file": "linear_jump2_tol0.5.npz",
+        "sha256": "01b29fb6e7cbd60e0fb413466306b6e153b6f8351c870c3df4128ef780b0ae82"
+      },
+      "edge_halo2px_bad2_pct_of_support": 8.245434024215063,
+      "thin_correct_completeness_pct": 28.2245348470514,
+      "unsupported_stereo_output_pixels": 1156,
+      "nominal_regressions": [
+        {
+          "cohort": "region_edges",
+          "population": "measured",
+          "delta_percentage_points": 0.8649657885835325
+        },
+        {
+          "cohort": "region_thin",
+          "population": "measured",
+          "delta_percentage_points": 3.432787489033455
+        }
+      ]
+    },
+    "linear_jump2_tol1": {
+      "lr_sampling": "linear",
+      "lr_max_jump": 2.0,
+      "lr_tolerance": 1.0,
+      "correct_completeness_pct": 54.08800189392117,
+      "measured_coverage_pct": 71.89817479121636,
+      "discontinuity_rejections": 42902,
+      "artifact": {
+        "file": "linear_jump2_tol1.npz",
+        "sha256": "0e13258e4cfb635345e635bf06fad88e43b07bae152b690aa9cf2283f61744f9"
+      },
+      "edge_halo2px_bad2_pct_of_support": 9.045762364046789,
+      "thin_correct_completeness_pct": 33.301797540208135,
+      "unsupported_stereo_output_pixels": 1278,
+      "nominal_regressions": []
+    }
+  }
+}

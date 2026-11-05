@@ -518,6 +518,8 @@ def test_v9_gpu_hardware_execution_ortho_hybrid_and_selective_repair(tmp_path: P
     )
     res = json.loads(out_json.read_text())
     assert res["dual_vs_separate_preprocess_30_planes_exact"] is True
+    assert res["diagnostic_readback"]["producer_output_preserved"] is True
+    assert res["diagnostic_readback"]["fast_output_equivalence_checked"] is True
     assert float(res["gpu_combined_queue_span_ms"]["p50"]) <= 4.167
     assert float(res["gpu_stage_sum_ms"]["p50"]) <= 4.167
     assert float(res["host_wall_ms"]["p50"]) <= 4.167
