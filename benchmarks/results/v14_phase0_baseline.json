@@ -1,0 +1,36 @@
+{
+  "schema": "stereoforge.v14.phase0_baseline.v1",
+  "scene": "9 recorded ZED 2 frames, static person at desk (recorded 2026-11-04)",
+  "rectification_audit": {
+    "frames": 9,
+    "usable": 9,
+    "median_dy_px": -0.35723876953125,
+    "robust_rms_dy_px": 0.31685326538085934,
+    "tilt_px": 0.7907295227050781
+  },
+  "estimator_baseline": {
+    "fast_live_default": {
+      "coverage_pct": 6.502531828703703,
+      "pixel_locking_index": 0.38364073152475675,
+      "temporal": {
+        "n_pixels": 44905,
+        "median_std_mm": 3.3193461894989014,
+        "p90_std_mm": 33.543968200683594
+      }
+    },
+    "full_continuous_subpixel": {
+      "coverage_pct": 21.490137924382715,
+      "pixel_locking_index": 0.2637074268934355,
+      "temporal": {
+        "n_pixels": 162798,
+        "median_std_mm": 9.554084777832031,
+        "p90_std_mm": 704.7151489257812
+      }
+    }
+  },
+  "notes": [
+    "median_dy_px ~ -0.36 px with 3x3 grid medians ~ -0.25..-0.30 px: systematic vertical disparity after factory rectification (target <= 0.1 px)",
+    "pixel_locking_index: fast 0.38 vs full continuous 0.26 (uniform = 0)",
+    "temporal p90 std: fast 33 mm, full 705 mm (wrong-match flicker)"
+  ]
+}
