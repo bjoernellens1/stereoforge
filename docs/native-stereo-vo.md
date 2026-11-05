@@ -75,13 +75,30 @@ certify static-world camera motion in that case. Native temporal/world covarianc
 qualification remains false, and default fusion remains disabled. Broader dynamic
 scenes and reliable static-world evidence still require qualification.
 
-A longer moving-panel development sequence exposes this remaining limitation:
-after an initial two-model rejection, later moving frames can lack enough
-secondary support and resume research history. Five sampled fills put the old
-1.28 m foreground onto newly visible 1.6 m wall support. The existing
-disocclusion option retains these catastrophic fills. Research fusion is not
-qualified for dynamic scenes; a successful initial rejection does not establish
-subsequent static-world observability. Measured stereo remains separate.
+A longer moving-panel development sequence exposed a remaining failure after an
+initial two-model rejection: later moving frames can lack enough secondary
+support and resume research history. Five sampled fills put the old 1.28 m
+foreground onto newly visible 1.6 m wall support. The earlier current-image ZNCC
+check and disocclusion option both admitted these false fills.
+
+Multi-pair confirmation now additionally requires current **other-eye measured
+metric evidence**. Every interpolation tap must have support, measured stereo
+provenance `IndependentStereo` (1), the exact current source ID, zero age, a valid depth consistent with
+the candidate, and at most 1% depth spread. It uses the same metric consistency
+and continuity thresholds as cached evidence. Correlated left-aggregated current
+references (provenance 5) cannot satisfy independence. Historical cached evidence
+retains its existing 1-or-5 policy and cannot bypass the independent current gate.
+Current/cached validation shares
+one GPU helper; existing buffers and the packed source token preserve the 512-byte
+parameter layout. No full-frame transfer or new GPU allocation is required.
+
+These checks reject the five retained witnesses and preserve fresh measured
+output when history is rejected. Fault controls keep camera tracking and cache
+healthy while corrupting only current other-eye evidence. Large source IDs test
+both ID words; a healthy control still admits history. Accuracy/coverage costs
+require measurement before promotion. The guard does not establish subsequent
+static-world observability: dynamic scenes, uncertainty, clocks and physical/live
+operation remain unqualified.
 
 ## Temporal admission and four-pair history
 

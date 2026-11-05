@@ -45,6 +45,30 @@ static void run_case(std::shared_ptr<DaxaFoundation> const& context,double objec
         }
     }
 }
+// Removing current independent metric verification must expose the retained
+// near-foreground wake on independently known, newly revealed wall support.
+static void disocclusion_sequence(std::shared_ptr<DaxaFoundation> const& context,double camera_step) {
+    auto source=render_dynamic(1,0);DaxaRectifiedInput input(geometry(),{},DaxaRectifiedInputConfig{2,false},context,source);
+    auto rgb=input.enqueue(source);DaxaDepthConfig dc{StereoConfig{width,height,32,4,8,32,true},1.f,2,32};
+    DaxaDepthPipeline depth(dc,context,rgb.full());auto frame=depth.enqueue_preprocessed(rgb.full());
+    DaxaStereoVoConfig vc;vc.columns=12;vc.rows=8;DaxaStereoVo vo(context,frame.observations(),vc);StereoTrajectory trajectory;
+    DaxaTemporalConfig tc;tc.odometry_research=true;tc.multi_pair_research=true;DaxaTemporal temporal(context,frame,tc);
+    for(uint64_t id=1;id<=4;++id) {
+        if(id>1){rgb=input.enqueue(render_dynamic(id,.04*double(id-1),camera_step*double(id-1)));frame=depth.enqueue_preprocessed(rgb.full());}
+        auto pose=trajectory.process(vo.process(frame.observations()));auto output=temporal.process_odometry(frame,pose);
+        auto result=temporal.readback(output);
+        if(id==4) {
+            check(pose.status==StereoTrajectoryStatus::Tracked&&result.counters.history_scanned>0&&result.counters.pair_checks>0,"disocclusion control did not exercise resumed history");
+            auto raw=depth.readback(frame);
+            std::vector<std::array<unsigned,2>> witnesses=camera_step==0?std::vector<std::array<unsigned,2>>{{31,26},{31,27},{31,28}}:std::vector<std::array<unsigned,2>>{{244,91},{43,137}};
+            for(auto xy:witnesses) {
+                size_t i=xy[1]*width+xy[0];check(raw.metric_validity[i]==0,"retained disocclusion witness is no longer a measured hole");
+                check(!result.validity[i]||std::abs(result.depth[i]-1.6f)<=.016f,"temporal history put foreground depth onto newly revealed wall");
+            }
+        }
+        output={};frame={};rgb={};temporal.collect();depth.collect();input.collect();
+    }
+}
 static void full_field_identifiability(std::shared_ptr<DaxaFoundation> const& context) {
     auto object=render_dynamic(2,.03125,0,true),camera=render_dynamic(2,0,-.03125,true);
     for(unsigned eye=0;eye<4;++eye)check(std::equal(object.source->canonical_rgb->rgb[eye].bytes.begin(),object.source->canonical_rgb->rgb[eye].bytes.end(),camera.source->canonical_rgb->rgb[eye].bytes.begin()),"equivalent rigid-scene controls are not image-identical");
@@ -60,6 +84,7 @@ static void full_field_identifiability(std::shared_ptr<DaxaFoundation> const& co
 int main(){try{
     auto context=std::make_shared<DaxaFoundation>(true);
     run_case(context,.04,0,true);run_case(context,.04,-.02,true);run_case(context,0,-.02,false);run_case(context,0,0,false);
+    disocclusion_sequence(context,0);disocclusion_sequence(context,-.02);
     full_field_identifiability(context);
     check(context->validation_errors.load()==0,"motion guard Vulkan validation error");context->close();
 }catch(std::exception const& e){std::cerr<<e.what()<<'\n';return 1;}}

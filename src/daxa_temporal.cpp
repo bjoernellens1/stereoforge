@@ -88,6 +88,10 @@ struct DaxaTemporal::Impl {
     ~Impl(){if(!context||!context->device.get())return;auto& d=context->device;d.wait_idle();history.reset();slots.clear();pipelines={};for(auto b:owned)if(d.is_id_valid(b))d.destroy_buffer(b);d.collect_garbage();memory.clear();}
     void prepare_pairs(Slot& slot,Parameters& params,DaxaObservationFrame const& fresh) {
         params.pair_count=0;params.require_pair_support=vo_dispatch;
+        // The existing packed current-source token occupies the unused final
+        // homogeneous matrix row; projection only reads each matrix's first three rows.
+        auto source_id=split(fresh.source()->frame_id);
+        std::memcpy(&params.transforms[30],source_id.data(),sizeof(source_id));
         slot.pairs.clear();
         for(unsigned eye=0;eye<2;++eye) {
             auto image=fresh.image(eye?DaxaObservationImage::RectifiedRight:DaxaObservationImage::RectifiedLeft).buffer();

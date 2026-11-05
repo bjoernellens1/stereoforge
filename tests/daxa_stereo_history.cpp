@@ -27,7 +27,7 @@ static void cached_evidence_and_four_pair_votes(std::shared_ptr<DaxaFoundation> 
     for(uint64_t id=1;id<=(fault==7?5u:2u);++id) {
         if(id>1){rgb=input.enqueue(render(id,0));frame=depth.enqueue_preprocessed(rgb.full());}
         auto pose=trajectory.process(vo.process(frame.observations()));
-        if((fault<7&&id==2)||(fault==7&&id==3)) {
+        if((fault<7&&id==2)||(fault==7&&id==3)||(fault==8&&id==2)) {
             auto cached=history->select(pose);check(cached.size()==(fault==7?2u:1u),"cache fault witness has wrong frame set");
             for(auto const& entry:cached) {
                 auto plane=DaxaStereoHistoryPlane::Right;uint64_t value=0xff808080ff808080ULL;
@@ -37,6 +37,7 @@ static void cached_evidence_and_four_pair_votes(std::shared_ptr<DaxaFoundation> 
                 if(fault==3){plane=DaxaStereoHistoryPlane::Depth;float a=1.59f,b=1.61f;uint32_t lo,hi;std::memcpy(&lo,&a,4);std::memcpy(&hi,&b,4);value=uint64_t(lo)|(uint64_t(hi)<<32);}
                 if(fault==4){plane=DaxaStereoHistoryPlane::Depth;float z=1.2f;uint32_t bits;std::memcpy(&bits,&z,4);value=uint64_t(bits)|(uint64_t(bits)<<32);}
                 if(fault==5)plane=DaxaStereoHistoryPlane::Left;
+                if(fault==8){plane=DaxaStereoHistoryPlane::Provenance;value=0x500000005ULL;}
                 entry.frame.wait();auto view=entry.frame.plane(plane);
                 // Cache planes are packed; corruption is limited to this view.
                 overwrite_buffer(context,view.buffer,view.size,value,view.offset);
@@ -46,8 +47,44 @@ static void cached_evidence_and_four_pair_votes(std::shared_ptr<DaxaFoundation> 
         if(fault<7&&id==2)check(result.counters.pair_checks>0&&result.counters.pair_rejections==result.counters.pair_checks,"cached-only corrupted evidence admitted fusion");
         if(fault==7&&id==4)check(result.counters.pair_checks>0&&result.counters.pair_rejections==result.counters.pair_checks,"one valid pair falsely satisfied two-pair vote");
         if(fault==7&&id==5)check(result.counters.pair_checks>0&&result.counters.pair_rejections<result.counters.pair_checks,"pair indices2/3 were not consumed for fusion");
+        if(fault==8&&id==2)check(result.counters.pair_checks>0&&result.counters.pair_rejections<result.counters.pair_checks,"cached derived evidence bypassed or lost independent current verification");
         output={};frame={};rgb={};temporal.collect();depth.collect();input.collect();
     }
+}
+// Cache and camera pose remain healthy: only CURRENT right-eye evidence is
+// corrupted after VO. Reusing the cache despite that contradiction is the bug.
+static void current_metric_evidence(std::shared_ptr<DaxaFoundation> const& context,unsigned fault) {
+    constexpr uint64_t base=1ull<<33;
+    auto source=render(base+1,0);DaxaRectifiedInput input(geometry(),{},DaxaRectifiedInputConfig{2,false},context,source);
+    auto rgb=input.enqueue(source);DaxaDepthConfig dc{StereoConfig{width,height,32,4,8,32,true},1.f,2,32};
+    DaxaDepthPipeline depth(dc,context,rgb.full());auto frame=depth.enqueue_preprocessed(rgb.full());
+    DaxaStereoVoConfig vc;vc.columns=12;vc.rows=8;DaxaStereoVo vo(context,frame.observations(),vc);StereoTrajectory trajectory;
+    DaxaTemporalConfig tc;tc.odometry_research=true;tc.multi_pair_research=true;DaxaTemporal temporal(context,frame,tc);
+    auto first=temporal.process_odometry(frame,trajectory.process(vo.process(frame.observations())));first.wait();
+    first={};frame={};rgb={};temporal.collect();depth.collect();input.collect();
+    rgb=input.enqueue(render(base+2,0));frame=depth.enqueue_preprocessed(rgb.full());auto pose=trajectory.process(vo.process(frame.observations()));
+    check(pose.status==StereoTrajectoryStatus::Tracked,"current metric fault lost the healthy camera pose");auto raw=depth.readback(frame);
+    if(fault<9) {
+        auto obs=frame.observations();auto plane=DaxaObservationPlane::Depth;uint64_t value=0;
+        if(fault==0){float z=1.2f;uint32_t bits;std::memcpy(&bits,&z,4);value=uint64_t(bits)|(uint64_t(bits)<<32);}
+        if(fault==1)value=0x7fc000007fc00000ULL;
+        if(fault==2){plane=DaxaObservationPlane::SourceIds;value=2;} // Same low word; wrong upper word.
+        if(fault==3){plane=DaxaObservationPlane::AgeNs;value=1;}
+        if(fault==4){plane=DaxaObservationPlane::Provenance;value=0x600000006ULL;}
+        if(fault==5)plane=DaxaObservationPlane::Validity;
+        if(fault==8){plane=DaxaObservationPlane::Provenance;value=0x500000005ULL;} // Derived evidence is not independent.
+        if(fault==7){float a=1.59f,b=1.61f;uint32_t lo,hi;std::memcpy(&lo,&a,4);std::memcpy(&hi,&b,4);value=uint64_t(lo)|(uint64_t(hi)<<32);}
+        if(fault==6){auto view=frame.image(DaxaPreprocessPlane::RightSupport);overwrite_buffer(context,view.buffer(),view.size_bytes(),0);}
+        else {auto half=obs.size_bytes(plane)/2;overwrite_buffer(context,obs.buffer(plane),half,value,half);}
+    }
+    auto output=temporal.process_odometry(frame,pose);auto result=temporal.readback(output);size_t reused=0,measured=0;
+    check(result.counters.pair_checks>0,"current metric fault bypassed multi-pair verification");
+    for(size_t i=0;i<width*height;++i)if(raw.metric_validity[i]) {
+        ++measured;reused+=result.count[i]>1;
+        if(fault<9)check(result.count[i]==1&&result.validity[i]&&result.depth[i]==raw.depth[i]&&result.provenance[i]==raw.provenance[i]&&result.source_ids[i]==int64_t(base+2),"contradictory current right metric evidence admitted left history");
+    }
+    check(measured>20000,"current metric fault discarded measured support");
+    if(fault==9)check(reused>1000,"healthy current metric evidence never admitted history");
 }
 static void qualified_acquisition_bounds(std::shared_ptr<DaxaFoundation> const& context,unsigned kind) {
     auto source=render(1,0);DaxaRectifiedInput input(geometry(),{},DaxaRectifiedInputConfig{2,false},context,source);
@@ -121,7 +158,8 @@ int main(){try{
         history.clear();check(survivor->pose().source.frame_id==7,"logical reset invalidated exported historical frame");
         frame={};rgb={};stored={};depth.collect();input.collect();
     }
-    for(unsigned fault=0;fault<8;++fault)cached_evidence_and_four_pair_votes(context,fault);
+    for(unsigned fault=0;fault<9;++fault)cached_evidence_and_four_pair_votes(context,fault);
+    for(unsigned fault=0;fault<10;++fault)current_metric_evidence(context,fault);
     for(unsigned kind=0;kind<6;++kind)qualified_acquisition_bounds(context,kind);
     auto retained=survivor->plane(DaxaStereoHistoryPlane::Right);
     check(download(context,retained.buffer,retained.size,retained.offset)==survivor_bytes,"history destruction released an exported GPU lease");survivor.reset();
