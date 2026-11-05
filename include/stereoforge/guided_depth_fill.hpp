@@ -14,11 +14,11 @@ struct GuidedDepthFillConfig {
     // A ray stops when luma jumps between neighbours (object edge) or drifts away from the anchor.
     std::uint32_t step_luma_threshold=10,anchor_luma_threshold=28;
     float agreement_tolerance=0.04f;
-    std::uint32_t min_agreeing_rays=3;
 };
 // Edge-aware hole filling of a 32FC1 depth image. Each invalid pixel looks along the four axes for the nearest
-// valid depth reachable without crossing an RGB edge and is filled only when at least two rays agree on one
-// surface, so flat walls inherit depth from their textured parts and silhouettes are never bridged.
+// valid depth reachable without crossing an RGB edge and is filled only when opposite rays agree on one
+// surface (interpolation, never extrapolation), so flat walls inherit depth from their textured parts and
+// silhouettes are never grown into the background.
 class GuidedDepthFill {
     GuidedDepthFillConfig c_;
     std::vector<std::uint8_t> luma_,dist_[4];
@@ -90,20 +90,28 @@ public:
             for(std::size_t i=y0*w;i<y1*w;++i) {
                 const float d0=depth[i];
                 if(std::isfinite(d0)&&d0>0.f)continue;
-                float best_sum=0,best_w=0;unsigned best_n=0;
-                for(unsigned a=0;a<4;++a) {
-                    const float da=cand_[a][i];
-                    if(!std::isfinite(da))continue;
-                    float sum=0,wt=0;unsigned cnt=0;
-                    for(unsigned c=0;c<4;++c) {
-                        const float db=cand_[c][i];
-                        if(!std::isfinite(db)||std::abs(db-da)>c_.agreement_tolerance*da)continue;
-                        const float wb=1.f/(1.f+float(dist_[c][i]));
-                        sum+=db*wb;wt+=wb;++cnt;
-                    }
-                    if(cnt>best_n){best_n=cnt;best_sum=sum;best_w=wt;}
+                // Interpolate only: opposite rays (left/right or up/down) must reach the same surface.
+                float value[2]={0,0},weight[2]={0,0};bool ok[2]={false,false};
+                for(unsigned axis=0;axis<2;++axis) {
+                    const float da=cand_[2*axis][i],db=cand_[2*axis+1][i];
+                    if(!std::isfinite(da)||!std::isfinite(db)||std::abs(da-db)>c_.agreement_tolerance*std::max(da,db))continue;
+                    const float wa=1.f/(1.f+float(dist_[2*axis][i])),wb=1.f/(1.f+float(dist_[2*axis+1][i]));
+                    value[axis]=(da*wa+db*wb)/(wa+wb);weight[axis]=wa+wb;ok[axis]=true;
                 }
-                if(best_n>=c_.min_agreeing_rays){depth[i]=best_sum/best_w;filled[i]=1;++counts[b];}
+                if(!ok[0]&&!ok[1])continue;
+                // A third ray on the same surface guards against isolated noisy anchors.
+                auto supported=[&](float v){
+                    unsigned n=0;
+                    for(unsigned r=0;r<4;++r){const float dr=cand_[r][i];if(std::isfinite(dr)&&std::abs(dr-v)<=c_.agreement_tolerance*std::max(dr,v))++n;}
+                    return n>=3;
+                };
+                if(ok[0]&&!supported(value[0]))ok[0]=false;
+                if(ok[1]&&!supported(value[1]))ok[1]=false;
+                if(!ok[0]&&!ok[1])continue;
+                float fill;
+                if(ok[0]&&ok[1])fill=std::abs(value[0]-value[1])<=c_.agreement_tolerance*std::max(value[0],value[1])?(value[0]*weight[0]+value[1]*weight[1])/(weight[0]+weight[1]):(weight[0]>=weight[1]?value[0]:value[1]);
+                else fill=ok[0]?value[0]:value[1];
+                depth[i]=fill;filled[i]=1;++counts[b];
             }
         });
         std::size_t count=0;

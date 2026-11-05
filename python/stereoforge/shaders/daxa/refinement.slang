@@ -85,29 +85,6 @@ void census(uint3 tid:SV_DispatchThreadID,uint3 gid:SV_GroupID,uint gidx:SV_Grou
 #endif
     if(t>=2*n)return;uint eye=t/n,i=t%n,x=i%p.width,y=i/p.width;uint* gray=p.borrowed[0]!=0?(uint*)p.borrowed[eye]:uplane(27)+eye*n;uint* support=p.borrowed[0]!=0?(uint*)p.borrowed[2+eye]:uplane(28)+eye*n;bool valid=refinement_support(support,p.width,p.height,x,y);uplane(24)[t]=valid?(((p.subpixel&2u)!=0)?refinement_ortho_thermo_census(gray,p.width,x,y):refinement_census(gray,p.width,x,y)):0;uplane(25)[t]=uint(valid);
 }
-// Probes coarse taps 7 coarse px away (4 directions, ~28 px at 1/4 scale). Returns true when any tap
-// differs strongly from the local prior, i.e. the pixel lies near a depth discontinuity where coarse SGM may have
-// bled foreground disparity over a flat surface. bg/bg_n receive the mean disparity of farther taps whose full-res
-// luma matches the pixel: a bright wall pixel inside the halo copies the wall disparity, not the head's.
-bool refinement_coarse_ring(uint eye,int ix,int iy,float ref_c,float mult,float luma_0,uint* gray_own,out float bg,out uint bg_n){
-    uint cn=p.coarse_width*p.coarse_height;
-    static const int2 kDir[4]={int2(1,0),int2(-1,0),int2(0,1),int2(0,-1)};
-    bool edge=false;float sum=0;bg_n=0;
-    for(uint k=0;k<4;++k){
-        int xx=ix+kDir[k].x*7,yy=iy+kDir[k].y*7;
-        if(xx<0||yy<0||xx>=int(p.coarse_width)||yy>=int(p.coarse_height))continue;
-        uint j=eye*cn+uint(yy)*p.coarse_width+uint(xx);
-        float d=((float*)p.coarse[0])[j];
-        if(((uint*)p.coarse[2])[j]==0||!isfinite(d)||abs(d-ref_c)<=2.f)continue;
-        edge=true;
-        if(d<ref_c){
-            uint gx=min(uint(float(xx)*mult+.5f*mult),p.width-1u),gy=min(uint(float(yy)*mult+.5f*mult),p.height-1u);
-            if(abs(float(gray_own[gy*p.width+gx])-luma_0)<=14.f){sum+=d;++bg_n;}
-        }
-    }
-    bg=bg_n>0?sum/float(bg_n):0.f;
-    return edge;
-}
 [shader("compute")][numthreads(64,1,1)]
 void match(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=2*n)return;uint eye=t/n,i=t%n,x=i%p.width,y=i/p.width,cn=p.coarse_width*p.coarse_height;
     // Half-pixel 2x/4x coordinates are exact binary32 fractions.
@@ -281,22 +258,11 @@ void match(uint3 tid:SV_DispatchThreadID){uint n=p.width*p.height,t=tid.x;if(t>=
     }
     uint eff_margin=plateau_tie?p.min_margin:(second-best);
     uint eff_second=plateau_tie?(best+p.min_margin):second;
-    bool unique=(count>=2&&eff_margin>=p.min_margin&&!strict_reject);
-    bool bg_fill=false;float bg_d=0.f;
-    if(unique&&adaptive_tiles&&eye==0&&eff_margin<p.min_margin+1u){
-        uint* g_own=p.borrowed[0]!=0?(uint*)p.borrowed[eye]:uplane(27)+eye*n;
-        float bg=0.f;uint bg_n=0;
-        if(refinement_coarse_ring(eye,ix,iy,predicted/mult,mult,float(g_own[t]),g_own,bg,bg_n)){
-            if(bg_n>=2u){bg_fill=true;bg_d=bg*mult;winner=uint(floor(bg_d+.5f));}
-            else unique=false;
-        }
-    }
-    if(count<2)reason|=REF_TOO_FEW;if(count>=2&&!unique)reason|=REF_AMBIGUOUS;bool restricted=!hybrid&&count>0&&((winner==lo&&lo>0)||(winner==hi&&hi+1<p.disparities));if(restricted)reason|=REF_RESTRICTED;if(count>0&&(winner==0||winner+1==p.disparities))reason|=REF_GLOBAL;bool valid=unique&&!restricted;
+    bool unique=(count>=2&&eff_margin>=p.min_margin+(adaptive_tiles?1u:0u)&&!strict_reject);if(count<2)reason|=REF_TOO_FEW;if(count>=2&&!unique)reason|=REF_AMBIGUOUS;bool restricted=!hybrid&&count>0&&((winner==lo&&lo>0)||(winner==hi&&hi+1<p.disparities));if(restricted)reason|=REF_RESTRICTED;if(count>0&&(winner==0||winner+1==p.disparities))reason|=REF_GLOBAL;bool valid=unique&&!restricted;
     float d=float(winner),confidence=0;bool applied=false;
     if(valid){
         confidence=clamp(float(eff_margin)/float(max(eff_second,1u)),0.f,1.f);
-        if(bg_fill){d=bg_d;confidence=.25f;}
-        else if((p.subpixel&1u)!=0&&!(ultra&&eye!=0)){
+        if((p.subpixel&1u)!=0&&!(ultra&&eye!=0)){
             SF_PRECISE float offset=0.f;
             if(minus!=0xffffffff&&plus!=0xffffffff){
                 SF_PRECISE float denominator=(float(minus)-2.f*float(best))+float(plus);

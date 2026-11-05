@@ -296,7 +296,7 @@ def generate_launch_description():
             default_value="/stereoforge/depth_completed_provenance",
         ),
         DeclareLaunchArgument("depth_speckle_min_pixels", default_value="0"),
-        DeclareLaunchArgument("guided_fill_px", default_value="48"),
+        DeclareLaunchArgument("guided_fill_px", default_value="0"),
         DeclareLaunchArgument("duration_seconds", default_value="3600"),
         DeclareLaunchArgument("depth_speckle_delta_m", default_value="0.05"),
         DeclareLaunchArgument("depth_speckle_delta_px", default_value="1.25"),
