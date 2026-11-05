@@ -1,0 +1,65 @@
+{
+  "schema": "stereoforge.v14.phase2_reference_prototype.v1",
+  "scene": "S0_desk_person, 10 frames subsampled from a 150-frame static clip (2026-11-05)",
+  "prototype": "benchmarks/physical_depth_v14/reference_sgm.py (numpy/OpenCV, ~4 s/frame)",
+  "reference_estimator": {
+    "coverage_pct": 42.22805989583333,
+    "pixel_locking_index": 0.031089340117467706,
+    "temporal": {
+      "n_pixels": 391418,
+      "median_std_mm": 11.558855056762695,
+      "p90_std_mm": 357.6014099121094
+    }
+  },
+  "baselines_same_clip_type": {
+    "fast_live_default": {
+      "coverage_pct": 6.5,
+      "pixel_locking_index": 0.38,
+      "median_std_mm": 3.3,
+      "p90_std_mm": 33.5
+    },
+    "full_continuous_subpixel": {
+      "coverage_pct": 21.5,
+      "pixel_locking_index": 0.26,
+      "median_std_mm": 9.6,
+      "p90_std_mm": 704.7
+    }
+  },
+  "sigma_model": {
+    "schema": "stereoforge.sigma_model.v1",
+    "features": [
+      "1",
+      "log(uniq+0.02)",
+      "log(curv+0.5)"
+    ],
+    "coef": [
+      -1.9135435819625854,
+      -0.7802364230155945,
+      -0.008828806690871716
+    ],
+    "heldout": {
+      "n_pixels": 164050,
+      "log_corr": 0.6512431759334679,
+      "within_1sigma": 0.6618653960789509,
+      "within_2sigma": 0.8532456009625999,
+      "median_sigma_px": 0.38477230072021484,
+      "median_measured_std_px": 0.2890893220901489
+    },
+    "note": "random error only (temporal scatter of a static scene); bias is validated separately against targets/RealSense"
+  },
+  "trusted_gate": {
+    "rule": "sigma_d <= 0.01 * disparity (i.e. sigma_z <= 1% of range)",
+    "trusted_pct_of_frame": 22.5,
+    "median_temporal_std_mm": 5.2,
+    "p90_temporal_std_mm": 14.8,
+    "p99_temporal_std_mm": 47.7,
+    "relative_std_median_pct": 0.35,
+    "relative_std_p90_pct": 0.86,
+    "fraction_within_1pct_of_range": 0.929
+  },
+  "caveats": [
+    "precision only (temporal scatter); bias needs targets/RealSense corpus",
+    "sigma fitted/tested on the same scene (pixel-split); needs held-out scenes",
+    "synthetic subpixel bias <= 0.08 px"
+  ]
+}
