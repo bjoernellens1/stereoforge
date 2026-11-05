@@ -3,7 +3,7 @@
 
   python benchmarks/physical_depth_v14/capture_corpus.py --scene S1_target_1.0m --frames 150 --out ~/stereoforge_corpus [--realsense]
 
-Output (per scene): zed_raw.npy (N,720,2560,2) uint8, zed_t_ns.npy, and with --realsense rs_depth.npy (N,480,640) float32 m
+Output (per scene): zed_raw.npy (N,720,2560,2) uint8, zed_t_ns.npy, and with --realsense rs_depth.npy (M,480,640) float32 m, M>=N/2 (runs until the ZED capture ends)
 (aligned to colour), rs_color.npy, rs_t_ns.npy, rs_intrinsics.json. Add `--tape-m 1.0` to store the measured distance.
 The RealSense half runs under REALSENSE_PYTHON (default miniforge3 python, which has pyrealsense2).
 """
@@ -44,6 +44,7 @@ def zed_capture(out: Path, frames: int, device: str) -> None:
 
 
 def realsense_worker(out: Path, frames: int) -> None:
+    """Capture until `<out>/.stop` appears (the ZED capture is done), so both streams overlap completely."""
     import numpy as np
     import pyrealsense2 as rs
 
@@ -61,7 +62,8 @@ def realsense_worker(out: Path, frames: int) -> None:
     depth, color, stamps = [], [], []
     for _ in range(30):
         pipe.wait_for_frames()
-    while len(depth) < frames:
+    (out / ".ready").write_text("ok")
+    while not (out / ".stop").exists() or len(depth) < 2:
         fs = align.process(pipe.wait_for_frames())
         d, c = fs.get_depth_frame(), fs.get_color_frame()
         if d and c:
@@ -74,6 +76,14 @@ def realsense_worker(out: Path, frames: int) -> None:
     np.save(out / "rs_color.npy", np.stack(color))
     np.save(out / "rs_t_ns.npy", np.asarray(stamps, np.int64))
     (out / "rs_intrinsics.json").write_text(json.dumps({"fx": intr.fx, "fy": intr.fy, "ppx": intr.ppx, "ppy": intr.ppy, "width": intr.width, "height": intr.height, "depth_scale": scale}))
+
+
+def report_overlap(out: Path) -> None:
+    import numpy as np
+
+    zt, rt = np.load(out / "zed_t_ns.npy"), np.load(out / "rs_t_ns.npy")
+    overlap = (min(zt[-1], rt[-1]) - max(zt[0], rt[0])) / 1e9
+    print(f"ZED {(zt[-1] - zt[0]) / 1e9:.2f} s, RealSense {(rt[-1] - rt[0]) / 1e9:.2f} s, overlap {overlap:.2f} s")
 
 
 def main() -> None:
@@ -95,9 +105,23 @@ def main() -> None:
     if args.realsense:
         py = os.environ.get("REALSENSE_PYTHON", "/home/bjoern/miniforge3/bin/python3")
         proc = subprocess.Popen([py, __file__, "--realsense-worker", str(out), "--frames", str(args.frames)])
+    for stale in (".ready", ".stop"):
+        (out / stale).unlink(missing_ok=True)
+    if proc is not None:
+        while not (out / ".ready").exists():  # start the ZED only once the RealSense is streaming
+            if proc.poll() is not None:
+                sys.exit("RealSense worker failed to start")
+            time.sleep(0.1)
+        time.sleep(0.5)
     zed_capture(out, args.frames, args.device)
-    if proc is not None and proc.wait() != 0:
-        sys.exit("RealSense worker failed")
+    if proc is not None:
+        time.sleep(0.5)
+        (out / ".stop").write_text("ok")
+        if proc.wait() != 0:
+            sys.exit("RealSense worker failed")
+        (out / ".ready").unlink(missing_ok=True)
+        (out / ".stop").unlink(missing_ok=True)
+        report_overlap(out)
     (out / "scene.json").write_text(json.dumps({"scene": args.scene, "frames": args.frames, "tape_m": args.tape_m, "realsense": args.realsense, "captured_at": time.strftime("%Y-%m-%dT%H:%M:%S")}))
     print(f"saved {out}")
 
