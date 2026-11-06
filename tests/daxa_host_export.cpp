@@ -40,7 +40,7 @@ static DaxaRectification gpu_grid(bool high){
     g.P1={f,0,cx,0,0,f,cy,0,0,0,1,0};g.P2={f,0,cx,-f*.1,0,f,cy,0,0,0,1,0};return c;
 }
 static Fixture gpu_fixture(){
-    Fixture f;f.capture->source_width=256;f.capture->height=64;
+    Fixture f;f.capture->source_width=256;f.capture->height=64;f.capture->frame_id=(uint64_t(1)<<48)+7;
     auto texture=[](unsigned x,unsigned y,unsigned ch){uint32_t v=(x+1)*0x9e3779b9u^(y+3)*0x85ebca6bu^(ch+7)*0xc2b2ae35u;v^=v>>16;v*=0x7feb352du;v^=v>>15;return uint8_t(v>>24);};
     for(unsigned p=0;p<6;++p){unsigned stride=p<4?128*3+1+2*p:128+3+2*p;auto& bytes=(*f.backing)[p];bytes.assign(stride*64,0xe7);CanonicalRgbPlane plane{bytes,128,64,stride,p<4?CanonicalRgbFormat::Rgb8:CanonicalRgbFormat::SupportU8};if(p<4){f.sidecar->rgb[p]=plane;for(unsigned y=0;y<64;++y)for(unsigned x=0;x<128;++x)for(unsigned ch=0;ch<3;++ch)bytes[y*stride+x*3+ch]=texture(x+(p&1?8:0)+(p<2?13:0),y,ch);}else{f.sidecar->support[p-4]=plane;for(unsigned y=0;y<64;++y)for(unsigned x=0;x<128;++x)bytes[y*stride+x]=x>=2&&x<126&&y>=2&&y<62?1:0;}}
     // Explicit interior support holes plus supported black pixels exercise
@@ -57,6 +57,27 @@ static void memory_contract(const DaxaHostExport& output,unsigned requested_plan
  check(memory.bytes_per_slot==size_t(requested_planes)*128*64*4,"requested payload bytes per slot exact");
  check(output.requested_bytes()==size_t(2)*requested_planes*128*64*4,"requested bytes across two slots exact");
 }
+static void diagnostic_contracts(const std::shared_ptr<DaxaFoundation>& context,const DaxaObservationFrame& observation,const DaxaDepthReadback& expected){
+ DaxaHostExportConfig config{2,true,true,true};config.confidence=config.validity=config.source_ids=config.age_ns=true;
+ DaxaHostExport output(context,observation,config);memory_contract(output,9);
+ auto frame=output.enqueue(observation);frame.wait();
+ const size_t pixels=128*64;
+ auto compare=[&](DaxaObservationPlane plane,const auto& values){
+  auto bytes=frame.observation_bytes(plane);const auto expected_bytes=pixels*sizeof(values[0]);
+  check(bytes.size()==expected_bytes,"diagnostic left-only extent");
+  check(std::memcmp(bytes.data(),values.data(),bytes.size())==0,"native diagnostic bytes match producer readback including invalid values");
+ };
+ compare(DaxaObservationPlane::Depth,expected.depth);compare(DaxaObservationPlane::Confidence,expected.metric_confidence);
+ compare(DaxaObservationPlane::Validity,expected.metric_validity);compare(DaxaObservationPlane::Provenance,expected.provenance);
+ compare(DaxaObservationPlane::SourceIds,expected.source_ids);compare(DaxaObservationPlane::AgeNs,expected.age_ns);
+ check(std::any_of(expected.source_ids.begin(),expected.source_ids.end(),[](auto id){return id>(int64_t(1)<<32);}),"nonvacuous high-bit source IDs");
+ check(frame.source()->frame_id==observation.source()->frame_id,"diagnostics retain exact capture association");
+ reject([&]{frame.observation_bytes(static_cast<DaxaObservationPlane>(99));});
+ config.depth=config.rgb=config.provenance=false;
+ DaxaHostExport only(context,observation,config);memory_contract(only,6);auto selected=only.enqueue(observation);selected.wait();
+ check(selected.depth_bytes().empty()&&selected.rgba_bytes().empty()&&selected.provenance_bytes().empty(),"diagnostic-only export omits unrequested legacy planes");
+ check(selected.observation_bytes(DaxaObservationPlane::SourceIds).size()==pixels*8,"diagnostic-only 64-bit extent");
+}
 static void gpu_contracts(bool validation){
  auto context=std::make_shared<DaxaFoundation>(validation);
  auto fixture=gpu_fixture();auto high=gpu_grid(true);DaxaRectifiedInputConfig input_config;input_config.coarse_2x=false;
@@ -70,6 +91,7 @@ static void gpu_contracts(bool validation){
  DaxaDepthPipeline pipeline(config,context,prototype);prototype.wait();prototype={};producer={};input.collect();
  auto native=input.enqueue(fixture.frame());auto depth=pipeline.enqueue_preprocessed(native.full());auto observation=depth.observations();
  auto expected=pipeline.readback(depth);check(std::count(expected.metric_validity.begin(),expected.metric_validity.end(),1u)>64,"nonvacuous analytic metric support");
+ diagnostic_contracts(context,observation,expected);
  DaxaHostExport output(context,observation,{2,true,true});memory_contract(output,2);
  auto a=output.enqueue(observation),b=output.enqueue(observation);reject([&]{output.enqueue(observation);});
  check(a.producer_ticket()==observation.submit_ticket()&&a.copy_ticket()>a.producer_ticket(),"producer and copy ticket boundaries");
@@ -92,6 +114,7 @@ static void gpu_contracts(bool validation){
  }
  output.drain();rgb.drain();pipeline.drain();input.collect();
  check(context->validation_errors.load()==0,"Vulkan validation errors");
+ check(context->validation_warnings.load()==0,"Vulkan validation warnings");
  auto selected=output.memory();
  std::cout<<"native host export GPU cases passed: 128x64, 30 static cycles, exact selective bytes"
   <<" memory_type_index="<<selected.type_index<<" property_flags="<<selected.property_flags

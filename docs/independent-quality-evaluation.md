@@ -51,7 +51,39 @@ The [published evidence summary](evidence/quality-plane-2026-10-28.json) binds t
 
 Refinement has lower error on its accepted predictions and lower fixed-support completeness in this fixture; these data do not establish overall superiority. The report remains `status=unqualified`, `parity_qualified=false`, with actual reasons `missing_executed_reference` and `provisional_policy`. These are quality measurements, not GPU FPS results.
 
-## Verification boundary
+## Analytic image sampling controls
+
+The analytic fixture generator defaults to one centre ray per original sensor
+pixel. Discontinuous fine textures can alias differently between eyes and after
+rectification, so a photometric minimum need not coincide with the geometric
+correspondence. Treat this as an explicit image-formation assumption when
+comparing matching costs.
+
+An optional uniform box response integrates independently traced original
+subpixel rays before YUYV encoding and rectification:
+
+```sh
+PYTHONPATH=python:benchmarks:. python benchmarks/refinement_quality_fixtures.py \
+  --output /path/to/fresh-family --width 1280 --height 720 \
+  --pixel-samples-per-axis 4
+```
+
+The supported values are 1, 2, 4 and 8 rays per axis; 4 means 16 rays per original
+pixel. The Python APIs expose the same option as `pixel_samples`. This changes
+input radiance sampling, not image resolution, calibration, centre-ray depth or
+the fixed geometric support. It is not a calibrated ZED optical PSF, exposure or
+radiometric model, and it does not establish physical accuracy.
+
+Area-sampled families record `image_sampling`, mark the optical model unqualified,
+and retain original mixed-footprint masks. Their truth planes additionally expose
+`mixed_pixel_footprint` wherever a contributing original pixel has an area subray
+on a different surface from its centre ray. Existing `mixed_bilinear` semantics
+remain unchanged. These diagnostics identify ambiguous inputs; they do not remove
+pixels from the primary completeness denominator. Keep point-sampled controls and
+failed candidates when adding an area-sampled ablation; a changed image-formation
+model is not a new independent scene group or a promotion decision.
+
+## Earlier evaluator verification (2026-10-28)
 
 The independent functional review (`artifacts/zed-task4/functional-review.md`) independently verified 131 tests and decoded retained depth/validity bytes to reproduce the fixture metrics. The CPU performance review (`artifacts/zed-task4/performance/review.md`) records 150 passing component tests, including 19 performance checks. The final full CPU regression passed **2,290 tests**, with 37 GPU/camera tests deselected and no skips (132.74 s).
 

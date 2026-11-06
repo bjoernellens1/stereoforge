@@ -65,7 +65,8 @@ def test_nonidentity_world_pose_and_distorted_original_rays():
     distorted = CameraModel(c.width, c.height, c.fx, c.fy, c.cx, c.cy, (.03, -.002, .001, -.001, 0.))
     cal = Calibration(distorted, distorted, cal.right_to_left)
     scene = dict(schema=truth.SCENE_SCHEMA, seed=7, surfaces=[plane()])
-    pose = np.eye(4); pose[:3, 3] = [.2, -.1, .5]
+    pose = np.eye(4)
+    pose[:3, 3] = [.2, -.1, .5]
     rendered = truth.render_original(cal, scene, 'left', world_from_left=pose)
     assert np.all(rendered['axial_z_m'] == 2.5)
     points = rendered['points_world']
@@ -159,7 +160,8 @@ def test_half_pixel_truth_is_recomputed_not_resized():
     high = truth.render_grid_truth(cal, full, scene, 'left')
     low = truth.render_grid_truth(cal, half, scene, 'left', disparities=64)
     assert not np.array_equal(low['axial_z_m'], high['axial_z_m'][::2, ::2])
-    fx = half['P1'][0][0]; cx = half['P1'][0][2]
+    fx = half['P1'][0][0]
+    cx = half['P1'][0][2]
     expected = 3. / (1 - .3 * (np.arange(32) - cx) / fx)
     np.testing.assert_allclose(low['axial_z_m'], np.broadcast_to(expected, (18, 32)), rtol=0, atol=1e-14)
 
@@ -227,8 +229,10 @@ def test_invalid_export_and_unsafe_destination(tmp_path):
     for dims in ((63, 36), (64, 35), (0, 0)):
         with pytest.raises(ValueError):
             truth.export_scene_family(tmp_path / 'bad', width=dims[0], height=dims[1])
-    target = tmp_path / 'real'; target.mkdir()
-    link = tmp_path / 'link'; link.symlink_to(target, target_is_directory=True)
+    target = tmp_path / 'real'
+    target.mkdir()
+    link = tmp_path / 'link'
+    link.symlink_to(target, target_is_directory=True)
     with pytest.raises(ValueError, match='symlink'):
         truth.export_scene_family(link / 'child', width=64, height=36)
 
@@ -247,3 +251,90 @@ def test_photometric_is_bounded_documented_and_does_not_change_geometry(tmp_path
     for setting in ({'right': {'gain': 0., 'offset': 0.}}, {'other': {}}, {'left': {'gain': 1.}}):
         with pytest.raises(ValueError):
             truth.export_scene_family(tmp_path / 'bad-exposure', width=64, height=36, photometric=setting)
+
+
+def test_point_sampling_retains_frozen_original_capture():
+    import hashlib
+    cal = truth.synthetic_calibration(64, 36)
+    scene = truth.default_scene(cal)
+    implicit = [truth.render_original(cal, scene, eye)['luma'] for eye in ('left', 'right')]
+    explicit = [truth.render_original(cal, scene, eye, pixel_samples=1)['luma'] for eye in ('left', 'right')]
+    expected = 'd46fa38862adcaedffff9aa919ad0808bfceb0338a8f9b3809295472f0931b9f'
+    for images in (implicit, explicit):
+        assert hashlib.sha256(truth._capture_bytes(cal, *images)).hexdigest() == expected
+
+
+@pytest.mark.parametrize('samples', [4, 8])
+def test_pixel_area_coverage_preserves_centre_geometry(samples):
+    cal = truth.synthetic_calibration(64, 48)
+    patch = dict(plane(z=1.), bounds_xy_m=[0., .01, -100., 100.], texture='lowtexture', region='near')
+    scene = dict(schema=truth.SCENE_SCHEMA, seed=42, surfaces=[patch])
+    point = truth.render_original(cal, scene, 'left')
+    area = truth.render_original(cal, scene, 'left', pixel_samples=samples)
+    # fx=26.4,cx=31.5: one of four horizontal subrays hits the patch.
+    # Radiance126 on it and16 outside gives mean43.5, rounded to44.
+    assert point['luma'][24, 32] == 16
+    assert area['luma'][24, 32] == 44
+    assert area['mixed_pixel_footprint'][24, 32]
+    for key in point:
+        if key != 'luma':
+            np.testing.assert_array_equal(area[key], point[key])
+
+
+@pytest.mark.parametrize('samples', [0, 3, 16, True, 1.5])
+def test_invalid_pixel_samples_fail_before_export(tmp_path, samples):
+    with pytest.raises(ValueError, match='pixel samples'):
+        truth.export_scene_family(tmp_path / 'invalid', width=64, height=36, pixel_samples=samples)
+    assert not (tmp_path / 'invalid').exists()
+
+
+def test_area_export_declares_sampling_without_changing_truth(tmp_path, monkeypatch):
+    import cv2
+    monkeypatch.setattr(cv2, 'resize', lambda *a, **k: pytest.fail('area sampling must trace original rays'))
+    cal = truth.synthetic_calibration(64, 36)
+    scene = truth.default_scene(cal)
+    before = native.canonical(scene)
+    point = truth.export_scene_family(tmp_path / 'point', width=64, height=36, calibration=cal, scene=scene)
+    area = truth.export_scene_family(tmp_path / 'area', width=64, height=36, calibration=cal, scene=scene, pixel_samples=4)
+    a, b = [native.strict_json(p.read_text()) for p in (point, area)]
+    assert native.canonical(scene) == before
+    assert a['original_capture']['sha256'] != b['original_capture']['sha256']
+    assert 'image_sampling' not in a
+    assert b['image_sampling']['samples_per_axis'] == 4
+    assert b['image_sampling']['rays_per_pixel'] == 16
+    assert b['image_sampling']['optical_model_qualified'] is False
+    for profile in ('full', 'half'):
+        ga, gb = [native.strict_json((p.parent / doc['profiles'][profile]['truth_manifest']['file']).read_text())
+                  for p, doc in ((point, a), (area, b))]
+        for eye in ('left', 'right'):
+            for key, value in ga['eyes'][eye].items():
+                assert gb['eyes'][eye].get(key) == value
+            entry = gb['eyes'][eye]['mixed_pixel_footprint']
+            mask = np.fromfile(native.fixture_file(area.parent / profile, entry), np.uint8).reshape(entry['shape'])
+            assert mask.any()
+            original = b['image_sampling']['original_mixed'][eye]
+            original_mask = np.fromfile(native.fixture_file(area.parent, original), np.uint8).reshape(original['shape'])
+            model = native.strict_json((area.parent / profile / 'manifest.json').read_text())
+            # Independently enumerate positive bilinear contributors on the
+            # frozen OpenCV 1/32-pixel sampling lattice, rather than remapping.
+            coords = [np.fromfile(native.fixture_file(area.parent / profile, model['maps'][eye + axis]), '<f4')
+                      .reshape(entry['shape']) for axis in ('_x', '_y')]
+            mx, my = [np.rint(coord * 32) / 32 for coord in coords]
+            ix, iy = np.floor(mx).astype(int), np.floor(my).astype(int)
+            wx, wy = mx - ix, my - iy
+            expected = np.zeros(mask.shape, bool)
+            for dy in (0, 1):
+                for dx in (0, 1):
+                    x, y = ix + dx, iy + dy
+                    weight = (wx if dx else 1 - wx) * (wy if dy else 1 - wy)
+                    valid = (weight > 0) & (x >= 0) & (y >= 0) & (x < original_mask.shape[1]) & (y < original_mask.shape[0])
+                    expected[valid] |= original_mask[y[valid], x[valid]] != 0
+            np.testing.assert_array_equal(mask, expected)
+
+
+def test_pixel_samples_cli_exports_declared_model(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, 'argv', ['fixtures', '--output', str(tmp_path / 'cli'), '--width', '64',
+                                    '--height', '36', '--pixel-samples-per-axis', '2'])
+    truth.main()
+    family = native.strict_json((tmp_path / 'cli/family.json').read_text())
+    assert family['image_sampling']['samples_per_axis'] == 2

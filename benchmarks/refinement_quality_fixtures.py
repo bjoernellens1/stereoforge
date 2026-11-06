@@ -2,8 +2,9 @@
 """Offline analytic development truth for independent two-camera refinement.
 
 Metres, +X right/+Y down/+Z forward. World is the original Left optical
-frame unless world_from_left is supplied. Every image pixel samples its centre
-ray once (no optical antialiasing or area integration). Surfaces are bounded
+frame unless world_from_left is supplied. Images default to one centre ray per
+pixel; optional original-pixel box integration is an uncalibrated sampling
+ablation. Geometric truth always retains its centre ray. Surfaces are bounded
 world-XY patches z=slope_x*x+slope_y*y+intercept_m. Original cameras are
 independently ray traced; neither a forward warp nor a matcher produces truth.
 """
@@ -29,7 +30,8 @@ def synthetic_calibration(width=1280, height=720):
     """Public illustrative calibration, never ZED factory/physical calibration."""
     if type(width) is not int or type(height) is not int or min(width, height) < 8 or width % 4 or height % 2:
         raise ValueError('even half-size grids and width divisible by four required')
-    pose = np.eye(4); pose[0, 3] = .12
+    pose = np.eye(4)
+    pose[0, 3] = .12
     model = CameraModel(width, height, 528. * width / 1280, 528. * height / 720,
                         (width - 1) / 2., (height - 1) / 2.)
     return Calibration(model, model, pose, 'synthetic-public-refinement-v1')
@@ -179,26 +181,50 @@ def _eye_pose(calibration, eye, world_from_left):
     return _world_pose(world_from_left) @ (calibration.right_to_left if eye == 'right' else np.eye(4))
 
 
-def render_original(calibration, scene, eye, *, world_from_left=None):
-    """Invert Brown/rational camera distortion with OpenCV, then ray trace world."""
+def render_original(calibration, scene, eye, *, world_from_left=None, pixel_samples=1):
+    """Trace centre geometry and optionally integrate image radiance per pixel.
+
+    pixel_samples is midpoint quadrature per axis, not output resolution. The
+    uniform box is not a calibrated optical PSF. Mixed footprints flag any
+    subray whose surface differs from the retained geometric centre ray.
+    """
     import cv2
+    if type(pixel_samples) is not int or pixel_samples not in (1, 2, 4, 8):
+        raise ValueError('pixel samples per axis must be 1, 2, 4 or 8')
     c = getattr(calibration, eye) if eye in ('left', 'right') else None
     if c is None or len(c.distortion) not in (0, 4, 5, 8):
         raise ValueError('eye and Brown/rational 0/4/5/8 distortion required')
     y, x = np.indices((c.height, c.width), dtype=np.float64)
     pixels = np.stack((x, y), axis=-1).reshape(-1, 1, 2)
-    # Iterated inverse, with a strict independent forward residual gate.
     distortion = np.asarray(c.distortion if c.distortion else (0.,)*5)
-    normalized = cv2.undistortPointsIter(pixels, c.K, distortion, None, None,
-        (cv2.TERM_CRITERIA_COUNT | cv2.TERM_CRITERIA_EPS, 50, 1e-13)).reshape(c.height, c.width, 2)
-    ray = np.concatenate((normalized, np.ones((c.height, c.width, 1))), axis=-1)
-    reprojection = cv2.projectPoints(ray.reshape(-1, 3), np.zeros(3), np.zeros(3), c.K, distortion)[0].reshape(c.height, c.width, 2)
-    if not np.isfinite(ray).all() or np.max(np.abs(reprojection - np.stack((x, y), axis=-1))) > 1e-7:
-        raise ValueError('distorted ray inverse did not converge')
     pose = _eye_pose(calibration, eye, world_from_left)
-    hit = render_rays(scene, pose[:3, 3], ray @ pose[:3, :3].T)
+
+    def trace(points):
+        # Every original subray has its own inverse and forward residual gate.
+        normalized = cv2.undistortPointsIter(points, c.K, distortion, None, None,
+            (cv2.TERM_CRITERIA_COUNT | cv2.TERM_CRITERIA_EPS, 50, 1e-13)).reshape(c.height, c.width, 2)
+        ray = np.concatenate((normalized, np.ones((c.height, c.width, 1))), axis=-1)
+        projected = cv2.projectPoints(ray.reshape(-1, 3), np.zeros(3), np.zeros(3), c.K, distortion)[0]
+        if not np.isfinite(ray).all() or np.max(np.abs(projected - points)) > 1e-7:
+            raise ValueError('distorted ray inverse did not converge')
+        result = render_rays(scene, pose[:3, 3], ray @ pose[:3, :3].T)
+        result['luma'] = _texture(scene, result)
+        return result
+
+    hit = trace(pixels)
     hit['axial_z_m'] = hit['ray_parameter'].copy()
-    hit['luma'] = _texture(scene, hit)
+    if pixel_samples > 1:
+        total = np.zeros((c.height, c.width), np.uint32)
+        mixed = np.zeros((c.height, c.width), bool)
+        offsets = (np.arange(pixel_samples) + .5) / pixel_samples - .5
+        for dy in offsets:
+            for dx in offsets:
+                sample = trace(pixels + [dx, dy])
+                total += sample['luma']
+                mixed |= sample['surface_id'] != hit['surface_id']
+                del sample
+        hit['luma'] = np.floor(total / (pixel_samples * pixel_samples) + .5).astype(np.uint8)
+        hit['mixed_pixel_footprint'] = mixed
     return hit
 
 
@@ -211,8 +237,11 @@ def _texture(scene, hit):
     with np.errstate(over='ignore'):
         bits = x.astype(np.uint32) * np.uint32(73856093) ^ y.astype(np.uint32) * np.uint32(19349663)
         bits ^= hit['surface_id'].astype(np.uint32) * np.uint32(83492791) ^ np.uint32(scene['seed'])
-        bits ^= bits >> np.uint32(16); bits *= np.uint32(0x7feb352d)
-        bits ^= bits >> np.uint32(15); bits *= np.uint32(0x846ca68b); bits ^= bits >> np.uint32(16)
+        bits ^= bits >> np.uint32(16)
+        bits *= np.uint32(0x7feb352d)
+        bits ^= bits >> np.uint32(15)
+        bits *= np.uint32(0x846ca68b)
+        bits ^= bits >> np.uint32(16)
     luma = (32 + bits % 192).astype(np.uint8)
     for p in scene['surfaces']:
         mask = hit['surface_id'] == p['id']
@@ -237,7 +266,8 @@ def scaled_models(model, width, height):
         raise ValueError('equal-axis downscale required')
     s = width / model['width']
     a = np.array([[s, 0., (s-1)/2], [0., s, (s-1)/2], [0., 0., 1.]])
-    result = copy.deepcopy(model); result.update(width=width, height=height)
+    result = copy.deepcopy(model)
+    result.update(width=width, height=height)
     for key in ('P1', 'P2'):
         result[key] = (a @ np.asarray(model[key])).tolist()
     return result
@@ -280,10 +310,12 @@ def render_grid_truth(calibration, model, scene, eye, *, disparities=128, world_
     other_raw = (safe_points - other_pose[:3, 3]) @ other_pose[:3, :3]
     other_rect = other_raw @ other_r.T
     front = hit['valid'] & (other_rect[..., 2] > 0)
-    u = np.full((h, w), np.nan); v = u.copy()
+    u = np.full((h, w), np.nan)
+    v = u.copy()
     np.divide(other_rect[..., 0] * other_k[0, 0], other_rect[..., 2], out=u, where=front)
     np.divide(other_rect[..., 1] * other_k[1, 1], other_rect[..., 2], out=v, where=front)
-    u += other_k[0, 2]; v += other_k[1, 2]
+    u += other_k[0, 2]
+    v += other_k[1, 2]
     off = hit['valid'] & (~front | (u < -.5) | (u >= w-.5) | (v < -.5) | (v >= h-.5))
     # All valid surface points have a nonzero ray from the other camera; use a
     # harmless forward ray for missing points solely to avoid invalid arithmetic.
@@ -305,8 +337,10 @@ def render_grid_truth(calibration, model, scene, eye, *, disparities=128, world_
     edge = np.zeros((h, w), bool)
     horizontal = hit['surface_id'][:, 1:] != hit['surface_id'][:, :-1]
     vertical = hit['surface_id'][1:, :] != hit['surface_id'][:-1, :]
-    edge[:, 1:] |= horizontal; edge[:, :-1] |= horizontal
-    edge[1:, :] |= vertical; edge[:-1, :] |= vertical
+    edge[:, 1:] |= horizontal
+    edge[:, :-1] |= horizontal
+    edge[1:, :] |= vertical
+    edge[:-1, :] |= vertical
     result['region_edges'] = edge
     return result
 
@@ -333,7 +367,8 @@ def _capture_bytes(calibration, left, right):
     packed[..., 1] = 128
     packed[:, :w, 0], packed[:, w:, 0] = left, right
     def string(value):
-        raw = value.encode(); return struct.pack('<I', len(raw)) + raw
+        raw = value.encode()
+        return struct.pack('<I', len(raw)) + raw
     record = struct.pack('<IIIQQQ', 2*w, h, 4*w, 7, 1000000000, 1000000001)
     for value in ('synthetic_camera', 'synthetic_host', calibration.identity,
                   'synthetic-analytic-world-v1', '{"synthetic":true}', 'synthetic'):
@@ -350,12 +385,13 @@ def _capture_bytes(calibration, left, right):
 
 
 def export_scene_family(output, *, width=1280, height=720, calibration=None, scene=None,
-                        seed=42, photometric=None, world_from_left=None):
+                        seed=42, photometric=None, world_from_left=None, pixel_samples=1):
     """Export fresh full/half native fixtures and independent analytic truth.
 
     Returns family.json. No physical recordings or private calibration caches are
     consumed. photometric supplies per-eye gain/offset; clipping is documented.
-    All saved references are relative and content hashed; paths don't affect bytes.
+    pixel_samples controls original-pixel image integration, never truth geometry
+    or output resolution. All saved references are relative and content hashed.
     """
     output = profiles._no_symlinks(output)
     if output.exists():
@@ -377,7 +413,11 @@ def export_scene_family(output, *, width=1280, height=720, calibration=None, sce
             if not np.isfinite(list(values.values())).all() or not 0 < values['gain'] <= 4 or abs(values['offset']) > 128:
                 raise ValueError('photometric settings outside bounded domain')
             settings[eye] = copy.deepcopy(values)
-    originals = {eye: render_original(calibration, scene, eye, world_from_left=pose) for eye in ('left', 'right')}
+    originals = {eye: render_original(calibration, scene, eye, world_from_left=pose, pixel_samples=pixel_samples)
+                 for eye in ('left', 'right')}
+    if pixel_samples > 1:
+        scene['sample_footprint'] = (f'uniform original-pixel square, {pixel_samples}x{pixel_samples} midpoint rays; '
+                                    'uncalibrated box response; centre-ray geometry retained')
     lumas = {}
     clipped = {}
     for eye, rendered in originals.items():
@@ -387,7 +427,8 @@ def export_scene_family(output, *, width=1280, height=720, calibration=None, sce
     # Inputs and ray domains validate before the fresh output is created.
     output.mkdir(parents=True)
     def save(name, raw, *, dtype=None, shape=None):
-        path = output / name; path.parent.mkdir(parents=True, exist_ok=True)
+        path = output / name
+        path.parent.mkdir(parents=True, exist_ok=True)
         with path.open('xb') as stream:
             stream.write(raw)
         entry = dict(file=name, bytes=len(raw), sha256=native.sha256(path))
@@ -404,6 +445,13 @@ def export_scene_family(output, *, width=1280, height=720, calibration=None, sce
                   original_calibration=calibration_entry, world_from_left=pose.tolist(),
                   photometric=dict(settings=settings, clipped_pixels=clipped, rounding='floor(clamp(Y*gain+offset,0,255)+.5); neutral U/V128'),
                   profiles={})
+    if pixel_samples > 1:
+        family['image_sampling'] = dict(model='uniform_original_pixel_box', samples_per_axis=pixel_samples,
+            rays_per_pixel=pixel_samples * pixel_samples, optical_model_qualified=False, original_mixed={})
+        for eye in ('left', 'right'):
+            mixed = originals[eye]['mixed_pixel_footprint']
+            family['image_sampling']['original_mixed'][eye] = save(
+                f'original/{eye}_mixed_pixel_footprint.u8', mixed.astype('|u1').tobytes(), dtype='|u1', shape=mixed.shape)
     for name in ('full', 'half'):
         path = output / name / 'manifest.json'
         manifest, _ = native.validate_fixture(path)
@@ -425,6 +473,13 @@ def export_scene_family(output, *, width=1280, height=720, calibration=None, sce
             my = np.frombuffer(native.fixture_file(path.parent, manifest['maps'][eye+'_y']).read_bytes(), '<f4').reshape(shape)
             planes['mixed_bilinear'] = _mixed_footprints(mx, my, originals[eye]['surface_id'], planes['surface_id'])
             planes['remap_support'] = native.support_mask(mx, my, width, height).astype(bool)
+            if pixel_samples > 1:
+                import cv2
+                planes['mixed_pixel_footprint'] = cv2.remap(
+                    originals[eye]['mixed_pixel_footprint'].astype(np.float32), mx, my, cv2.INTER_LINEAR) > 0
+                gt['conventions']['footprint'] = ('centre-ray truth retained with area-integrated input; '
+                    'mixed_pixel_footprint marks contributing original pixels with centre/subray surface disagreement; '
+                    'mixed_bilinear retains its centre-surface meaning; support separate')
             gt['eyes'][eye] = {}
             for key, plane in planes.items():
                 dtype = '<f8' if plane.dtype.kind == 'f' else ('<i4' if key == 'surface_id' else '|u1')
@@ -445,9 +500,12 @@ def main():
     parser.add_argument('--width', type=int, default=1280)
     parser.add_argument('--height', type=int, default=720)
     parser.add_argument('--seed', type=int, default=42)
+    parser.add_argument('--pixel-samples-per-axis', dest='pixel_samples', type=int, choices=(1, 2, 4, 8), default=1,
+                        help='original-pixel box quadrature per axis; default 1 centre ray, not a calibrated optical PSF')
     args = parser.parse_args()
     try:
-        print(export_scene_family(args.output, width=args.width, height=args.height, seed=args.seed))
+        print(export_scene_family(args.output, width=args.width, height=args.height, seed=args.seed,
+                                  pixel_samples=args.pixel_samples))
     except (ValueError, OSError) as e:
         parser.error(str(e))
 

@@ -19,7 +19,7 @@ def test_hotpath_guards_and_mutations():
     hot += definition(source, 'DaxaHostExport::Frame DaxaHostExport::enqueue(const DaxaFrame&')
     def check(text):
         assert not re.search(r'\b(create_buffer|create_memory|wait_on_submit|wait_idle|readback|memcpy|make_shared|resize|push_back)\s*\(', text)
-        assert text.count('copy_buffer_to_buffer(') == 3
+        assert text.count('copy_buffer_to_buffer(') == 7
         assert '.src_offset=0,.dst_offset=0,.size=plane_bytes});' in text
         assert '.dst_offset=config.depth?plane_bytes:0,.size=plane_bytes});' in text
         assert '.dst_offset=plane_bytes*(unsigned(config.depth)+unsigned(config.rgb)),.size=plane_bytes});' in text
@@ -72,7 +72,7 @@ struct Name{std::string name;};
 struct AccessConsts{static constexpr int COMPUTE_SHADER_WRITE=1,TRANSFER_WRITE=2,TRANSFER_READ=4,HOST_READ=8;};
 struct Barrier{int src_access,dst_access;};
 struct BufferCopyInfo{BufferId src_buffer,dst_buffer;size_t src_offset=0,dst_offset=0,size=0;};
-struct Command{std::array<BufferCopyInfo,3> copies{};unsigned count=0;};
+struct Command{std::array<BufferCopyInfo,7> copies{};unsigned count=0;};
 struct Recorder{Command commands;std::vector<Barrier>* barriers;void pipeline_barrier(Barrier b){barriers->push_back(b);}void copy_buffer_to_buffer(BufferCopyInfo c){commands.copies[commands.count++]=c;}Command complete_current_commands(){return commands;}};
 struct Submit{std::span<const Command> command_lists;};
 struct Wait{int queue;uint64_t queue_submit_index,timeout;};
@@ -100,11 +100,11 @@ struct CaptureFrame {unsigned frame_id=1;};using CaptureLease=std::shared_ptr<co
 struct DaxaFoundation{daxa::Device device;};
 struct DaxaRectification{uint32_t width=7,height=5;};
 namespace detail{inline bool completed_submission(uint64_t submitted,uint64_t oldest){return !submitted||submitted<=oldest;}inline bool available_slot(long refs,uint64_t submitted,uint64_t oldest){return refs==1&&completed_submission(submitted,oldest);}}
-enum class DaxaObservationPlane{Depth,Provenance};enum class DaxaObservationImage{RectifiedLeft};enum class DaxaPreprocessPlane{RectifiedLeft};
+enum class DaxaObservationPlane{Depth,Confidence,Validity,Provenance,SourceIds,AgeNs};enum class DaxaObservationImage{RectifiedLeft};enum class DaxaPreprocessPlane{RectifiedLeft};
 struct MockImage{daxa::BufferId id;uint32_t w,h;auto buffer()const{return id;}auto width()const{return w;}auto height()const{return h;}};
-struct InputState{std::shared_ptr<DaxaFoundation> context;std::shared_ptr<const DaxaRectification> maps;CaptureLease source;daxa::BufferId depth,rgb;uint64_t ticket=10;uint64_t generation=1;uint32_t w=7,h=5;};
+struct InputState{std::shared_ptr<DaxaFoundation> context;std::shared_ptr<const DaxaRectification> maps;CaptureLease source;daxa::BufferId depth,rgb,confidence,validity,source_ids,age_ns;uint64_t ticket=10;uint64_t generation=1;uint32_t w=7,h=5;};
 struct DaxaFrame {std::shared_ptr<InputState> state;uint64_t generation_=1;void validate()const{if(!state||state->generation!=generation_)throw std::invalid_argument("stale producer");}explicit operator bool()const{return bool(state);}uint64_t context_id()const{validate();return reinterpret_cast<uintptr_t>(state->context->device.get());}auto calibration()const{validate();return state->maps;}auto source()const{validate();return state->source;}uint64_t submit_ticket()const{validate();return state->ticket;}auto plane(DaxaPreprocessPlane)const{validate();return MockImage{state->rgb,state->w,state->h};}};
-struct DaxaObservationFrame:DaxaFrame {uint32_t width()const{validate();return state->w;}uint32_t height()const{validate();return state->h;}size_t size_bytes(DaxaObservationPlane)const{validate();return size_t(state->w)*state->h*8;}auto buffer(DaxaObservationPlane)const{validate();return state->depth;}auto image(DaxaObservationImage)const{validate();return MockImage{state->rgb,state->w,state->h};}};
+struct DaxaObservationFrame:DaxaFrame {uint32_t width()const{validate();return state->w;}uint32_t height()const{validate();return state->h;}size_t size_bytes(DaxaObservationPlane p)const{validate();return size_t(state->w)*state->h*(p==DaxaObservationPlane::SourceIds||p==DaxaObservationPlane::AgeNs?16:8);}auto buffer(DaxaObservationPlane p)const{validate();switch(p){case DaxaObservationPlane::Confidence:return state->confidence;case DaxaObservationPlane::Validity:return state->validity;case DaxaObservationPlane::SourceIds:return state->source_ids;case DaxaObservationPlane::AgeNs:return state->age_ns;default:return state->depth;}}auto image(DaxaObservationImage)const{validate();return MockImage{state->rgb,state->w,state->h};}};
 }
 '''
 
@@ -112,10 +112,26 @@ CASES = r'''
 using namespace stereoforge;
 void check(bool ok,const char* message){if(!ok)throw std::runtime_error(message);}
 template<class F>void rejects(F fn){bool failed=false;try{fn();}catch(const std::exception&){failed=true;}check(failed,"expected rejection");}
-DaxaObservationFrame input(std::shared_ptr<DaxaFoundation> c,std::shared_ptr<const DaxaRectification> maps){auto s=std::make_shared<InputState>();s->context=c;s->maps=maps;s->source=std::make_shared<CaptureFrame>();s->depth=c->device.source(280,3);s->rgb=c->device.source(140,29);uint32_t nan=0x7fc12345;std::memcpy(c->device.buffers[s->depth.index].data(),&nan,4);return {{s,1}};}
+DaxaObservationFrame input(std::shared_ptr<DaxaFoundation> c,std::shared_ptr<const DaxaRectification> maps){auto s=std::make_shared<InputState>();s->context=c;s->maps=maps;s->source=std::make_shared<CaptureFrame>();s->depth=c->device.source(280,3);s->rgb=c->device.source(140,29);s->confidence=c->device.source(280,47);s->validity=c->device.source(280,83);s->source_ids=c->device.source(560,119);s->age_ns=c->device.source(560,157);uint32_t nan=0x7fc12345;std::memcpy(c->device.buffers[s->depth.index].data(),&nan,4);return {{s,1}};}
+void diagnostic_contract(std::shared_ptr<DaxaFoundation> c,const DaxaObservationFrame& p){
+  DaxaHostExportConfig cfg{2,true,true,true};cfg.confidence=cfg.validity=cfg.source_ids=cfg.age_ns=true;
+  DaxaHostExport output(c,p,cfg);check(output.memory().bytes_per_slot==1264&&output.requested_bytes()==2528,"odd-grid mixed-width aligned byte accounting");
+  DaxaHostExport::Frame frame=output.enqueue(p);rejects([&]{frame.observation_bytes(DaxaObservationPlane::Validity);});frame.wait();
+  for(auto plane:{DaxaObservationPlane::Depth,DaxaObservationPlane::Confidence,DaxaObservationPlane::Validity,DaxaObservationPlane::Provenance,DaxaObservationPlane::SourceIds,DaxaObservationPlane::AgeNs}){
+   auto bytes=frame.observation_bytes(plane);auto width=plane==DaxaObservationPlane::SourceIds||plane==DaxaObservationPlane::AgeNs?8u:4u;
+   check(bytes.size()==35*width,"requested left-only diagnostic extent");check(std::equal(bytes.begin(),bytes.end(),c->device.buffers[p.buffer(plane).index].begin()),"diagnostic buffers copied without conversion or narrowing");
+  }
+  rejects([&]{frame.observation_bytes(static_cast<DaxaObservationPlane>(99));});
+  auto independent=frame;frame={};output.collect();auto second=output.enqueue(p);rejects([&]{output.enqueue(p);});second.wait();second={};independent={};output.collect();
+  cfg={2,false,false,false};cfg.confidence=cfg.validity=cfg.source_ids=cfg.age_ns=true;DaxaHostExport only(c,p,cfg);
+  check(only.memory().bytes_per_slot==840,"diagnostic-only exact bytes");DaxaHostExport::Frame d=only.enqueue(p);d.wait();check(d.depth_bytes().empty()&&d.rgba_bytes().empty()&&d.provenance_bytes().empty(),"unrequested outputs remain empty");
+  check(d.observation_bytes(DaxaObservationPlane::SourceIds).size()==280&&d.observation_bytes(DaxaObservationPlane::AgeNs).size()==280,"64-bit sidecars retain every byte");
+  rejects([&]{DaxaHostExport invalid(c,static_cast<const DaxaFrame&>(p),cfg);});
+}
 void setup(){properties={};properties.memoryTypeCount=3;properties.memoryTypes[0].propertyFlags=3;properties.memoryTypes[1].propertyFlags=7;properties.memoryTypes[2].propertyFlags=1;}
 int main(){try{
  setup();auto c=std::make_shared<DaxaFoundation>();auto maps=std::make_shared<DaxaRectification>();auto p=input(c,maps);
+ {auto diagnostic_context=std::make_shared<DaxaFoundation>();auto diagnostic_input=input(diagnostic_context,maps);diagnostic_contract(diagnostic_context,diagnostic_input);}
  for(auto cfg:{DaxaHostExportConfig{1,true,false},DaxaHostExportConfig{4,true,false},DaxaHostExportConfig{2,false,false}})rejects([&]{DaxaHostExport x(c,p,cfg);});
  DaxaHostExport x(c,p,{2,true,true});check(x.memory().type_index==1&&x.memory().host_cached&&x.memory().property_flags==7&&x.memory().bytes_per_slot==280&&x.requested_bytes()==560,"cached exact memory accounting");
  auto allocated=c->device.allocations;auto memory=c->device.memories;auto a=x.enqueue(p);check(a.producer_ticket()==10&&a.copy_ticket()==11&&!a.ready(),"copy vs producer completion");rejects([&]{a.depth_bytes();});check(c->device.waits==0,"implicit wait");
@@ -142,7 +158,7 @@ int main(){try{
 '''
 
 
-@pytest.mark.parametrize("mutation", [None,"double_depth","rgb_offset","producer_ready","uncached_first","release_producer"])
+@pytest.mark.parametrize("mutation", [None,"double_depth","rgb_offset","producer_ready","uncached_first","release_producer","narrow_ids","wrong_validity_source","early_observation_read"])
 def test_actual_source_cpu_probe(tmp_path, mutation):
     compiler = shutil.which('c++')
     assert compiler, 'actual-source CPU export probe requires C++20 compiler'
@@ -157,6 +173,9 @@ def test_actual_source_cpu_probe(tmp_path, mutation):
         'producer_ready': ('completed_submission(slot_->copy_ticket,', 'completed_submission(slot_->producer_ticket,'),
         'uncached_first': ('(pass||bool(flags&VK_MEMORY_PROPERTY_HOST_CACHED_BIT))', 'true'),
         'release_producer': ('s.producer=input;', 's.producer=std::monostate{};'),
+        'narrow_ids': ('plane_sizes[4]=plane_sizes[5]=plane_bytes*2;', 'plane_sizes[4]=plane_sizes[5]=plane_bytes;'),
+        'wrong_validity_source': ('diagnostics[1]=input.buffer(DaxaObservationPlane::Validity)', 'diagnostics[1]=input.buffer(DaxaObservationPlane::Confidence)'),
+        'early_observation_read': ('require(ready(),"host export copy incomplete");const auto index=', 'require(bool(*this),"host export copy incomplete");const auto index='),
     }
     if mutation:
         before, after = mutations[mutation]

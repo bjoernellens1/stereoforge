@@ -24,12 +24,12 @@ def sources():
 def check_hotpaths(src):
     export = src['src/daxa_host_export.cpp']
     selected = {
-        'src/daxa_host_export.cpp': ['void require(', 'bool same_owner(', 'void require_thread(',
+        'src/daxa_host_export.cpp': ['void require(', 'bool observation_requested(', 'bool same_owner(', 'void require_thread(',
             'void validate(uint64_t', 'std::shared_ptr<Slot>& available(', 'template<class Input>void submit(',
             'DaxaHostExport::Frame DaxaHostExport::enqueue(const DaxaObservationFrame&',
             'DaxaHostExport::Frame DaxaHostExport::enqueue(const DaxaFrame&', 'size_t DaxaHostExport::collect(',
             'DaxaHostExport::Frame::Frame(', 'DaxaHostExport::Frame& DaxaHostExport::Frame::operator=(',
-            'void DaxaHostExport::Frame::validate('],
+            'void DaxaHostExport::Frame::validate(', 'std::span<const std::byte> DaxaHostExport::Frame::observation_bytes('],
         'src/daxa_frame.cpp': ['void require(', 'void DaxaFrame::validate(', 'DaxaFrame::context_id(',
             'DaxaFrame::submit_ticket(', 'CaptureLease DaxaFrame::source(', 'DaxaFrame::calibration(',
             'DaxaFrame::plane(', 'DaxaImageView::DaxaImageView(', 'DaxaImageView::buffer(',
@@ -58,10 +58,12 @@ def check_hotpaths(src):
         assert enqueue.index('e.available()') < enqueue.index('input.context_id()')
         assert 'for(' not in enqueue and 'while(' not in enqueue
     submit = body(export, 'template<class Input>void submit(')
-    assert submit.count('copy_buffer_to_buffer(') == 3
+    assert submit.count('copy_buffer_to_buffer(') == 7
     assert 'if(config.depth)recorder.copy_buffer_to_buffer(' in submit
     assert 'if(config.rgb)recorder.copy_buffer_to_buffer(' in submit
     assert 'if(config.provenance)recorder.copy_buffer_to_buffer(' in submit
+    for flag in ('confidence', 'validity', 'source_ids', 'age_ns'):
+        assert f'if(config.{flag})recorder.copy_buffer_to_buffer(' in submit
     assert '.src_offset=0,.dst_offset=0,.size=plane_bytes' in submit
     assert '.dst_offset=config.depth?plane_bytes:0,.size=plane_bytes' in submit
     assert '.dst_offset=plane_bytes*(unsigned(config.depth)+unsigned(config.rgb)),.size=plane_bytes' in submit
