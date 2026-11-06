@@ -39,6 +39,27 @@ def record_file(tmp_path,records=2,width=8,height=5,vary_pixels=False):
     return path,c
 
 
+def test_v2_driver_timing_exact_fields_and_absence(tmp_path):
+    path,_=record_file(tmp_path,records=1)
+    raw=path.read_bytes();body=bytearray(raw[20:-8]);anchor=1793955000000000037
+    struct.pack_into('<Q',body,20,anchor+1000000)
+    timing=struct.pack('<BQIIQQQQ',1,1000000000,0xffffffff,0x80012001,
+                       1014000000,1015000000,anchor,999000000)
+    def encoded(extension):
+        record=body+extension;value=14695981039346656037
+        for byte in record:value=((value^byte)*1099511628211)&0xffffffffffffffff
+        return b'SFYUYV1\0'+struct.pack('<IQ',2,1)+record+struct.pack('<Q',value)
+    path.write_bytes(encoded(timing));metadata,_=compare.read_capture_record(path,0)
+    assert metadata['driver_timing']==dict(timestamp_ns=1000000000,sequence=0xffffffff,flags=0x80012001,
+        dequeue_begin_monotonic_ns=1014000000,dequeue_end_monotonic_ns=1015000000,
+        sdk_wall_anchor_ns=anchor,sdk_first_timestamp_ns=999000000)
+    path.write_bytes(encoded(b'\0'));metadata,_=compare.read_capture_record(path,0)
+    assert 'driver_timing' not in metadata
+    for malformed in [b'\2',struct.pack('<BQIIQQQQ',1,1000000000,1,0,1015000000,1,anchor,999000000)]:
+        path.write_bytes(encoded(malformed))
+        with pytest.raises(ValueError):compare.read_capture_record(path,0)
+
+
 def test_existing_sfp_record_ordinal_preserves_duplicate_and_raw_metadata(tmp_path):
     path,c=record_file(tmp_path)
     one,payload=compare.read_capture_record(path,0);two,again=compare.read_capture_record(path,1)
@@ -244,7 +265,7 @@ def test_bridge_cli_profile_and_resident_scope(tmp_path):
 def test_sfp_rejects_corruption_before_export(tmp_path,mutation):
     path,_=record_file(tmp_path,1);data=bytearray(path.read_bytes());ordinal=0
     if mutation=='magic':data[0]^=1
-    if mutation=='version':struct.pack_into('<I',data,8,2)
+    if mutation=='version':struct.pack_into('<I',data,8,3)
     if mutation=='nonfinalized':struct.pack_into('<Q',data,12,0xffffffffffffffff)
     if mutation=='truncated':data=data[:-1]
     if mutation=='trailing':data+=b'not-a-record'

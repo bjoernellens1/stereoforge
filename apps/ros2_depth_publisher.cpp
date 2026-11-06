@@ -8,6 +8,7 @@
 #include <stereoforge/daxa_dual_preprocess.hpp>
 #include <stereoforge/daxa_refinement.hpp>
 #include <stereoforge/daxa_host_export.hpp>
+#include <stereoforge/daxa_point_cloud.hpp>
 #include <stereoforge/ros_delivery_json.hpp>
 #include <stereoforge/ros_depth_contract.hpp>
 #include <stereoforge/ros_depth_diagnostics.hpp>
@@ -16,6 +17,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include <rmw/rmw.h>
 #include <sensor_msgs/msg/image.hpp>
+#include <sensor_msgs/msg/point_cloud2.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <algorithm>
 #include <array>
@@ -59,7 +61,7 @@ struct Options {
     std::string pipeline_mode="full-sgm",coarse_manifest,descriptor_mode="census",coarse_schedule="sequential",coarse_right_mode="independent-sgm",profile="quality";
     std::string depth_topic="/stereoforge/depth",rgb_topic="/stereoforge/rectified_rgb",completed_depth_topic="/stereoforge/depth_completed",completed_provenance_topic="/stereoforge/depth_completed_provenance";
     std::string depth_rate="adaptive",rate_report,gpu_timing_report,diagnostic_prefix="/stereoforge/diagnostics",rig_session_id;
-    bool diagnostics=false;
+    bool diagnostics=false,cloud=false;unsigned cloud_stride=4,cloud_rate=15;std::string cloud_topic="/stereoforge/points";
     unsigned depth_speckle_min_pixels=0,guided_fill_px=0; double depth_speckle_delta_m=0.05; double depth_speckle_delta_px=1.25; double gpu_duty_budget_pct=0.0;
     unsigned min_depth_fps=5,max_depth_fps=60,consumer_min_depth_fps=5,max_depth_age_ms=250,downshift_ms=3000;
     unsigned fps=60,disparities=128,warmup=5,max_frames=100000,qos_depth=1,min_disparity_bound=0,max_disparity_bound=0;int device_id=-1;double duration=600,subscriber_wait=0;bool validation=false,thread_cpu_timing=false,fast_mode=false,ultra_fast=false,refinement_subpixel=false,continuous_subpixel=false,adaptive_tiles=false,selective_repair=false,planar_recovery=false,verify_payload_checksum=false;
@@ -82,11 +84,15 @@ DepthRateConfig depth_rate_config(const Options& o) {
 Options parse(int argc,char** argv){
     Options o;
     for(int i=1;i<argc;++i){std::string a=argv[i];
-        if(a=="--help"){std::cout<<"--source camera|replay --manifest FILE --clock-map FILE --frame-id ID --run-id ID --trace FILE [--replay DIR --mode depth|rgb|depth-rgb --depth-rate 5|10|20|30|60|adaptive --min-depth-fps N --max-depth-fps N --consumer-min-depth-fps N --max-depth-age-ms N --downshift-ms N --rate-report FILE --capture-fps 15|30|60 --duration-seconds N --subscriber-wait-seconds N --max-frames N --warmup N --disparities N --stereo-variant packed-specialized|packed-specialized-overwrite|packed-specialized-overwrite-quad --pipeline full-sgm|experimental-refinement|experimental-dual-refinement --coarse-manifest FILE --device-id N --depth-topic TOPIC --rgb-topic TOPIC --reliability best_effort|reliable --depth-speckle-min-pixels N --depth-speckle-delta-m METRES --depth-speckle-delta-px PIXELS --gpu-timing-report FILE --diagnostics 0|1 --diagnostic-prefix TOPIC --rig-session-id ID --validation --thread-cpu-timing]\n";std::exit(0);}
+        if(a=="--help"){std::cout<<"--source camera|replay --manifest FILE --clock-map FILE --frame-id ID --run-id ID --trace FILE [--replay DIR --mode depth|rgb|depth-rgb --depth-rate 5|10|20|30|60|adaptive --min-depth-fps N --max-depth-fps N --consumer-min-depth-fps N --max-depth-age-ms N --downshift-ms N --rate-report FILE --capture-fps 15|30|60 --duration-seconds N --subscriber-wait-seconds N --max-frames N --warmup N --disparities N --stereo-variant packed-specialized|packed-specialized-overwrite|packed-specialized-overwrite-quad --pipeline full-sgm|experimental-refinement|experimental-dual-refinement --coarse-manifest FILE --device-id N --depth-topic TOPIC --rgb-topic TOPIC --reliability best_effort|reliable --depth-speckle-min-pixels N --depth-speckle-delta-m METRES --depth-speckle-delta-px PIXELS --cloud 0|1 --cloud-stride N --cloud-rate HZ --cloud-topic TOPIC --gpu-timing-report FILE --diagnostics 0|1 --diagnostic-prefix TOPIC --rig-session-id ID --validation --thread-cpu-timing]\n";std::exit(0);}
         if(a=="--validation"){o.validation=true;continue;}if(a=="--thread-cpu-timing"){o.thread_cpu_timing=true;continue;}if(a=="--verify-payload-checksum"){o.verify_payload_checksum=true;continue;}if(i+1>=argc)throw std::invalid_argument("missing option value");std::string v=argv[++i];
         if(a=="--source")o.source=v;else if(a=="--manifest")o.manifest=v;else if(a=="--replay")o.replay=v;else if(a=="--mode")o.mode=v;
         else if(a=="--clock-map")o.map=v;else if(a=="--frame-id")o.frame=v;else if(a=="--run-id")o.run=v;else if(a=="--trace")o.trace=v;
         else if(a=="--depth-topic")o.depth_topic=v;else if(a=="--rgb-topic")o.rgb_topic=v;else if(a=="--completed-depth-topic")o.completed_depth_topic=v;else if(a=="--completed-provenance-topic")o.completed_provenance_topic=v;else if(a=="--reliability")o.reliability=v;
+        else if(a=="--cloud")o.cloud=number(v,0,1)!=0;
+        else if(a=="--cloud-stride")o.cloud_stride=number(v,1,8192);
+        else if(a=="--cloud-rate")o.cloud_rate=number(v,1,60);
+        else if(a=="--cloud-topic")o.cloud_topic=v;
         else if(a=="--diagnostics")o.diagnostics=number(v,0,1)!=0;
         else if(a=="--diagnostic-prefix")o.diagnostic_prefix=v;else if(a=="--rig-session-id")o.rig_session_id=v;
         else if(a=="--qos-depth")o.qos_depth=number(v,1,64);
@@ -143,6 +149,14 @@ Options parse(int argc,char** argv){
             if(topic==o.depth_topic||topic==o.rgb_topic||topic==o.completed_depth_topic||topic==o.completed_provenance_topic)throw std::invalid_argument("diagnostic topic collision");
         }
     }
+    if(o.cloud){
+        if(o.mode=="rgb"||o.pipeline_mode!="full-sgm"||o.depth_speckle_min_pixels||o.guided_fill_px||o.cloud_topic.empty()||o.cloud_topic.front()!='/'||o.cloud_topic.back()=='/'||o.cloud_topic.size()>4096||o.rig_session_id.size()>256)throw std::invalid_argument("cloud requires full-SGM measured depth without CPU filtering and an absolute topic");
+        for(const auto& topic:{o.cloud_topic,o.cloud_topic+"/metadata"}){
+            if(topic==o.depth_topic||topic==o.rgb_topic||topic==o.completed_depth_topic||topic==o.completed_provenance_topic)throw std::invalid_argument("cloud topic collision");
+            if(o.diagnostics)for(const char* suffix:{"disparity","validity","confidence","uncertainty_m","provenance","source_ids","source_age_ns","metadata"})if(topic==o.diagnostic_prefix+"/"+suffix)throw std::invalid_argument("cloud diagnostic topic collision");
+        }
+        if(o.gpu_timing_report==o.trace+".cloud.json"||o.rate_report==o.trace+".cloud.json")throw std::invalid_argument("cloud report path collision");
+    }
     depth_rate_config(o);
     return o;
 }
@@ -187,10 +201,14 @@ struct Counters {std::uint64_t read=0,admitted=0,ring_drops=0,identity_rejects=0
 json counters_json(const Counters& c,bool has_completed=false){json j={{"read",c.read},{"admitted",c.admitted},{"ring_drops",c.ring_drops},{"identity_rejects",c.identity_rejects},{"published_depth",c.published_depth},{"published_rgb",c.published_rgb},{"received_depth",0},{"received_rgb",0},{"timeouts",c.timeouts}};if(has_completed){j["published_completed_depth"]=c.published_completed_depth;j["published_completed_provenance"]=c.published_completed_provenance;j["received_completed_depth"]=0;j["received_completed_provenance"]=0;}return j;}
 struct DiagnosticCounters {uint64_t frames=0,images=0,metadata=0,bytes=0,pack_ns=0,publish_call_ns=0;};
 struct GpuTimingSample {int64_t source_id;uint64_t capture_ns,producer_ticket,published_ns,query_begin_ns,query_end_ns,start_tick,end_tick;uint32_t timestamp_bits;double timestamp_period_ns,gpu_span_ms;};
-struct Pending {DaxaDepthPipeline::Frame depth;DaxaFrame full;DaxaRefinement::Frame refined;DaxaFrame rgb;DaxaHostExport::Frame output,completed_output;CaptureLease capture;RosCaptureStamp stamp;std::uint64_t producer_observed=0,producer_enqueue_begin=0,producer_enqueue_end=0,export_enqueue_end=0;};
+struct CloudSample {uint64_t source_id,capture_ns,ingress_ns,submit_ticket,copy_begin_ns,copy_end_ns,serialize_begin_ns,serialize_end_ns,serialized_bytes,publish_begin_ns,publish_end_ns;double generation_gpu_ms,export_gpu_ms;};
+struct Pending {DaxaPointCloud::Frame cloud;DaxaDepthPipeline::Frame depth;DaxaFrame full;DaxaRefinement::Frame refined;DaxaFrame rgb;DaxaHostExport::Frame output,completed_output;CaptureLease capture;RosCaptureStamp stamp;std::uint64_t producer_observed=0,producer_enqueue_begin=0,producer_enqueue_end=0,export_enqueue_end=0;};
 void initialize_image(sensor_msgs::msg::Image& image,unsigned w,unsigned h,const char* encoding,const std::string& frame,unsigned elem_bytes=4){image.width=w;image.height=h;image.step=w*elem_bytes;image.encoding=encoding;image.is_bigendian=0;image.header.frame_id=frame;image.data.resize(size_t(w)*h*elem_bytes);}
 void run(const Options& o, OutputFile& file){
     if constexpr(std::endian::native!=std::endian::little)throw std::runtime_error("ROS image export requires a little-endian host");
+    std::unique_ptr<OutputFile> cloud_report;if(o.cloud)cloud_report=std::make_unique<OutputFile>(o.trace+".cloud.json");
+    std::vector<CloudSample> cloud_samples;if(o.cloud)cloud_samples.reserve(o.max_frames);
+    uint64_t cloud_generated=0,cloud_rate_skips=0,last_cloud_ingress=0;
     std::unique_ptr<OutputFile> gpu_timing_report;
     std::vector<GpuTimingSample> gpu_timings;
     if(!o.gpu_timing_report.empty()){gpu_timing_report=std::make_unique<OutputFile>(o.gpu_timing_report);gpu_timings.reserve(o.max_frames);}
@@ -217,6 +235,21 @@ void run(const Options& o, OutputFile& file){
         completed_depth_pub=node->create_publisher<sensor_msgs::msg::Image>(o.completed_depth_topic,qos_profile);
         completed_provenance_pub=node->create_publisher<sensor_msgs::msg::Image>(o.completed_provenance_topic,qos_profile);
     }
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_pub;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr cloud_metadata_pub;
+    sensor_msgs::msg::PointCloud2 cloud_message;std_msgs::msg::String cloud_metadata_message;
+    rclcpp::Serialization<sensor_msgs::msg::PointCloud2> cloud_serializer;
+    std::unique_ptr<rclcpp::SerializedMessage> cloud_serialized;
+    std::unique_ptr<FixedJsonUintFields<6>> cloud_metadata;
+    if(o.cloud){
+        cloud_pub=node->create_publisher<sensor_msgs::msg::PointCloud2>(o.cloud_topic,qos_profile);
+        cloud_metadata_pub=node->create_publisher<std_msgs::msg::String>(o.cloud_topic+"/metadata",qos_profile);
+        PointCloudLayout layout(maps.width,maps.height,o.cloud_stride);
+        cloud_message.width=layout.width;cloud_message.height=layout.height;cloud_message.point_step=16;cloud_message.row_step=layout.row_step;
+        cloud_message.is_bigendian=false;cloud_message.is_dense=false;cloud_message.header.frame_id=o.frame;cloud_message.data.resize(layout.bytes);
+        cloud_serialized=std::make_unique<rclcpp::SerializedMessage>(layout.bytes+o.frame.size()+1024);
+        for(const char* name:{"x","y","z","rgb"}){sensor_msgs::msg::PointField field;field.name=name;field.offset=uint32_t(cloud_message.fields.size())*4;field.datatype=sensor_msgs::msg::PointField::FLOAT32;field.count=1;cloud_message.fields.push_back(field);}
+    }
     if(rgb)rgb_pub=node->create_publisher<sensor_msgs::msg::Image>(o.rgb_topic,qos_profile);
     constexpr std::array<const char*,7> diagnostic_names{"disparity","validity","confidence","uncertainty_m","provenance","source_ids","source_age_ns"};
     std::array<rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr,7> diagnostic_publishers{};
@@ -241,7 +274,7 @@ void run(const Options& o, OutputFile& file){
     auto diagnostics_discovered=[&](){if(!o.diagnostics)return true;for(auto const& publisher:diagnostic_publishers)if(!publisher->get_subscription_count())return false;return metadata_publisher->get_subscription_count()!=0;};
     if(o.subscriber_wait>0){
         auto deadline=steady::now()+std::chrono::duration_cast<steady::duration>(std::chrono::duration<double>(o.subscriber_wait));
-        while((depth&&depth_pub->get_subscription_count()==0)||(rgb&&rgb_pub->get_subscription_count()==0)||!diagnostics_discovered()){
+        while((depth&&depth_pub->get_subscription_count()==0)||(rgb&&rgb_pub->get_subscription_count()==0)||!diagnostics_discovered()||(o.cloud&&(!cloud_pub->get_subscription_count()||!cloud_metadata_pub->get_subscription_count()))){
             if(!rclcpp::ok()||steady::now()>=deadline)throw std::runtime_error("subscriber discovery timed out");
             std::this_thread::sleep_until(std::min(deadline,steady::now()+std::chrono::milliseconds(10)));
         }
@@ -258,6 +291,7 @@ void run(const Options& o, OutputFile& file){
     std::uint64_t last_id=first->frame_id,last_capture=first->camera_timestamp_ns;
     auto context=std::make_shared<DaxaFoundation>(o.validation);
     std::unique_ptr<DaxaDepthPipeline> pipeline;std::unique_ptr<DaxaPreprocess> preprocess,full_preprocess;std::unique_ptr<DaxaRefinement> refinement;std::unique_ptr<DaxaHostExport> exporter,completed_exporter;std::unique_ptr<DaxaDualPreprocess> dual_preprocess;
+    std::unique_ptr<DaxaPointCloud> cloud_generator;
     DaxaRefinementConfig refinement_config;refinement_config.disparities=o.disparities;refinement_config.borrow_full_frame=true;refinement_config.ortho_hybrid=(o.descriptor_mode=="ortho-hybrid");refinement_config.fast_mode=o.fast_mode;refinement_config.ultra_fast=o.ultra_fast;refinement_config.radius=o.ultra_fast?2u:4u;refinement_config.subpixel=o.refinement_subpixel?1u:0u;refinement_config.continuous_subpixel=o.continuous_subpixel;refinement_config.adaptive_tiles=o.adaptive_tiles;refinement_config.min_disparity_bound=o.min_disparity_bound;refinement_config.max_disparity_bound=o.max_disparity_bound;refinement_config.selective_repair=o.selective_repair;refinement_config.planar_recovery=o.planar_recovery;refinement_config.allow_derived_coarse=(o.coarse_right_mode=="left-aggregated-selection");
     uint32_t coarse_scale=(experimental&&maps.width==coarse_maps.width*4)?4u:2u;
     DaxaDepthConfig depth_config{StereoConfig{experimental?coarse_maps.width:maps.width,experimental?coarse_maps.height:maps.height,experimental?o.disparities/coarse_scale:o.disparities,4,8,32,true,o.descriptor_mode=="ortho-hybrid"},1.f,2,32};
@@ -270,7 +304,7 @@ void run(const Options& o, OutputFile& file){
         if(dual){dual_preprocess=std::make_unique<DaxaDualPreprocess>(maps,coarse_maps,2,context);pair=dual_preprocess->enqueue(first);pipeline=std::make_unique<DaxaDepthPipeline>(depth_config,context,pair.coarse);prototype=pipeline->enqueue_preprocessed(pair.coarse);}
         else{pipeline=std::make_unique<DaxaDepthPipeline>(experimental?coarse_maps:maps,depth_config,context,first);prototype=pipeline->enqueue(first);}
         if(experimental){DaxaFrame full;if(dual)full=pair.full;else{full_preprocess=std::make_unique<DaxaPreprocess>(maps,2,context);full=full_preprocess->enqueue(first);}refinement=std::make_unique<DaxaRefinement>(context,prototype,full,refinement_config);auto refined=refinement->process(prototype,full);exporter=std::make_unique<DaxaHostExport>(context,refined.observations(),measured_export);if(o.planar_recovery)completed_exporter=std::make_unique<DaxaHostExport>(context,refined.completed_observations(),DaxaHostExportConfig{2,true,false,true});refined.wait();refined={};full={};refinement->collect();if(!dual)full_preprocess->collect_completed_sources();}
-        else{exporter=std::make_unique<DaxaHostExport>(context,prototype.observations(),measured_export);prototype.wait();}prototype={};pair={};pipeline->collect();if(dual)dual_preprocess->collect();}
+        else{exporter=std::make_unique<DaxaHostExport>(context,prototype.observations(),measured_export);if(o.cloud)cloud_generator=std::make_unique<DaxaPointCloud>(context,prototype.observations(),DaxaPointCloudConfig{2,o.cloud_stride});prototype.wait();}prototype={};pair={};pipeline->collect();if(dual)dual_preprocess->collect();}
     else{preprocess=std::make_unique<DaxaPreprocess>(maps,2,context);auto prototype=preprocess->enqueue(first);exporter=std::make_unique<DaxaHostExport>(context,prototype,DaxaHostExportConfig{2,false,true});prototype.wait();prototype={};preprocess->collect_completed_sources();}
     first={};
     RosDeliveryTrace trace(size_t(o.max_frames)*(unsigned(depth)+unsigned(rgb)+(completed_exporter?2u:0u))+2);std::array<Pending,2> pending{};Counters counters{};
@@ -367,6 +401,27 @@ void run(const Options& o, OutputFile& file){
             {"capture_requested_bytes",(baseline.pool_capacity+1)*baseline.packed_bytes_per_slot},{"trace_capacity",trace.event_capacity()},{"trace_record_bytes",sizeof(RosDeliveryTraceRecord)},
             {"ros_requested_bytes",depth_image.data.size()+rgb_image.data.size()+completed_depth_image.data.size()+completed_provenance_image.data.size()},{"export_memory_type_index",memory.type_index},{"export_memory_property_flags",memory.property_flags},{"export_host_cached",memory.host_cached},
             {"storage_accounting_complete",false}}}};
+    json cloud_configuration;
+    if(o.cloud){
+        auto m=cloud_generator->memory();
+        cloud_configuration={{"topic",o.cloud_topic},{"metadata_topic",o.cloud_topic+"/metadata"},{"frame_id",o.frame},{"resident_width",maps.width},{"resident_height",maps.height},{"export_stride",o.cloud_stride},{"max_export_hz",o.cloud_rate},{"export_width",cloud_message.width},{"export_height",cloud_message.height},
+            {"layout","organized_XYZ_float32_RGB_bits_R16_G8_B0_float32_field"},{"invalid_geometry","XYZ_NaN"},{"support","validity_1_and_finite_positive_axial_depth_and_finite_XYZ"},{"coordinate_frame","left_rectified_optical_x_right_y_down_z_forward_metres"},
+            {"provenance","current_frame_measured_no_completion"},{"source_age_ns","0"},{"source_age_semantics","producer_relative_not_acquisition_age"},{"metric_uncertainty","unavailable_uncalibrated"},{"acquisition_clock_qualified",false},
+            {"profile",o.profile},{"qualification","unqualified"},{"estimator",implementation},{"calibration_identity",maps.rectified_identity},{"rig_session_id",o.rig_session_id.empty()?"unknown":o.rig_session_id},
+            {"rig_session",o.rig_session_id.empty()?json{{"status","unavailable"},{"reason","mounting_session_unknown"}}:json{{"status","declared_unverified"},{"value",o.rig_session_id}}},
+            {"camera_clock_domain",mapping.source_clock},{"host_clock_domain","host_steady"},{"publication_host_clock_id",host_clock_id},{"ingress_clock_instance_status","not_attested_in_capture_format"},
+            {"mapped_header_clock","ROS_system_from_supplied_mapping"},{"mapping_max_error_ns",std::to_string(mapping.max_error_ns)},{"clock_mapping_status","supplied_unverified"},
+            {"resident_requested_bytes",m.resident_bytes},{"export_requested_bytes",m.export_bytes},{"export_memory_type",m.export_memory_type},{"export_memory_flags",m.export_memory_flags},{"ros_message_bytes",cloud_message.data.size()},
+            {"publication_semantics","serialized_publish_call_RMW_enqueue_not_subscriber_delivery"},{"serialization_timing","explicit_rclcpp_CDR_serialization_separate_from_copy_and_publish"}};
+        cloud_configuration["cloud_spirv_sha256"]=stereoforge::native_estimator::shader_hashes(DaxaPointCloud::shader_directory(),"daxa-cloud-");
+        cloud_configuration["publisher_executable_sha256"]=daxa_preprocess_file_sha256("/proc/self/exe");
+        config["point_cloud"]=cloud_configuration;
+        auto frame_template=cloud_configuration;frame_template["schema"]="stereoforge.ros_point_cloud.frame.v1";
+        const std::array<std::string_view,6> fields{"source_id","capture_timestamp_ns","host_ingress_timestamp_ns","mapped_header_stamp_ns","submit_ticket","cloud_publish_call_completed_ns"};
+        for(auto field:fields)frame_template[field]=std::string(FixedJsonUintFields<6>::placeholder());
+        cloud_metadata=std::make_unique<FixedJsonUintFields<6>>(frame_template.dump(),fields);
+        cloud_metadata_message.data=std::string(cloud_metadata->template_bytes());
+    }
     if(dual)config["memory"]["producer_requested_bytes_reason"]="dual_producer_requested_bytes_unavailable";
     auto valid_source=[&](const CaptureLease& f,RosCaptureStamp& stamp){check_source(f);if(f->frame_id<=last_id||f->camera_timestamp_ns<=last_capture)return false;stamp=checked_stamp(f);fresh.admit(static_cast<std::int64_t>(f->frame_id),f->camera_timestamp_ns,f->camera_clock_domain);last_id=f->frame_id;last_capture=f->camera_timestamp_ns;return true;};
     auto warmup_deadline=now_ns<steady>()+30'000'000'000ull;
@@ -381,6 +436,7 @@ void run(const Options& o, OutputFile& file){
         auto producer_ready=depth?(experimental?p.refined.ready():p.depth.ready()):p.rgb.ready();if(producer_ready&&!p.producer_observed)p.producer_observed=now_ns<steady>();
         if(drain)p.output.wait();else if(!p.output.ready())return;
         if(completed_exporter){if(drain)p.completed_output.wait();else if(!p.completed_output.ready())return;}
+        if(p.cloud){if(drain)p.cloud.wait();else if(!p.cloud.ready())return;}
         auto copy_observed=now_ns<steady>();if(!p.producer_observed)p.producer_observed=copy_observed;
         if(duty_governor&&p.producer_enqueue_begin&&p.producer_observed>=p.producer_enqueue_begin){
             duty_governor->observe_gpu_ms(double(p.producer_observed-p.producer_enqueue_begin)/1e6);
@@ -498,6 +554,21 @@ void run(const Options& o, OutputFile& file){
         if(completed_exporter&&completed_depth_pub&&!trace_full)emit(RosDeliveryOutput::CompletedDepth,completed_depth_image,completed_depth_pub);
         if(completed_exporter&&completed_provenance_pub&&!trace_full)emit(RosDeliveryOutput::CompletedProvenance,completed_provenance_image,completed_provenance_pub);
         if(rgb&&!trace_full)emit(RosDeliveryOutput::Rgb,rgb_image,rgb_pub);
+        if(p.cloud&&p.cloud.has_export()&&!trace_full){
+            CloudSample sample{};sample.source_id=p.capture->frame_id;sample.capture_ns=p.capture->camera_timestamp_ns;sample.ingress_ns=p.capture->host_ingress_timestamp_ns;sample.submit_ticket=p.cloud.submit_ticket();
+            const auto timing=p.cloud.timings();sample.generation_gpu_ms=timing.generation_gpu_ms;sample.export_gpu_ms=timing.export_gpu_ms;
+            sample.copy_begin_ns=now_ns<steady>();auto bytes=p.cloud.export_bytes();
+            if(bytes.size()!=cloud_message.data.size())throw std::runtime_error("cloud export extent mismatch");
+            std::memcpy(cloud_message.data.data(),bytes.data(),bytes.size());sample.copy_end_ns=now_ns<steady>();
+            cloud_message.header.stamp.sec=p.stamp.sec;cloud_message.header.stamp.nanosec=p.stamp.nanosec;
+            sample.serialize_begin_ns=now_ns<steady>();cloud_serializer.serialize_message(&cloud_message,cloud_serialized.get());sample.serialize_end_ns=now_ns<steady>();sample.serialized_bytes=cloud_serialized->size();
+            sample.publish_begin_ns=now_ns<steady>();cloud_pub->publish(*cloud_serialized);sample.publish_end_ns=now_ns<steady>();
+            cloud_metadata->stamp(std::span<char>(cloud_metadata_message.data),{sample.source_id,sample.capture_ns,sample.ingress_ns,uint64_t(p.stamp.sec)*uint64_t(1'000'000'000)+p.stamp.nanosec,sample.submit_ticket,sample.publish_end_ns});
+            cloud_metadata_pub->publish(cloud_metadata_message);
+            if(cloud_samples.size()>=o.max_frames)throw std::runtime_error("cloud sample storage exhausted");
+            cloud_samples.push_back(sample);
+        }
+        p.cloud={};if(cloud_generator)cloud_generator->collect();
         p.completed_output={};p.output={};p.refined={};p.full={};p.depth={};p.rgb={};p.capture={};if(completed_exporter)completed_exporter->collect();exporter->collect();if(experimental){refinement->collect();if(!dual)full_preprocess->collect_completed_sources();}if(depth)pipeline->collect();else preprocess->collect_completed_sources();if(dual)dual_preprocess->collect();
     };
     auto retire_pending=[&](bool drain){
@@ -538,7 +609,15 @@ void run(const Options& o, OutputFile& file){
             if(depth&&dual){auto pair=dual_preprocess->enqueue(f);index->depth=pipeline->enqueue_preprocessed(pair.coarse);index->full=pair.full;index->refined=refinement->process(index->depth,index->full);index->producer_enqueue_end=now_ns<steady>();index->output=exporter->enqueue(index->refined.observations());}
             else if(depth){index->depth=pipeline->enqueue(f);if(experimental){index->full=full_preprocess->enqueue(f);index->refined=refinement->process(index->depth,index->full);}index->producer_enqueue_end=now_ns<steady>();index->output=exporter->enqueue(experimental?index->refined.observations():index->depth.observations());}
             else{index->rgb=preprocess->enqueue(f);index->producer_enqueue_end=now_ns<steady>();index->output=exporter->enqueue(index->rgb);}
-            index->export_enqueue_end=now_ns<steady>();if(completed_exporter)index->completed_output=completed_exporter->enqueue(index->refined.completed_observations());++counters.admitted;
+            index->export_enqueue_end=now_ns<steady>();
+            if(cloud_generator){
+                const auto ingress=f->host_ingress_timestamp_ns;const auto period=uint64_t(1'000'000'000)/o.cloud_rate;
+                const bool export_due=!last_cloud_ingress||(ingress>=last_cloud_ingress&&ingress-last_cloud_ingress>=period);
+                index->cloud=cloud_generator->enqueue(index->depth.observations(),export_due);++cloud_generated;
+                if(export_due)last_cloud_ingress=ingress;else ++cloud_rate_skips;
+            }
+            if(completed_exporter)index->completed_output=completed_exporter->enqueue(index->refined.completed_observations());
+            ++counters.admitted;
             if(depth){
                 rate_controller.admitted(f->camera_timestamp_ns);
                 if(o.depth_rate=="adaptive")scene_monitor.depth_admitted();
@@ -547,10 +626,10 @@ void run(const Options& o, OutputFile& file){
         if(trace_full)reason="trace_full";else if(!rclcpp::ok())reason="shutdown";
     }catch(const std::exception& e){reason="error";failure=e.what();}
     auto window_end=now_ns<steady>();auto window_counters=counters;auto window_diagnostics=diagnostic_counters;auto window_capture=capture->metrics();auto window_pending=count_pending();auto drain_begin=now_ns<steady>();
-    try{capture->stop();retire_pending(true);if(completed_exporter)completed_exporter->drain();exporter->drain();if(depth)pipeline->drain();else preprocess->collect_completed_sources();}
+    try{capture->stop();retire_pending(true);if(completed_exporter)completed_exporter->drain();if(cloud_generator)cloud_generator->drain();exporter->drain();if(depth)pipeline->drain();else preprocess->collect_completed_sources();}
     catch(const std::exception& e){reason="error";failure=e.what();}
     if(trace_full&&reason!="error")reason="trace_full";
-    auto drain_end=now_ns<steady>();for(auto& p:pending){p.output={};p.refined={};p.full={};p.depth={};p.rgb={};p.capture={};}for(auto& p:pending)p.completed_output={};const bool has_completed=(depth&&experimental&&o.planar_recovery);completed_exporter.reset();exporter.reset();refinement.reset();full_preprocess.reset();pipeline.reset();dual_preprocess.reset();preprocess.reset();
+    auto drain_end=now_ns<steady>();for(auto& p:pending)p.cloud={};for(auto& p:pending){p.output={};p.refined={};p.full={};p.depth={};p.rgb={};p.capture={};}for(auto& p:pending)p.completed_output={};const bool has_completed=(depth&&experimental&&o.planar_recovery);cloud_generator.reset();completed_exporter.reset();exporter.reset();refinement.reset();full_preprocess.reset();pipeline.reset();dual_preprocess.reset();preprocess.reset();
     try{context->close();}catch(const std::exception& e){reason="error";failure=e.what();}
     if(context->validation_errors.load()||context->validation_warnings.load()){reason="error";failure="Vulkan validation errors or warnings";}
     json begin={{"schema","stereoforge.ros_delivery_event.v1"},{"kind","start"},{"run_id",o.run},{"role","publisher"},{"at_ns",started},{"config",config}};
@@ -568,6 +647,12 @@ void run(const Options& o, OutputFile& file){
             {"capacity",o.max_frames},{"sample_record_bytes",sizeof(GpuTimingSample)},{"requested_sample_storage_bytes",size_t(o.max_frames)*sizeof(GpuTimingSample)},
             {"source_window_end_ns",window_end},{"reason",reason},{"samples",samples},{"acquisition_age_qualified",false}}).dump()+"\n");
         gpu_timing_report->complete=true;
+    }
+    if(cloud_report){
+        json samples=json::array();for(const auto& s:cloud_samples)samples.push_back({{"source_id",std::to_string(s.source_id)},{"capture_ns",std::to_string(s.capture_ns)},{"ingress_ns",std::to_string(s.ingress_ns)},{"submit_ticket",std::to_string(s.submit_ticket)},
+            {"copy_begin_ns",std::to_string(s.copy_begin_ns)},{"copy_end_ns",std::to_string(s.copy_end_ns)},{"serialize_begin_ns",std::to_string(s.serialize_begin_ns)},{"serialize_end_ns",std::to_string(s.serialize_end_ns)},{"serialized_bytes",s.serialized_bytes},{"publish_begin_ns",std::to_string(s.publish_begin_ns)},{"publish_end_ns",std::to_string(s.publish_end_ns)},
+            {"generation_gpu_ms",s.generation_gpu_ms},{"export_gpu_ms",s.export_gpu_ms},{"in_measurement_window",s.publish_end_ns<=window_end}});
+        cloud_report->reset();cloud_report->put(json({{"schema","stereoforge.ros_point_cloud.report.v1"},{"configuration",cloud_configuration},{"generated",cloud_generated},{"export_rate_skips",cloud_rate_skips},{"samples",samples},{"reason",reason},{"source_window_end_ns",std::to_string(window_end)},{"subscriber_delivery_qualified",false}}).dump()+"\n");cloud_report->complete=true;
     }
     if(diagnostic_report){
         diagnostic_report->reset();

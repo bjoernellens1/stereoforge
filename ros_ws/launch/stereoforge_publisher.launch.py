@@ -11,6 +11,10 @@ from launch.substitutions import LaunchConfiguration
 
 _OPTIONAL_VALUE_ARGUMENTS = (
     ("mode", "--mode"),
+    ("cloud", "--cloud"),
+    ("cloud_stride", "--cloud-stride"),
+    ("cloud_rate", "--cloud-rate"),
+    ("cloud_topic", "--cloud-topic"),
     ("diagnostics", "--diagnostics"),
     ("diagnostic_prefix", "--diagnostic-prefix"),
     ("rig_session_id", "--rig-session-id"),
@@ -239,6 +243,10 @@ def generate_launch_description():
             default_value="depth-rgb",
             choices=["depth", "rgb", "depth-rgb"],
         ),
+        DeclareLaunchArgument("cloud", default_value="0", choices=["0", "1"]),
+        DeclareLaunchArgument("cloud_stride", default_value="4"),
+        DeclareLaunchArgument("cloud_rate", default_value="15"),
+        DeclareLaunchArgument("cloud_topic", default_value="/stereoforge/points"),
         DeclareLaunchArgument("gpu_timing_report", default_value=""),
         DeclareLaunchArgument("diagnostics", default_value="0", choices=["0", "1"]),
         DeclareLaunchArgument("diagnostic_prefix", default_value="/stereoforge/diagnostics"),

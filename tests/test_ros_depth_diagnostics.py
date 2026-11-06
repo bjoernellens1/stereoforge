@@ -30,7 +30,17 @@ def test_publisher_diagnostic_options(tmp_path):
                     str(path), '-o', str(binary)], check=True)
     required = ['--source', 'camera', '--manifest', 'x', '--clock-map', 'x',
                 '--frame-id', 'x', '--run-id', 'x', '--trace', 'x']
-    cases = [(['--gpu-timing-report', 'timing.json'], 0),
+    cases = [(['--cloud', '1'], 0),
+             (['--cloud', '0'], 0),
+             (['--cloud', '1', '--cloud-stride', '3', '--cloud-rate', '15'], 0),
+             (['--cloud', '1', '--cloud-stride', '0'], 2),
+             (['--cloud', '1', '--cloud-rate', '0'], 2),
+             (['--cloud', '1', '--mode', 'rgb'], 2),
+             (['--cloud', '1', '--depth-speckle-min-pixels', '10'], 2),
+             (['--cloud', '1', '--pipeline', 'experimental-refinement', '--coarse-manifest', 'coarse'], 2),
+             (['--cloud', '1', '--cloud-topic', '/stereoforge/depth'], 2),
+             (['--cloud', '1', '--cloud-topic', 'relative'], 2),
+             (['--gpu-timing-report', 'timing.json'], 0),
              (['--gpu-timing-report', 'x'], 2),
              (['--gpu-timing-report', 'timing.json', '--mode', 'rgb'], 2),
              (['--gpu-timing-report', 'timing.json', '--pipeline', 'experimental-refinement', '--coarse-manifest', 'coarse'], 2),

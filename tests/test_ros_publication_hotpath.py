@@ -46,7 +46,7 @@ def check_publisher(source):
     assert 'capture->read(capture_wait)' in loop
     retire=body(source,'auto retire=')
     assert not re.search(forbidden,retire)
-    assert 'if(drain)p.output.wait()' in retire and 'if(drain)p.completed_output.wait()' in retire and retire.count('.wait()')==2
+    assert 'if(drain)p.output.wait()' in retire and 'if(drain)p.completed_output.wait()' in retire and 'if(drain)p.cloud.wait();else if(!p.cloud.ready())return;' in retire and retire.count('.wait()')==3
     assert 'std::memcpy(image.data.data(),bytes.data(),bytes.size())' in retire
     assert 'publisher->publish(image)' in retire and 'trace.append(r)' in retire
 

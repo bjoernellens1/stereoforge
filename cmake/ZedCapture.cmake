@@ -24,6 +24,18 @@ foreach(name defines.hpp videocapture_def.hpp sensorcapture_def.hpp)
   configure_file("${sf_zed_SOURCE_DIR}/include/${name}" "${SF_ZED_ADAPTER_DIR}/${name}" COPYONLY)
 endforeach()
 file(READ "${sf_zed_SOURCE_DIR}/include/videocapture.hpp" SF_VIDEO_HEADER)
+set(SF_FRAME_TIMESTAMP "    uint64_t timestamp = 0;         //!< Timestamp in nanoseconds")
+string(FIND "${SF_VIDEO_HEADER}" "${SF_FRAME_TIMESTAMP}" SF_FRAME_TIMESTAMP_POS)
+if(SF_FRAME_TIMESTAMP_POS EQUAL -1)
+  message(FATAL_ERROR "Pinned ZED Frame timing insertion point missing")
+endif()
+string(REPLACE "${SF_FRAME_TIMESTAMP}" "${SF_FRAME_TIMESTAMP}
+    // StereoForge: unqualified raw driver evidence copied with the pixels.
+    bool driver_timing_available = false;
+    uint64_t raw_timestamp_ns = 0;
+    uint32_t driver_sequence = 0, driver_flags = 0;
+    uint64_t dequeue_begin_monotonic_ns = 0, dequeue_end_monotonic_ns = 0;
+    uint64_t sdk_wall_anchor_ns = 0, sdk_first_timestamp_ns = 0;" SF_VIDEO_HEADER "${SF_VIDEO_HEADER}")
 string(REPLACE "    void grabThreadFunc();" "public:\n    // Modified by StereoForge: generated producer-locked snapshot declaration.\n    Frame snapshotFrame(std::vector<uint8_t>& bytes, uint64_t timeout_msec, uint64_t previous_timestamp=0);\nprivate:\n    void grabThreadFunc();" SF_VIDEO_HEADER "${SF_VIDEO_HEADER}")
 if(NOT SF_VIDEO_HEADER MATCHES "snapshotFrame")
   message(FATAL_ERROR "Pinned ZED VideoCapture adapter insertion point missing")
@@ -36,7 +48,30 @@ if(NOT SF_SENSOR_HEADER MATCHES "snapshotIMU")
   message(FATAL_ERROR "Pinned ZED SensorCapture adapter insertion point missing")
 endif()
 file(WRITE "${SF_ZED_ADAPTER_DIR}/sensorcapture.hpp" "${SF_SENSOR_HEADER}")
-configure_file("${sf_zed_SOURCE_DIR}/src/videocapture.cpp" "${SF_ZED_ADAPTER_DIR}/videocapture.cpp" COPYONLY)
+file(READ "${sf_zed_SOURCE_DIR}/src/videocapture.cpp" SF_VIDEO_SOURCE)
+set(SF_DEQUEUE "        int ret = ioctl(mFileDesc, VIDIOC_DQBUF, &buf);")
+set(SF_TIMESTAMP_ASSIGN "                mLastFrame.timestamp = mStartTs + rel_ts;")
+foreach(anchor SF_DEQUEUE SF_TIMESTAMP_ASSIGN)
+  string(FIND "${SF_VIDEO_SOURCE}" "${${anchor}}" position)
+  if(position EQUAL -1)
+    message(FATAL_ERROR "Pinned ZED producer timing insertion point missing: ${anchor}")
+  endif()
+endforeach()
+string(REPLACE "${SF_DEQUEUE}" "        // StereoForge: bracket this exact dequeue in host monotonic time.
+        const auto sf_dequeue_begin = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+${SF_DEQUEUE}
+        const auto sf_dequeue_end = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();" SF_VIDEO_SOURCE "${SF_VIDEO_SOURCE}")
+string(REPLACE "${SF_TIMESTAMP_ASSIGN}" "${SF_TIMESTAMP_ASSIGN}
+                // Preserve returned metadata under the same producer lock as pixels.
+                mLastFrame.raw_timestamp_ns = ts_uvc * 1000;
+                mLastFrame.driver_sequence = buf.sequence;
+                mLastFrame.driver_flags = buf.flags;
+                mLastFrame.dequeue_begin_monotonic_ns = sf_dequeue_begin;
+                mLastFrame.dequeue_end_monotonic_ns = sf_dequeue_end;
+                mLastFrame.sdk_wall_anchor_ns = mStartTs;
+                mLastFrame.sdk_first_timestamp_ns = mInitTs * 1000;
+                mLastFrame.driver_timing_available = true;" SF_VIDEO_SOURCE "${SF_VIDEO_SOURCE}")
+file(WRITE "${SF_ZED_ADAPTER_DIR}/videocapture.cpp" "${SF_VIDEO_SOURCE}")
 configure_file("${sf_zed_SOURCE_DIR}/src/sensorcapture.cpp" "${SF_ZED_ADAPTER_DIR}/sensorcapture.cpp" COPYONLY)
 file(WRITE "${SF_ZED_ADAPTER_DIR}/snapshots.cpp" [=[
 #include "videocapture.hpp"

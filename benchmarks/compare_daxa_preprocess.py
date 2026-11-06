@@ -32,7 +32,7 @@ def canonical(value):return json.dumps(value,sort_keys=True,separators=(',',':')
 
 
 def read_capture_record(path,ordinal):
-    """Read existing SFPv1 through one exact ordinal; preserve opaque float bits.
+    """Read SFPv1/v2 through one exact ordinal; preserve opaque float bits.
 
     Whole-file SHA is bound separately. Existing records through the selected one
     are checksum-validated. This is not an alternate recording format or live path.
@@ -44,7 +44,7 @@ def read_capture_record(path,ordinal):
             if len(data)!=n:raise ValueError('truncated packed capture')
             return data
         magic,version,count=struct.unpack('<8sIQ',read(20))
-        if magic!=b'SFYUYV1\0' or version!=1 or count>10000000 or ordinal>=count:raise ValueError('invalid/nonfinalized packed capture or ordinal')
+        if magic!=b'SFYUYV1\0' or version not in (1,2) or count>10000000 or ordinal>=count:raise ValueError('invalid/nonfinalized packed capture or ordinal')
         for index in range(ordinal+1):
             checksum=14695981039346656037
             def data(n):
@@ -73,6 +73,15 @@ def read_capture_record(path,ordinal):
             if not width or width%4 or width>8192 or not 0<height<=8192 or stride!=width*2 or length!=stride*height or length>256*1024*1024 or not metadata['camera_timestamp_ns'] or not metadata['camera_clock_domain'] or not metadata['host_clock_domain']:
                 raise ValueError('invalid packed dimensions/stride/timestamp/domain')
             payload=data(length)
+            if version==2:
+                present=number('B')[0]
+                if present>1:raise ValueError('noncanonical driver timing presence flag')
+                if present:
+                    timing=dict(zip(('timestamp_ns','sequence','flags','dequeue_begin_monotonic_ns','dequeue_end_monotonic_ns','sdk_wall_anchor_ns','sdk_first_timestamp_ns'),number('QIIQQQQ')))
+                    if (not timing['sdk_wall_anchor_ns'] or not timing['dequeue_begin_monotonic_ns'] or timing['dequeue_end_monotonic_ns']<timing['dequeue_begin_monotonic_ns'] or timing['timestamp_ns']<timing['sdk_first_timestamp_ns']
+                            or timing['sdk_wall_anchor_ns']+timing['timestamp_ns']-timing['sdk_first_timestamp_ns']!=metadata['camera_timestamp_ns']):
+                        raise ValueError('invalid driver timing bracket or SDK association')
+                    metadata['driver_timing']=timing
             if struct.unpack('<Q',read(8))[0]!=checksum:raise ValueError('packed capture checksum mismatch')
             if index==ordinal:
                 if index+1==count and source.read(1):raise ValueError('trailing packed capture bytes')

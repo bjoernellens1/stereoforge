@@ -27,6 +27,14 @@ void validate(const CaptureFrame& f){
         throw std::invalid_argument("invalid packed YUYV frame dimensions, timestamp, clock or sample count");
     for(auto* s:{&f.camera_clock_domain,&f.host_clock_domain,&f.calibration_identity,&f.device_identity,&f.controls_json,&f.control_status,&f.controls_clock_domain,&f.sensor_status,&f.imu_clock_domain,&f.imu_association})
         if(s->size()>max_string)throw std::invalid_argument("capture metadata exceeds bound");
+    if(f.driver_timing){
+        const auto& t=*f.driver_timing;
+        if(!t.sdk_wall_anchor_ns||!t.dequeue_begin_monotonic_ns||t.dequeue_end_monotonic_ns<t.dequeue_begin_monotonic_ns||t.timestamp_ns<t.sdk_first_timestamp_ns)
+            throw std::invalid_argument("invalid raw driver timing bracket or SDK anchors");
+        auto elapsed=t.timestamp_ns-t.sdk_first_timestamp_ns;
+        if(t.sdk_wall_anchor_ns>UINT64_MAX-elapsed||f.camera_timestamp_ns!=t.sdk_wall_anchor_ns+elapsed)
+            throw std::invalid_argument("raw driver timing differs from exact SDK timestamp association");
+    }
 }
 void validate_config(const CaptureConfig& c){
     if(!c.eye_width||c.eye_width%2||c.eye_width>4096||!c.height||c.height>8192||!c.fps||c.fps>100||c.device_id < -1||!c.queue_capacity||c.queue_capacity>64||c.pool_capacity<=c.queue_capacity||c.pool_capacity>128||c.calibration_identity.size()>max_string||c.device_serial_override.size()>32||c.source_timeout.count()<=0||c.source_timeout.count()>1000||size_t(c.eye_width)*4*c.height>max_payload||size_t(c.eye_width)*4*c.height*(c.pool_capacity+1)>512*1024*1024)
@@ -136,6 +144,8 @@ public:
         // Upstream adjusts UVC timestamps against its host reference. No independently
         // validated mapping to steady time or IMU clock is claimed here.
         f.camera_clock_domain="zed_open_capture_video_unvalidated";f.device_identity=device_;
+        if(s.driver_timing_available)f.driver_timing=CaptureDriverTiming{s.raw_timestamp_ns,s.driver_sequence,s.driver_flags,
+            s.dequeue_begin_monotonic_ns,s.dequeue_end_monotonic_ns,s.sdk_wall_anchor_ns,s.sdk_first_timestamp_ns};
         f.controls_json=controls_;f.control_status="cached_api_readback_not_physically_verified";f.controls_timestamp_ns=control_time_;f.controls_clock_domain="host_steady";
         f.sensor_status=sensor_status_;f.imu_clock_domain="zed_open_capture_imu_unvalidated";f.imu_association="arrival_batch_unknown_raw_not_pose";
         {std::lock_guard lock(mutex_);f.imu_samples.assign(samples_.begin(),samples_.begin()+sample_count_);sample_count_=0;f.sensor_dropped_count=sensor_drops_;}
@@ -195,6 +205,7 @@ struct NativeCapture::Impl {
             }
             auto& frame=slot?*slot:discard;
             frame.imu_samples.clear();
+            frame.driver_timing.reset();
             frame.host_ingress_timestamp_ns=0;
             auto status=source(frame,config.source_timeout);
             auto ingress=ingress_now();
@@ -241,7 +252,7 @@ struct RecordIO {
     void text(std::string& s){uint32_t n=uint32_t(s.size());number(n);if(n>max_string)throw std::runtime_error("packed metadata too large");if(in)s.resize(n);bytes(s.data(),n);}
     void floating(float& f){uint32_t bits=std::bit_cast<uint32_t>(f);number(bits);if(in)f=std::bit_cast<float>(bits);}
 };
-void record(RecordIO& io,CaptureFrame& f){
+void record(RecordIO& io,CaptureFrame& f,uint32_t version){
     if(io.in&&(f.source_kind!=CaptureSourceKind::PackedYuyv||f.canonical_rgb))
         throw std::invalid_argument("raw replay requires packed YUYV destination");
     io.number(f.source_width);io.number(f.height);io.number(f.stride_bytes);io.number(f.frame_id);io.number(f.camera_timestamp_ns);io.number(f.host_ingress_timestamp_ns);
@@ -250,23 +261,31 @@ void record(RecordIO& io,CaptureFrame& f){
     uint32_t count=uint32_t(f.imu_samples.size());io.number(count);if(count>max_imu)throw std::runtime_error("packed IMU count exceeds bound");if(io.in)f.imu_samples.resize(count);
     for(auto& s:f.imu_samples){io.number(s.timestamp_ns);for(auto& v:s.acceleration_m_s2)io.floating(v);for(auto& v:s.angular_velocity_deg_s)io.floating(v);io.floating(s.temperature_c);uint8_t sync=s.sync;io.number(sync);if(sync>1)throw std::runtime_error("invalid IMU sync flag");if(io.in)s.sync=bool(sync);}
     uint64_t size=f.packed_yuyv.size();io.number(size);if(size>max_payload||size!=uint64_t(f.stride_bytes)*f.height)throw std::runtime_error("invalid packed payload size");if(io.in)f.packed_yuyv.resize(size);
-    io.bytes(reinterpret_cast<char*>(f.packed_yuyv.data()),size);auto expected=io.hash,stored=expected;io.number(stored);if(io.in&&stored!=expected)throw std::runtime_error("packed capture FNV-1a-64 checksum mismatch");validate(f);
+    io.bytes(reinterpret_cast<char*>(f.packed_yuyv.data()),size);
+    if(version==2){
+        uint8_t present=f.driver_timing.has_value();io.number(present);
+        if(present>1)throw std::runtime_error("noncanonical driver timing presence flag");
+        if(io.in){f.driver_timing.reset();if(present)f.driver_timing.emplace();}
+        if(present){auto& t=*f.driver_timing;io.number(t.timestamp_ns);io.number(t.sequence);io.number(t.flags);
+            io.number(t.dequeue_begin_monotonic_ns);io.number(t.dequeue_end_monotonic_ns);io.number(t.sdk_wall_anchor_ns);io.number(t.sdk_first_timestamp_ns);}
+    }else if(io.in)f.driver_timing.reset();
+    auto expected=io.hash,stored=expected;io.number(stored);if(io.in&&stored!=expected)throw std::runtime_error("packed capture FNV-1a-64 checksum mismatch");validate(f);
 }
 constexpr char magic[8]={'S','F','Y','U','Y','V','1','\0'};
-void header(std::istream* in,std::ostream* out,uint64_t& count){RecordIO io{in,out};char m[8];std::copy(std::begin(magic),std::end(magic),m);io.bytes(m,8);if(!std::equal(std::begin(m),std::end(m),std::begin(magic)))throw std::runtime_error("invalid packed capture magic");uint32_t version=1;io.number(version);if(version!=1)throw std::runtime_error("unsupported packed capture version");io.number(count);if(in&&(count==UINT64_MAX||count>10000000))throw std::runtime_error("nonfinalized or excessive packed capture count");}
+void header(std::istream* in,std::ostream* out,uint64_t& count,uint32_t& version){RecordIO io{in,out};char m[8];std::copy(std::begin(magic),std::end(magic),m);io.bytes(m,8);if(!std::equal(std::begin(m),std::end(m),std::begin(magic)))throw std::runtime_error("invalid packed capture magic");io.number(version);if(version!=1&&version!=2)throw std::runtime_error("unsupported packed capture version");io.number(count);if(in&&(count==UINT64_MAX||count>10000000))throw std::runtime_error("nonfinalized or excessive packed capture count");}
 struct Reader {
-    std::ifstream file;uint64_t remaining=0;
-    explicit Reader(const std::filesystem::path& d):file(d/"capture.sfp",std::ios::binary){if(!file)throw std::runtime_error("cannot open packed capture");header(&file,nullptr,remaining);}
-    bool next(CaptureFrame& f){if(!remaining){if(file.peek()!=std::char_traits<char>::eof())throw std::runtime_error("trailing packed capture bytes");return false;}RecordIO io{&file,nullptr};record(io,f);--remaining;if(!remaining&&file.peek()!=std::char_traits<char>::eof())throw std::runtime_error("trailing packed capture bytes");return true;}
+    std::ifstream file;uint64_t remaining=0;uint32_t version=0;
+    explicit Reader(const std::filesystem::path& d):file(d/"capture.sfp",std::ios::binary){if(!file)throw std::runtime_error("cannot open packed capture");header(&file,nullptr,remaining,version);}
+    bool next(CaptureFrame& f){if(!remaining){if(file.peek()!=std::char_traits<char>::eof())throw std::runtime_error("trailing packed capture bytes");return false;}RecordIO io{&file,nullptr};record(io,f,version);--remaining;if(!remaining&&file.peek()!=std::char_traits<char>::eof())throw std::runtime_error("trailing packed capture bytes");return true;}
 };
 }
 struct PackedCaptureWriter::Impl {
-    std::fstream file;uint64_t count=0;bool closed=false;
-    explicit Impl(const std::filesystem::path& d){if(std::filesystem::exists(d)&&!std::filesystem::is_empty(d))throw std::invalid_argument("recording directory must be new or empty");std::filesystem::create_directories(d);file.open(d/"capture.sfp",std::ios::binary|std::ios::out|std::ios::in|std::ios::trunc);if(!file)throw std::runtime_error("cannot create packed recording");uint64_t pending=UINT64_MAX;header(nullptr,&file,pending);}
+    std::fstream file;uint64_t count=0;bool closed=false;uint32_t version;
+    explicit Impl(const std::filesystem::path& d,CaptureRecordingFormat format):version(static_cast<uint32_t>(format)){if(version!=1&&version!=2)throw std::invalid_argument("unknown recording format");if(std::filesystem::exists(d)&&!std::filesystem::is_empty(d))throw std::invalid_argument("recording directory must be new or empty");std::filesystem::create_directories(d);file.open(d/"capture.sfp",std::ios::binary|std::ios::out|std::ios::in|std::ios::trunc);if(!file)throw std::runtime_error("cannot create packed recording");uint64_t pending=UINT64_MAX;header(nullptr,&file,pending,version);}
 };
-PackedCaptureWriter::PackedCaptureWriter(const std::filesystem::path& d):impl_(std::make_unique<Impl>(d)){}
+PackedCaptureWriter::PackedCaptureWriter(const std::filesystem::path& d,CaptureRecordingFormat format):impl_(std::make_unique<Impl>(d,format)){}
 PackedCaptureWriter::~PackedCaptureWriter(){/* Explicit close finalizes. An interrupted recording is rejected. */}
-void PackedCaptureWriter::append(const CaptureFrame& f){if(impl_->closed)throw std::runtime_error("recording closed");validate(f);RecordIO io{nullptr,&impl_->file};record(io,const_cast<CaptureFrame&>(f));++impl_->count;}
+void PackedCaptureWriter::append(const CaptureFrame& f){if(impl_->closed)throw std::runtime_error("recording closed");validate(f);if(impl_->version==1&&f.driver_timing)throw std::invalid_argument("legacy recording cannot discard driver timing");RecordIO io{nullptr,&impl_->file};record(io,const_cast<CaptureFrame&>(f),impl_->version);++impl_->count;}
 void PackedCaptureWriter::close(){if(impl_->closed)return;impl_->file.flush();if(!impl_->file)throw std::runtime_error("recording flush failed");impl_->file.seekp(12);RecordIO io{nullptr,&impl_->file};io.number(impl_->count);impl_->file.flush();if(!impl_->file)throw std::runtime_error("recording finalization failed");impl_->closed=true;impl_->file.close();}
 std::vector<CaptureFrame> read_packed_capture(const std::filesystem::path& d,size_t max_frames,size_t max_bytes){
     Reader r(d);if(r.remaining>max_frames)throw std::runtime_error("fixture exceeds frame bound; use streaming source");

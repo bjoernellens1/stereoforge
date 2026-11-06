@@ -51,3 +51,54 @@ auto retire = [&] {
 ```
 
 The callback does not catch enqueue failures as ordinary drops. The consumer preserves the producer observation until its copy completes. If an application submits additional work using a destination buffer, the work must be submitted on the shared Daxa main queue, then registered with `slot.retain_until(submission_ticket)` before releasing that slot. Retain the slot until all downstream GPU uses complete; if submission outcome is uncertain, keep the lease and fail closed. A copy-complete `ready()` check alone does not prove additional downstream work has completed. On shutdown stop publication, release queued ROS messages/subscriptions, drain consumer and downstream work, release all slots on the owner thread, then tear down the foundation. The example's copy does not include validity, confidence, age, or provenance sidecars; geometric consumers need those contracts separately.
+
+## Resident XYZRGB and optional PointCloud2 export
+
+The native publisher accepts `--cloud 1` with full SGM measured depth. Each
+admitted depth pair produces a full-resolution organized XYZRGB buffer on the
+shared Daxa device and main queue. The cloud retains its source observation,
+including validity, provenance and age. Consumers must retain the frame and
+register subsequent same-queue GPU reads with `retain_until` before releasing it.
+Two bounded cloud slots prevent reuse while a frame or GPU read remains active.
+
+`--cloud-stride 4 --cloud-rate 15` controls only the requested ROS cloud export.
+The resident geometry and depth/RGB image resolution remain unchanged. Export
+rate uses the source's host ingress timestamps; replay ingress timestamps may be
+recorded values. Frames outside this schedule generate resident geometry without
+cloud readback. The CPU copies requested cloud bytes into a preallocated
+PointCloud2 message and explicitly serializes it into a retained CDR buffer.
+
+The default topic is `/stereoforge/points`; `--cloud-topic` changes it. Points use
+the left rectified optical frame (x right, y down, z forward), axial metres and
+16-byte x/y/z/rgb fields. RGB is the PCL FLOAT32 bit payload R16/G8/B0. Invalid depth or overflowing coordinates
+have NaN XYZ; exports remain organized, including invalid points and odd
+image edges. The calibration's rectified fx/fy and principal point define rays;
+no RealSense geometry is required.
+
+A companion `<cloud-topic>/metadata` message associates each export with exact
+zero-padded decimal source/capture/ingress/header IDs, calibration, estimator, profile and
+rig session. Valid points are current-frame measured observations; source age
+zero is relative to that producer and does not qualify acquisition age. Metric
+uncertainty remains unavailable until calibrated. Unknown rig sessions and
+unqualified profiles remain explicitly labelled.
+
+`<trace>.cloud.json` retains bounded per-export GPU generation/export timing,
+CPU copy timing, explicit CDR serialization timing, serialized byte counts and
+serialized publish-call timing, plus generated and export-rate-skipped counts.
+Publish-call completion does not establish subscriber delivery. Drain exports
+are marked separately from the measurement window. These additions leave the
+existing depth-delivery trace schema intact.
+
+Cloud export currently rejects RGB-only mode, experimental refinement and CPU
+speckle/guided filtering combinations: their published support or geometry has
+not yet been implemented in the resident cloud path. The existing CPU preview
+remains available. This is an opt-in measured-cloud implementation, not complete
+profile, temporal/completed-cloud or physical accuracy qualification.
+
+The ROS launcher forwards `cloud`, `cloud_stride`, `cloud_rate` and `cloud_topic`.
+Clouds default to disabled. Set `pipeline:=full-sgm` when enabling this measured
+cloud path; the launcher's existing experimental default remains unchanged.
+Cloud metadata declares the camera and host clock domains, supplied mapping
+uncertainty and publication clock instance. Recorded ingress clock instances
+remain unattested, and supplied rig-session names remain declared/unverified.
+A zero supplied mapping error alone does not qualify acquisition timing.

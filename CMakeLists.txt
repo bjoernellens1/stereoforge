@@ -337,5 +337,6 @@ if(STEREOFORGE_FP2_PROTOTYPE)
 endif()
 
 if(TARGET stereoforge_daxa_depth)
+  include(cmake/DaxaPointCloud.cmake)
   include(cmake/DaxaStereoVo.cmake)
 endif()

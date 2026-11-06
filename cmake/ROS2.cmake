@@ -23,7 +23,7 @@ if(STEREOFORGE_ROS2_PUBLISHER)
   endif()
   add_executable(stereoforge_ros2_depth_publisher apps/ros2_depth_publisher.cpp)
   target_include_directories(stereoforge_ros2_depth_publisher PRIVATE "${sf_native_json_SOURCE_DIR}")
-  target_link_libraries(stereoforge_ros2_depth_publisher stereoforge_daxa_host_export stereoforge_daxa_depth stereoforge_daxa_refinement stereoforge_daxa_dual_preprocess stereoforge_capture)
+  target_link_libraries(stereoforge_ros2_depth_publisher stereoforge_daxa_point_cloud stereoforge_daxa_host_export stereoforge_daxa_depth stereoforge_daxa_refinement stereoforge_daxa_dual_preprocess stereoforge_capture)
   ament_target_dependencies(stereoforge_ros2_depth_publisher rclcpp sensor_msgs std_msgs)
 endif()
 

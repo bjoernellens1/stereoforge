@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_actual_stereo_integer_diagnostic_accepts_exact_words_and_rejects_mutations(tmp_path):
     source = (ROOT / "apps/daxa_preprocess_benchmark.cpp").read_text()
     assert "void verify_stereo_integer(" in source
-    helper = source[source.index("void verify_stereo_integer("):source.index("json metadata(")]
+    helper = source[source.index("void verify_stereo_integer("):source.index("\n}\nint main(")]
     cpp = tmp_path / "diagnostic.cpp"
     cpp.write_text(r'''
 #include <array>

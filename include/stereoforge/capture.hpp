@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 namespace stereoforge {
@@ -15,6 +16,16 @@ struct CaptureImuSample {
     bool sync=false;
 };
 enum class CaptureSourceKind { PackedYuyv,CanonicalRgbMetadata };
+// Raw driver observations, not a qualified physical exposure/clock mapping.
+// Device identity and both SDK anchors identify this SDK stream; retain them
+// across replay and do not reuse the association after reinitialization.
+struct CaptureDriverTiming {
+    uint64_t timestamp_ns=0;
+    uint32_t sequence=0,flags=0;
+    uint64_t dequeue_begin_monotonic_ns=0,dequeue_end_monotonic_ns=0;
+    uint64_t sdk_wall_anchor_ns=0,sdk_first_timestamp_ns=0;
+    bool operator==(const CaptureDriverTiming&) const=default;
+};
 struct CanonicalRgbSource;
 struct CaptureFrame {
     CaptureSourceKind source_kind=CaptureSourceKind::PackedYuyv;
@@ -26,6 +37,7 @@ struct CaptureFrame {
     uint32_t source_width=0,height=0,stride_bytes=0;
     uint64_t frame_id=0,camera_timestamp_ns=0,host_ingress_timestamp_ns=0;
     std::string camera_clock_domain="unknown",host_clock_domain="host_steady";
+    std::optional<CaptureDriverTiming> driver_timing;
     std::string calibration_identity,device_identity;
     std::string controls_json="{}",control_status="unavailable";
     uint64_t controls_timestamp_ns=0;
@@ -76,11 +88,15 @@ private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
-// capture.sfp v1: little-endian, finalized frame count, bounded length-prefixed metadata,
-// packed bytes and per-record FNV-1a-64 for accidental corruption (not authentication).
+// Both versions are little-endian with finalized frame count and per-record
+// FNV-1a-64 (accidental corruption, not authentication). V2 adds optional raw
+// driver timing after packed pixels. V1 reads preserve its absence; explicit
+// legacy writers reject frames with timing instead of silently discarding it.
+enum class CaptureRecordingFormat:uint32_t { legacy_v1=1,driver_timing_v2=2 };
 class PackedCaptureWriter {
 public:
-    explicit PackedCaptureWriter(const std::filesystem::path& directory);
+    explicit PackedCaptureWriter(const std::filesystem::path& directory,
+        CaptureRecordingFormat format=CaptureRecordingFormat::driver_timing_v2);
     ~PackedCaptureWriter();
     void append(const CaptureFrame& frame);
     void close();
