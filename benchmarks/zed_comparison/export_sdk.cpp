@@ -82,7 +82,7 @@ struct Options {
 };
 void help() {
     std::cout << "export_sdk --operation capture-diagnostic|benchmark --svo FILE --output FRESH_DIR\n"
-        "  [--mode NONE|NEURAL_LIGHT|NEURAL|NEURAL_PLUS|PERFORMANCE] [--frames 1..100]\n"
+        "  [--mode NONE|NEURAL_LIGHT|NEURAL|NEURAL_PLUS|ULTRA|PERFORMANCE] [--frames 1..100]\n"
         "  [--profile instantaneous] [--self-calibration on|off] [--settings-dir PRIVATE_DIR]\n"
         "  [--warmup 0..100 (benchmark default 5)] [--timing-lane opaque-api (benchmark only)]\n"
         "  [--depth-min 0.3] [--depth-max 8] | --version | --help\n"
@@ -125,7 +125,7 @@ Options parse(int argc, char** argv) {
     require(!o.svo.empty() && !o.output.empty(), "--svo and --output are required");
     require(o.profile == "instantaneous", "only instantaneous profile is implemented");
     require(o.minimum >= 0.3f && o.maximum <= 8.0f && o.minimum < o.maximum, "depth range must lie within 0.3..8 metres");
-    require(o.mode == "NONE" || o.mode == "NEURAL_LIGHT" || o.mode == "NEURAL" || o.mode == "NEURAL_PLUS" || o.mode == "PERFORMANCE", "unsupported requested mode");
+    require(o.mode == "NONE" || o.mode == "NEURAL_LIGHT" || o.mode == "NEURAL" || o.mode == "NEURAL_PLUS" || o.mode == "ULTRA" || o.mode == "PERFORMANCE", "unsupported requested mode");
     return o;
 }
 sl::DEPTH_MODE depth_mode(const std::string& name) {
@@ -133,6 +133,7 @@ sl::DEPTH_MODE depth_mode(const std::string& name) {
     if (name == "NEURAL_LIGHT") return sl::DEPTH_MODE::NEURAL_LIGHT;
     if (name == "NEURAL") return sl::DEPTH_MODE::NEURAL;
     if (name == "NEURAL_PLUS") return sl::DEPTH_MODE::NEURAL_PLUS;
+    if (name == "ULTRA") return sl::DEPTH_MODE::ULTRA;
     if (name == "PERFORMANCE") return sl::DEPTH_MODE::PERFORMANCE;
     throw SafeError("unsupported requested mode");
 }

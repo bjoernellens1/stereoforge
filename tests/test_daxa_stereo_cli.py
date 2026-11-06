@@ -7,7 +7,9 @@ import subprocess
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-BINARY = ROOT / "build/daxa/daxa_stereo_benchmark"
+BINARY = Path(os.environ.get(
+    "STEREOFORGE_DAXA_STEREO_BENCHMARK", ROOT / "build/daxa/daxa_stereo_benchmark",
+))
 
 
 def invoke(tmp_path, *args, limited=False):
@@ -109,3 +111,23 @@ def test_writer_exclusive_create_is_defensive(tmp_path):
     before = fresh.read_bytes()
     assert subprocess.run([str(exe), str(fresh)]).returncode == 1
     assert fresh.read_bytes() == before
+
+
+@pytest.mark.parametrize("reference", ["left", "right"])
+def test_native_d288_specialized_reaches_input_admission(tmp_path, reference):
+    result = invoke(tmp_path, "--variant", "packed-specialized", "--reference", reference,
+                    "--width", 9, "--height", 7, "--disparities", 288,
+                    "--left", tmp_path / "missing-left", "--right", tmp_path / "missing-right")
+    assert result.returncode == 1
+    assert "luma input must contain exactly WxH uint32 pixels" in result.stderr
+    assert not (tmp_path / "report.json").exists()
+
+
+@pytest.mark.parametrize("variant,disparities", [("packed-specialized", 289), ("baseline", 288)])
+def test_native_d288_admission_preserves_other_capacity_bounds(tmp_path, variant, disparities):
+    result = invoke(tmp_path, "--variant", variant, "--width", 9, "--height", 7,
+                    "--disparities", disparities, "--left", tmp_path / "missing-left",
+                    "--right", tmp_path / "missing-right")
+    assert result.returncode == 1
+    assert "invalid stereo dimensions, disparities, paths, or penalties" in result.stderr
+    assert not (tmp_path / "report.json").exists()

@@ -411,13 +411,24 @@ def canonical_shared_body(text):
     return text
 
 
-def test_shared_specialized_math_matches_frozen_pre_extraction_bodies():
+def check_frozen_specialized_math(helper):
     import hashlib
     from sgm_shader_contract_helpers import legacy_specialized_body
-    helper=(ROOT/'python/stereoforge/shaders/ops/sgm_specialized.slang').read_text()
     for signature,expected in FROZEN_SPECIALIZED_BODIES.items():
         instantiated=legacy_specialized_body(helper,body(helper,signature))
-        assert hashlib.sha256(canonical_shared_body(instantiated).encode()).hexdigest()==expected, signature+' frozen math/output expression drift'
+        canonical=canonical_shared_body(instantiated)
+        if signature=='void select_specialized_body<':
+            # The packed descriptor bit must not enable refinement. Require this
+            # one control repair, then retain the ORIGINAL math/output hash.
+            masked='if((subpixel&1u)!=0&&'
+            assert canonical.count(masked)==1, 'selector must decode only subpixel bit0'
+            canonical=canonical.replace(masked,'if(subpixel!=0&&',1)
+        assert hashlib.sha256(canonical.encode()).hexdigest()==expected, signature+' frozen math/output expression drift'
+
+
+def test_shared_specialized_math_matches_frozen_pre_extraction_bodies():
+    helper=(ROOT/'python/stereoforge/shaders/ops/sgm_specialized.slang').read_text()
+    check_frozen_specialized_math(helper)
 
 
 def check_layered_host(source,app):
@@ -484,3 +495,19 @@ def test_built_cpu_identity_getter_matches_actual_wrapper_helper_and_parameters(
         'stereo_shader_source_sha256_pair':sha('python/stereoforge/shaders/daxa/stereo.slang')+':'+sha('python/stereoforge/shaders/ops/sgm.slang'),
         'stereo_shared_shader_source_sha256_pair':sha('python/stereoforge/shaders/daxa/stereo_parameters.slang')+':'+sha('python/stereoforge/shaders/ops/sgm_specialized.slang'),
         'stereo_layered_shader_source_sha256':sha('python/stereoforge/shaders/daxa/stereo_layered.slang')}
+
+
+@pytest.mark.parametrize('original,replacement', [
+    ('if((subpixel&1u)!=0&&', 'if(subpixel!=0&&'),
+    ('if((subpixel&1u)!=0&&', 'if((subpixel&2u)!=0&&'),
+    ('best+1<disparities', 'best+1<=disparities'),
+    ('best_cost,reference_sum', 'best_cost+1u,reference_sum'),
+    ('output_disparity[i]=valid?value:', 'output_disparity[i]=valid?value+1.0:'),
+])
+def test_frozen_specialized_guard_rejects_flag_bounds_and_math_mutations(original,replacement):
+    checker=globals().get('check_frozen_specialized_math')
+    assert callable(checker), 'explicit packed-flag exception must retain the frozen math guard'
+    helper=(ROOT/'python/stereoforge/shaders/ops/sgm_specialized.slang').read_text()
+    assert original in helper
+    with pytest.raises(AssertionError):
+        checker(helper.replace(original,replacement))

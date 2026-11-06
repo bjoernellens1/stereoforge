@@ -26,7 +26,7 @@ void select_quad_body<let Components:uint,let Bits:uint,let RightReference:bool>
     if(lane!=0||i>=width*parameters.height)return;
     if(disparities==1)second=best_cost;
     bool valid=sgm_selection_valid(best,best_cost,second);float value=float(best);
-    if(subpixel!=0&&best>0&&best+1<disparities)value=sgm_subpixel(best,best_cost,reference_sum<Components,Bits,RightReference>(width,x,i,best-1,word_base,paths,reference,reference_valid,right_valid,right_desc,words),reference_sum<Components,Bits,RightReference>(width,x,i,best+1,word_base,paths,reference,reference_valid,right_valid,right_desc,words));
+    if((subpixel&1u)!=0&&best>0&&best+1<disparities)value=sgm_subpixel(best,best_cost,reference_sum<Components,Bits,RightReference>(width,x,i,best-1,word_base,paths,reference,reference_valid,right_valid,right_desc,words),reference_sum<Components,Bits,RightReference>(width,x,i,best+1,word_base,paths,reference,reference_valid,right_valid,right_desc,words));
     float* disparity=(float*)parameters.disparity_address;float* confidence=(float*)parameters.confidence_address;uint* validity=(uint*)parameters.validity_address;
     disparity[i]=valid?value:asfloat(0x7fc00000);confidence[i]=valid?float(second-best_cost)/float(max(second,1u)):0;validity[i]=valid?1:0;
 }

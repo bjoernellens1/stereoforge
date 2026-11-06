@@ -122,6 +122,11 @@ cmake -S . -B build/zed-reference -DBUILD_TESTING=OFF -DSTEREOFORGE_BUILD_ZED_RE
 cmake --build build/zed-reference --target export_sdk
 ```
 
+Diagnostic and benchmark operations accept explicit `NONE`, `NEURAL_LIGHT`,
+`NEURAL`, `NEURAL_PLUS`, `ULTRA`, and `PERFORMANCE` modes. `ULTRA` is the
+legacy classical quality reference. The exporter rejects an effective SDK mode
+that differs from the requested mode; it never substitutes another mode.
+
 For a bounded diagnostic capture, supply an existing output parent directory and
 a fresh output directory path:
 

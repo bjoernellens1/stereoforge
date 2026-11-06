@@ -51,7 +51,8 @@ static void disocclusion_sequence(std::shared_ptr<DaxaFoundation> const& context
     auto source=render_dynamic(1,0);DaxaRectifiedInput input(geometry(),{},DaxaRectifiedInputConfig{2,false},context,source);
     auto rgb=input.enqueue(source);DaxaDepthConfig dc{StereoConfig{width,height,32,4,8,32,true},1.f,2,32};
     DaxaDepthPipeline depth(dc,context,rgb.full());auto frame=depth.enqueue_preprocessed(rgb.full());
-    DaxaStereoVoConfig vc;vc.columns=12;vc.rows=8;DaxaStereoVo vo(context,frame.observations(),vc);StereoTrajectory trajectory;
+    DaxaStereoVoConfig vc;vc.columns=12;vc.rows=8;vc.guard.enabled=false; // Explicit unsafe-pose ablation exercises independent metric rejection.
+    DaxaStereoVo vo(context,frame.observations(),vc);StereoTrajectory trajectory;
     DaxaTemporalConfig tc;tc.odometry_research=true;tc.multi_pair_research=true;DaxaTemporal temporal(context,frame,tc);
     for(uint64_t id=1;id<=4;++id) {
         if(id>1){rgb=input.enqueue(render_dynamic(id,.04*double(id-1),camera_step*double(id-1)));frame=depth.enqueue_preprocessed(rgb.full());}
@@ -69,6 +70,56 @@ static void disocclusion_sequence(std::shared_ptr<DaxaFoundation> const& context
         output={};frame={};rgb={};temporal.collect();depth.collect();input.collect();
     }
 }
+static void continued_mixed_motion(std::shared_ptr<DaxaFoundation> const& context,double camera_step) {
+    auto source=render_dynamic(1,0);DaxaRectifiedInput input(geometry(),{},DaxaRectifiedInputConfig{2,false},context,source);
+    auto rgb=input.enqueue(source);DaxaDepthConfig dc{StereoConfig{width,height,32,4,8,32,true},1.f,2,32};
+    DaxaDepthPipeline depth(dc,context,rgb.full());auto frame=depth.enqueue_preprocessed(rgb.full());
+    DaxaStereoVoConfig vc;vc.columns=12;vc.rows=8;DaxaStereoVo vo(context,frame.observations(),vc);StereoTrajectory trajectory;
+    DaxaTemporalConfig tc;tc.odometry_research=true;tc.multi_pair_research=true;DaxaTemporal temporal(context,frame,tc);
+    for(uint64_t id=1;id<=8;++id) {
+        if(id>1){auto step=double(std::min(id-1,uint64_t(4)));rgb=input.enqueue(render_dynamic(id,.04*step,camera_step*step));frame=depth.enqueue_preprocessed(rgb.full());}
+        auto motion=vo.process(frame.observations());auto pose=trajectory.process(motion);
+        auto output=temporal.process_odometry(frame,pose);auto result=temporal.readback(output);
+        if(id>=2&&id<=5) {
+            check(motion.motion.status==StereoMotionStatus::AmbiguousMotion,"continued moving foreground resumed camera tracking after ambiguity");
+            if(id>=3)check(motion.guard.status==StereoMotionGuardStatus::UnresolvedMixedMotion,"unresolved recovery lacks explicit guard reason");
+            check(!pose.world_from_rig&&result.counters.history_scanned==0&&result.counters.pair_checks==0,"unresolved mixed motion reused history");
+            auto raw=depth.readback(frame);check(result.validity==raw.metric_validity&&result.provenance==raw.provenance&&result.source_ids==raw.source_ids&&result.age_ns==raw.age_ns,"unresolved motion changed fresh stereo metadata");
+            check(result.depth.size()==raw.depth.size()&&std::memcmp(result.depth.data(),raw.depth.data(),raw.depth.size()*sizeof(float))==0,"unresolved motion changed fresh stereo geometry");
+        }
+        if(id>=6) {
+            check(motion.motion.status==StereoMotionStatus::Tracked,"clean stationary recovery stayed latched");
+            check(id==6?result.counters.history_scanned==0:result.counters.history_scanned>0,"clean recovery history boundary incorrect");
+            check(!pose.temporal_qualified&&!pose.covariance_calibrated,"clean recovery certified unobservable world motion");
+        }
+        output={};frame={};rgb={};temporal.collect();depth.collect();input.collect();
+    }
+}
+static void mixed_motion_expiry_and_reset(std::shared_ptr<DaxaFoundation> const& context) {
+    auto source=render_dynamic(1,0);DaxaRectifiedInput input(geometry(),{},DaxaRectifiedInputConfig{2,false},context,source);
+    auto rgb=input.enqueue(source);DaxaDepthConfig dc{StereoConfig{width,height,32,4,8,32,true},1.f,2,32};
+    DaxaDepthPipeline depth(dc,context,rgb.full());auto frame=depth.enqueue_preprocessed(rgb.full());
+    DaxaStereoVoConfig vc;vc.columns=12;vc.rows=8;DaxaStereoVo vo(context,frame.observations(),vc);StereoTrajectory trajectory;
+    DaxaTemporal temporal(context,frame);
+    auto step=[&](uint64_t id,double displacement){
+        if(id!=1){rgb=input.enqueue(render_dynamic(id,displacement));frame=depth.enqueue_preprocessed(rgb.full());}
+        auto result=vo.process(frame.observations());auto pose=trajectory.process(result);auto output=temporal.process_odometry(frame,pose);
+        auto reconstruction=temporal.readback(output);auto measured=depth.readback(frame);
+        check(pose.source.frame_id==id&&pose.source.acquisition_timestamp_ns==id*33000000&&pose.source.ingress_timestamp_ns==id*33000000+5000000,"pose lost exact source timestamp association");
+        check(!pose.temporal_qualified&&!pose.covariance_calibrated,"reset or expiry qualified world motion");
+        check(reconstruction.counters.history_scanned==0&&reconstruction.counters.pair_checks==0,"unqualified reset/recovery entered default history");
+        check(reconstruction.validity==measured.metric_validity&&reconstruction.provenance==measured.provenance&&reconstruction.source_ids==measured.source_ids&&reconstruction.age_ns==measured.age_ns,"default fallback changed current source metadata");
+        check(reconstruction.depth.size()==measured.depth.size()&&std::memcmp(reconstruction.depth.data(),measured.depth.data(),measured.depth.size()*sizeof(float))==0,"default fallback changed measured geometry");
+        std::cout<<"frame="<<id<<" tracks="<<result.tracked_features<<" motion="<<int(result.motion.status)<<" guard="<<int(result.guard.status)<<" previous="<<bool(result.previous_source)<<" history="<<reconstruction.counters.history_scanned<<'\n';
+        output={};frame={};rgb={};temporal.collect();depth.collect();input.collect();return result;
+    };
+    check(step(1,0).motion.status==StereoMotionStatus::InsufficientTracks,"initial frame produced motion");
+    check(step(2,.04).guard.status==StereoMotionGuardStatus::MultipleMotions,"mixed-motion control did not latch");
+    auto expired=step(21,.08);check(!expired.previous_source&&expired.motion.status==StereoMotionStatus::InsufficientTracks,"expired source chain reused old tracks");
+    auto unresolved=step(22,.12);check(unresolved.motion.status==StereoMotionStatus::AmbiguousMotion&&unresolved.guard.status==StereoMotionGuardStatus::UnresolvedMixedMotion,"automatic history expiry erased unresolved mixed motion");
+    vo.reset();auto reset=step(23,.08);check(!reset.previous_source&&reset.motion.status==StereoMotionStatus::InsufficientTracks,"explicit reset reused prior tracks");
+    auto body=step(24,.12);check(body.motion.status==StereoMotionStatus::Tracked&&body.guard.status==StereoMotionGuardStatus::Accepted,"explicit reset did not start a fresh unqualified chain");
+}
 static void full_field_identifiability(std::shared_ptr<DaxaFoundation> const& context) {
     auto object=render_dynamic(2,.03125,0,true),camera=render_dynamic(2,0,-.03125,true);
     for(unsigned eye=0;eye<4;++eye)check(std::equal(object.source->canonical_rgb->rgb[eye].bytes.begin(),object.source->canonical_rgb->rgb[eye].bytes.end(),camera.source->canonical_rgb->rgb[eye].bytes.begin()),"equivalent rigid-scene controls are not image-identical");
@@ -85,6 +136,8 @@ int main(){try{
     auto context=std::make_shared<DaxaFoundation>(true);
     run_case(context,.04,0,true);run_case(context,.04,-.02,true);run_case(context,0,-.02,false);run_case(context,0,0,false);
     disocclusion_sequence(context,0);disocclusion_sequence(context,-.02);
+    continued_mixed_motion(context,0);continued_mixed_motion(context,-.02);
+    mixed_motion_expiry_and_reset(context);
     full_field_identifiability(context);
     check(context->validation_errors.load()==0,"motion guard Vulkan validation error");context->close();
 }catch(std::exception const& e){std::cerr<<e.what()<<'\n';return 1;}}

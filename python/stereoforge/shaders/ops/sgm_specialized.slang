@@ -74,7 +74,7 @@ void select_specialized_body<let Components:uint,let Bits:uint,let RightReferenc
     if(lane!=0||i>=width*parameters.height)return;
     best=select_best_index[t];best_cost=select_best_cost[t];second=select_second_cost[t];if(disparities==1)second=best_cost;
     bool valid=sgm_selection_valid(best,best_cost,second);float value=float(best);
-    if(subpixel!=0&&best>0&&best+1<disparities)value=sgm_subpixel(best,best_cost,reference_sum<Components,Bits,RightReference>(width,x,i,best-1,word_base,paths,reference,reference_valid,right_valid,right_desc,words),reference_sum<Components,Bits,RightReference>(width,x,i,best+1,word_base,paths,reference,reference_valid,right_valid,right_desc,words));
+    if((subpixel&1u)!=0&&best>0&&best+1<disparities)value=sgm_subpixel(best,best_cost,reference_sum<Components,Bits,RightReference>(width,x,i,best-1,word_base,paths,reference,reference_valid,right_valid,right_desc,words),reference_sum<Components,Bits,RightReference>(width,x,i,best+1,word_base,paths,reference,reference_valid,right_valid,right_desc,words));
     float* output_disparity=(float*)parameters.disparity_address;float* output_confidence=(float*)parameters.confidence_address;uint* output_validity=(uint*)parameters.validity_address;
     output_disparity[i]=valid?value:asfloat(0x7fc00000);output_confidence[i]=valid?float(second-best_cost)/float(max(second,1u)):0;output_validity[i]=valid?1:0;
 }

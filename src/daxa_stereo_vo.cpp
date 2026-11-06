@@ -39,6 +39,7 @@ struct DaxaStereoVo::Impl {
     DaxaObservationFrame pending_source;
     uint64_t ticket=0;
     bool poisoned=false;
+    bool unresolved_mixed_motion=false;
     std::thread::id thread=std::this_thread::get_id();
     ~Impl() noexcept {
         try {wait();for(auto b:owned)context->device.destroy_buffer(b);context->device.collect_garbage();}
@@ -83,7 +84,7 @@ DaxaStereoVo::DaxaStereoVo(std::shared_ptr<DaxaFoundation> context,DaxaObservati
     impl_=std::move(e);
 }
 DaxaStereoVo::~DaxaStereoVo()=default;
-void DaxaStereoVo::reset() {auto& e=*impl_;e.require_thread();require(!e.poisoned,"VO submission failed; reconstruct estimator");e.wait();e.previous_source={};}
+void DaxaStereoVo::reset() {auto& e=*impl_;e.require_thread();require(!e.poisoned,"VO submission failed; reconstruct estimator");e.wait();e.previous_source={};e.unresolved_mixed_motion=false;}
 DaxaStereoVoResult DaxaStereoVo::process(DaxaObservationFrame const& input) {
     auto& e=*impl_;e.require_thread();require(!e.poisoned,"VO submission failed; reconstruct estimator");
     require(bool(input)&&input.context_id()==reinterpret_cast<uintptr_t>(e.context->device.get()),"foreign VO observation context");
@@ -146,8 +147,18 @@ DaxaStereoVoResult DaxaStereoVo::process(DaxaObservationFrame const& input) {
     }
     result.tracked_features=points.size();result.motion=estimate_stereo_motion(points,e.config.motion);
     result.guard=guard_stereo_motion(points,pixels,result.motion,e.config.motion,e.config.guard);
+    if(e.config.guard.enabled) {
+        if(result.guard.status==StereoMotionGuardStatus::MultipleMotions)e.unresolved_mixed_motion=true;
+        else if(result.guard.status==StereoMotionGuardStatus::Accepted&&e.unresolved_mixed_motion) {
+            // A skipped/degenerate secondary search cannot clear known mixed
+            // motion. Keep fresh stereo until one model explains every track.
+            // This remains an unqualified body-motion fit, not a world-motion proof.
+            if(result.motion.inliers.size()==points.size())e.unresolved_mixed_motion=false;
+            else result.guard.status=StereoMotionGuardStatus::UnresolvedMixedMotion;
+        }
+    }
     if(result.motion.status==StereoMotionStatus::Tracked&&e.config.guard.enabled&&result.guard.status!=StereoMotionGuardStatus::Accepted) {
-        result.motion.status=result.guard.status==StereoMotionGuardStatus::MultipleMotions?StereoMotionStatus::AmbiguousMotion:
+        result.motion.status=(result.guard.status==StereoMotionGuardStatus::MultipleMotions||result.guard.status==StereoMotionGuardStatus::UnresolvedMixedMotion)?StereoMotionStatus::AmbiguousMotion:
             (result.guard.status==StereoMotionGuardStatus::InsufficientImageSupport?StereoMotionStatus::InsufficientImageSupport:StereoMotionStatus::InvalidInput);
         result.motion.current_from_previous={};result.motion.covariance={};result.motion.inliers.clear();
     }

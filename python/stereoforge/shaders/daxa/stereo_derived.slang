@@ -31,7 +31,7 @@ void derived_select<let Components:uint,let Bits:uint>(uint3 gid,uint3 tid){
     if(lane!=0||i>=parameters.width*parameters.height)return;
     best=derived_best_index[t];best_cost=derived_best_cost[t];second=derived_second_cost[t];
     bool valid=derived_count[t]>=2&&sgm_selection_valid(best,best_cost,second);float value=float(best);
-    if(parameters.subpixel!=0&&best>0&&best+1<parameters.disparities&&derived_supported(parameters,i,best-1)&&derived_supported(parameters,i,best+1))
+    if((parameters.subpixel&1u)!=0&&best>0&&best+1<parameters.disparities&&derived_supported(parameters,i,best-1)&&derived_supported(parameters,i,best+1))
         value=sgm_subpixel(best,best_cost,derived_score<Components,Bits>(parameters,i,best-1),derived_score<Components,Bits>(parameters,i,best+1));
     ((float*)parameters.disparity_address)[i]=valid?value:asfloat(0x7fc00000);
     ((float*)parameters.confidence_address)[i]=valid?float(second-best_cost)/float(max(second,1u)):0;

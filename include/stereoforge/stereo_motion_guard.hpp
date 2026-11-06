@@ -3,7 +3,8 @@
 namespace stereoforge {
 // Pixel coordinates normalized by (width-1,height-1), before/current frame.
 struct StereoImageTrack {std::array<double,2> previous{},current{};};
-enum class StereoMotionGuardStatus { NotEvaluated, Accepted, InvalidInput, InsufficientImageSupport, MultipleMotions };
+// Stateful VO recovery alone emits UnresolvedMixedMotion.
+enum class StereoMotionGuardStatus { NotEvaluated, Accepted, InvalidInput, InsufficientImageSupport, MultipleMotions, UnresolvedMixedMotion };
 struct StereoMotionGuardConfig {
     bool enabled=true;
     unsigned columns=4,rows=3,min_cells=6;

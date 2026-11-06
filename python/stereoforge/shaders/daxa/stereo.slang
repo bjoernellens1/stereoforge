@@ -87,7 +87,7 @@ void select_output(uint3 gid:SV_GroupID,uint3 tid:SV_GroupThreadID){
     if(lane!=0||i>=p.width*p.height)return;
     best=select_best_index[t];best_cost=select_best_cost[t];second=select_second_cost[t];if(p.disparities==1)second=best_cost;
     bool valid=sgm_selection_valid(best,best_cost,second);float value=float(best);
-    if(p.subpixel!=0&&best>0&&best+1<p.disparities)value=sgm_subpixel(best,best_cost,sums[offset+best-1],sums[offset+best+1]);
+    if((p.subpixel&1u)!=0&&best>0&&best+1<p.disparities)value=sgm_subpixel(best,best_cost,sums[offset+best-1],sums[offset+best+1]);
     disparity[i]=valid?value:asfloat(0x7fc00000);confidence[i]=valid?float(second-best_cost)/float(max(second,1u)):0;validity[i]=valid?1:0;
 }
 [shader("compute")][numthreads(64,1,1)]
@@ -155,7 +155,7 @@ void select_packed(uint3 gid:SV_GroupID,uint3 tid:SV_GroupThreadID){
     if(lane!=0||i>=p.width*p.height)return;
     best=select_best_index[t];best_cost=select_best_cost[t];second=select_second_cost[t];if(p.disparities==1)second=best_cost;
     bool valid=sgm_selection_valid(best,best_cost,second);float value=float(best);
-    if(p.subpixel!=0&&best>0&&best+1<p.disparities)value=sgm_subpixel(best,best_cost,packed_sum(i,best-1),packed_sum(i,best+1));
+    if((p.subpixel&1u)!=0&&best>0&&best+1<p.disparities)value=sgm_subpixel(best,best_cost,packed_sum(i,best-1),packed_sum(i,best+1));
     disparity[i]=valid?value:asfloat(0x7fc00000);confidence[i]=valid?float(second-best_cost)/float(max(second,1u)):0;validity[i]=valid?1:0;
 }
 
@@ -244,7 +244,7 @@ void select_quad_body<let Components:uint,let Bits:uint>(uint3 gid){
     if(lane!=0||i>=width*p.height)return;
     if(disparities==1)second=best_cost;
     bool valid=sgm_selection_valid(best,best_cost,second);float value=float(best);
-    if(subpixel!=0&&best>0&&best+1<disparities)value=sgm_subpixel(best,best_cost,specialized_sum<Components,Bits>(x,i,best-1,word_base,paths,reference,reference_valid,right_valid,right_desc,words),specialized_sum<Components,Bits>(x,i,best+1,word_base,paths,reference,reference_valid,right_valid,right_desc,words));
+    if((subpixel&1u)!=0&&best>0&&best+1<disparities)value=sgm_subpixel(best,best_cost,specialized_sum<Components,Bits>(x,i,best-1,word_base,paths,reference,reference_valid,right_valid,right_desc,words),specialized_sum<Components,Bits>(x,i,best+1,word_base,paths,reference,reference_valid,right_valid,right_desc,words));
     disparity[i]=valid?value:asfloat(0x7fc00000);confidence[i]=valid?float(second-best_cost)/float(max(second,1u)):0;validity[i]=valid?1:0;
 }
 

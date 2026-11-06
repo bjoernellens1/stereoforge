@@ -12,6 +12,8 @@ struct DaxaStereoVoConfig {
 };
 using DaxaStereoVoResult=StereoVoFrame;
 // GPU corners/patch tracking and stereo landmarks; only bounded tracks reach CPU.
+// After mixed motion, residual tracks keep recovery rejected until one model
+// explains all tracks. Explicit reset starts a new, still unqualified chain.
 // Synchronous initial implementation: producer lease is held through the GPU fence.
 // Does not qualify temporal fusion or expose an externally supplied pose.
 class DaxaStereoVo {
