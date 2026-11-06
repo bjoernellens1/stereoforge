@@ -288,7 +288,8 @@ def test_quad_guard_catches_assumed_subgroup_identity():
 
 
 def check_shuffle_minimum_only(shader):
-    original=body(shader,'void aggregate_specialized_body<')
+    from sgm_shader_contract_helpers import legacy_specialized_body
+    original=legacy_specialized_body(shader,body(shader,'void aggregate_specialized_body<'))
     # Canonicalize only the new explicit bindings back to the legacy wrapper names.
     original=original.replace('parameters.','p.').replace('sgm_direction(path)','sgm_direction(pc.pass)').replace('(gid.y*groups_x+gid.x)','linear_group(gid)')
     # Compare shuffle to the left instantiation, folding only exact compile-time routing.
@@ -313,6 +314,11 @@ def test_shuffle_variant_changes_only_full_wave_minimum():
     check_shuffle_minimum_only(shader_source())
     setup=body((ROOT/'src/daxa_stereo.cpp').read_text(),'void DaxaStereo::Impl::setup(')
     assert 'i==19||i==20' in setup[:setup.index('shader.create_flags=')]
+
+
+def test_shuffle_guard_rejects_changing_the_legacy_register_capacity():
+    with pytest.raises(AssertionError,match='legacy register capacity'):
+        check_shuffle_minimum_only(shader_source().replace('let Registers:uint=8>', 'let Registers:uint=12>'))
 
 
 @pytest.mark.parametrize('old,new,diagnostic',[('offset<32','offset<16','five full-wave'),('if(lanes==64)','if(lane==0)','five full-wave'),('uint local_min=SGM_REDUCTION_INF','uint local_min=0','only the minimum')])

@@ -76,8 +76,10 @@ struct StereoConfig {
     std::uint32_t p1 = 8, p2 = 32;
     bool subpixel = true;
     bool ortho_hybrid = false;
-    void validate() const {
-        if (width < 5 || height < 5 || disparities == 0 || disparities > 256 ||
+    // Legacy callers retain D256. A native kernel with an independently
+    // checked larger state may explicitly supply its bounded capacity.
+    void validate(std::uint32_t disparity_capacity = 256) const {
+        if (disparity_capacity > 288 || width < 5 || height < 5 || disparities == 0 || disparities > disparity_capacity ||
             (paths != 4 && paths != 8) || p1 > p2 || p2 > 10000 ||
             std::uint64_t(width) * height * disparities > std::numeric_limits<std::uint32_t>::max())
             throw std::invalid_argument("invalid stereo dimensions, disparities, paths, or penalties");

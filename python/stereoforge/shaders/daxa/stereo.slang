@@ -294,3 +294,13 @@ void aggregate_shuffle_body<let Components:uint,let Bits:uint>(uint3 gid){
 void aggregate_shuffle8(uint3 gid:SV_GroupID){aggregate_shuffle_body<4,8>(gid);}
 [shader("compute")][numthreads(64,1,1)]
 void aggregate_shuffle16(uint3 gid:SV_GroupID){aggregate_shuffle_body<2,16>(gid);}
+
+// Bounded D288-only native recurrence. Existing entry points keep Registers=8.
+[shader("compute")][numthreads(64,1,1)]
+void aggregate_wide8(uint3 gid:SV_GroupID){aggregate_specialized_body<4,8,false,12>(p,pc.pass,pc.groups_x,gid);}
+[shader("compute")][numthreads(64,1,1)]
+void aggregate_wide16(uint3 gid:SV_GroupID){aggregate_specialized_body<2,16,false,12>(p,pc.pass,pc.groups_x,gid);}
+[shader("compute")][numthreads(64,1,1)]
+void aggregate_right_wide8(uint3 gid:SV_GroupID){aggregate_specialized_body<4,8,true,12>(p,pc.pass,pc.groups_x,gid);}
+[shader("compute")][numthreads(64,1,1)]
+void aggregate_right_wide16(uint3 gid:SV_GroupID){aggregate_specialized_body<2,16,true,12>(p,pc.pass,pc.groups_x,gid);}

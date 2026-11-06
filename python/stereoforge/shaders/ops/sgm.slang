@@ -1,7 +1,8 @@
 // Binding-independent, exact uint32 Census/SGM scalar operations. The dense
 // layout is row-major pixel, disparity fastest. Census is 5x5/24 bits, strict
 // less-than, and the two-pixel border is unsupported. Invalid cost is 10000.
-// P1<=P2<=10000, D<=256, 4/8 paths. Normalization keeps path values <=20000,
+// P1<=P2<=10000, 4/8 paths. Native D288 uses a separately bounded recurrence;
+// legacy kernels remain D<=256. Normalization keeps path values <=20000,
 // so uint32 sums <=160000; no precision/packed-width change is authorized.
 #ifndef SF_SGM_OPS
 #define SF_SGM_OPS

@@ -24,6 +24,19 @@ void derived_selection_cpu_contracts(){
 }
 void cpu_contracts(){
     derived_selection_cpu_contracts();
+    {
+        DaxaDepthConfig wide{StereoConfig{1920,1080,288,4,8,32,true},1.f,1,32,DaxaDepthStereoSchedule::SharedCensusSequential};
+        wide.validate();
+        DaxaRectification native;native.eye_width=1920;native.source_height=1080;native.stride_bytes=7680;native.width=1920;native.height=1080;
+        check(wide.requested_buffer_bytes(native)==1609114264ull,"native1080D288 one-slot budget remains below unchanged2GiB");
+        auto two=wide;two.slots=2;rejects([&]{two.requested_buffer_bytes(native);});
+        for(auto schedule:{DaxaDepthStereoSchedule::PairedPerPath,DaxaDepthStereoSchedule::LayeredPerPath,DaxaDepthStereoSchedule::Hierarchical1to8Selective1to4}){
+            auto unsupported=wide;unsupported.stereo_schedule=schedule;rejects([&]{unsupported.validate();});
+        }
+        auto derived_wide=wide;derived_wide.right_reference_mode=DaxaRightReferenceMode::LeftAggregatedSelection;
+        rejects([&]{derived_wide.validate();});
+        wide.stereo_schedule=DaxaDepthStereoSchedule::Sequential;wide.validate();
+    }
     DaxaDepthConfig c{StereoConfig{5,5,3,4},1.f,1,32};c.validate();check(c.right_reference_mode==DaxaRightReferenceMode::IndependentSGM,"independent right default");
     auto derived=c;derived.right_reference_mode=DaxaRightReferenceMode::LeftAggregatedSelection;rejects([&]{derived.validate();});derived.stereo_schedule=DaxaDepthStereoSchedule::SharedCensusSequential;derived.validate();auto bad_mode=derived;bad_mode.right_reference_mode=static_cast<DaxaRightReferenceMode>(99);rejects([&]{bad_mode.validate();});
 check(c.stereo_variant==DaxaSgmVariant::PackedSpecialized,"stereo variant default preserved");auto overwrite=c;overwrite.stereo_variant=DaxaSgmVariant::PackedSpecializedOverwrite;overwrite.validate();for(auto schedule:{DaxaDepthStereoSchedule::PairedPerPath,DaxaDepthStereoSchedule::LayeredPerPath,DaxaDepthStereoSchedule::SharedCensusSequential}){auto bad=overwrite;bad.stereo_schedule=schedule;rejects([&]{bad.validate();});}auto derived_overwrite=overwrite;derived_overwrite.right_reference_mode=DaxaRightReferenceMode::LeftAggregatedSelection;rejects([&]{derived_overwrite.validate();});auto quad=c;quad.stereo_variant=DaxaSgmVariant::PackedSpecializedOverwriteQuad;quad.validate();for(auto schedule:{DaxaDepthStereoSchedule::PairedPerPath,DaxaDepthStereoSchedule::LayeredPerPath,DaxaDepthStereoSchedule::SharedCensusSequential}){auto bad=quad;bad.stereo_schedule=schedule;rejects([&]{bad.validate();});}auto derived_quad=quad;derived_quad.right_reference_mode=DaxaRightReferenceMode::LeftAggregatedSelection;rejects([&]{derived_quad.validate();});auto bad_variant=c;bad_variant.stereo_variant=DaxaSgmVariant::Packed;rejects([&]{bad_variant.validate();});bad_variant.stereo_variant=static_cast<DaxaSgmVariant>(99);rejects([&]{bad_variant.validate();});

@@ -48,9 +48,10 @@ def test_experimental_first_path_declares_write_and_bypasses_clear():
 
 
 def test_overwrite_body_is_frozen_baseline_with_only_store_changed():
+    from sgm_shader_contract_helpers import legacy_specialized_body
     baseline = (ROOT / 'python/stereoforge/shaders/ops/sgm_specialized.slang').read_text()
     overwrite = (ROOT / 'python/stereoforge/shaders/ops/sgm_overwrite.slang').read_text()
     start = baseline.index('void aggregate_specialized_body<')
     end = baseline.index('void select_specialized_body<', start)
-    expected = baseline[start:end].replace('aggregate_specialized_body', 'aggregate_overwrite_body').replace('words[i*row_words+word]+=addition;', 'words[i*row_words+word]=addition;')
+    expected = legacy_specialized_body(baseline, baseline[start:end]).replace('aggregate_specialized_body', 'aggregate_overwrite_body').replace('words[i*row_words+word]+=addition;', 'words[i*row_words+word]=addition;')
     assert expected.strip() in overwrite

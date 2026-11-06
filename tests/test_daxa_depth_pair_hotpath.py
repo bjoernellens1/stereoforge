@@ -413,9 +413,11 @@ def canonical_shared_body(text):
 
 def test_shared_specialized_math_matches_frozen_pre_extraction_bodies():
     import hashlib
+    from sgm_shader_contract_helpers import legacy_specialized_body
     helper=(ROOT/'python/stereoforge/shaders/ops/sgm_specialized.slang').read_text()
     for signature,expected in FROZEN_SPECIALIZED_BODIES.items():
-        assert hashlib.sha256(canonical_shared_body(body(helper,signature)).encode()).hexdigest()==expected, signature+' frozen math/output expression drift'
+        instantiated=legacy_specialized_body(helper,body(helper,signature))
+        assert hashlib.sha256(canonical_shared_body(instantiated).encode()).hexdigest()==expected, signature+' frozen math/output expression drift'
 
 
 def check_layered_host(source,app):
