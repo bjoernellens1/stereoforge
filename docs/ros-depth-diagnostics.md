@@ -96,3 +96,32 @@ software transport semantics for those frames, not physical accuracy, calibrated
 uncertainty, native acquisition timing, sustained ROS/RViz throughput or a
 quality/live profile promotion. Named `quality-reference` and `live-quality`
 profiles remain pending measured frontier selection and qualification.
+
+## Optional GPU timestamp report
+
+`--gpu-timing-report FILE` (launch `gpu_timing_report:=FILE`) records bounded
+per-frame GPU timing samples for the full-SGM depth path. It rejects RGB-only or
+refinement modes, which do not share the same complete GPU timing interval.
+Without this option the publisher performs no added timing queries or sample
+storage. With it, queries run after the export has completed on the shared
+queue; they add no GPU wait. The live run still includes their host overhead.
+
+The separate `stereoforge.ros_depth_gpu_timing.v1` JSON report contains source ID,
+capture timestamp, producer ticket, depth publication-call completion time,
+host query begin/end times, GPU start/end ticks, valid timestamp bits and period.
+IDs, timestamps, tickets and ticks are exact decimal strings. The GPU interval
+starts at preprocessing upload and ends after metric metadata. Recompute it as
+`((end_tick - start_tick) & ((1 << timestamp_bits) - 1)) * timestamp_period_ns / 1e6`.
+Host producer-completion observations are not substituted for GPU measurements.
+`in_measurement_window` separates steady measurement samples from shutdown drain
+samples. Capacity equals `--max-frames`; storage is reserved before capture and
+its requested bytes are recorded. JSON serialization happens after processing.
+The legacy delivery trace still supplies offered/read/admitted/published/drop
+counts, ingress-to-publication times and source associations; GPU samples do not
+prove subscriber delivery, acquisition age or depth accuracy.
+
+Pending outputs now retire in source order in both the live loop and shutdown.
+A retained live witness showed frame922 being drained before frame920 when the
+newer frame occupied an earlier array slot. Retirement follows the oldest source
+frame, without allowing a newer completed slot to bypass it. Shutdown still
+releases all pending exports if the delivery trace is full.

@@ -35,6 +35,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <vector>
 #include <time.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -57,7 +58,7 @@ struct Options {
     std::string source,manifest,replay,mode="depth",map,frame,run,trace,reliability="best_effort",stereo_variant="packed-specialized",device_serial;
     std::string pipeline_mode="full-sgm",coarse_manifest,descriptor_mode="census",coarse_schedule="sequential",coarse_right_mode="independent-sgm",profile="quality";
     std::string depth_topic="/stereoforge/depth",rgb_topic="/stereoforge/rectified_rgb",completed_depth_topic="/stereoforge/depth_completed",completed_provenance_topic="/stereoforge/depth_completed_provenance";
-    std::string depth_rate="adaptive",rate_report,diagnostic_prefix="/stereoforge/diagnostics",rig_session_id;
+    std::string depth_rate="adaptive",rate_report,gpu_timing_report,diagnostic_prefix="/stereoforge/diagnostics",rig_session_id;
     bool diagnostics=false;
     unsigned depth_speckle_min_pixels=0,guided_fill_px=0; double depth_speckle_delta_m=0.05; double depth_speckle_delta_px=1.25; double gpu_duty_budget_pct=0.0;
     unsigned min_depth_fps=5,max_depth_fps=60,consumer_min_depth_fps=5,max_depth_age_ms=250,downshift_ms=3000;
@@ -81,7 +82,7 @@ DepthRateConfig depth_rate_config(const Options& o) {
 Options parse(int argc,char** argv){
     Options o;
     for(int i=1;i<argc;++i){std::string a=argv[i];
-        if(a=="--help"){std::cout<<"--source camera|replay --manifest FILE --clock-map FILE --frame-id ID --run-id ID --trace FILE [--replay DIR --mode depth|rgb|depth-rgb --depth-rate 5|10|20|30|60|adaptive --min-depth-fps N --max-depth-fps N --consumer-min-depth-fps N --max-depth-age-ms N --downshift-ms N --rate-report FILE --capture-fps 15|30|60 --duration-seconds N --subscriber-wait-seconds N --max-frames N --warmup N --disparities N --stereo-variant packed-specialized|packed-specialized-overwrite|packed-specialized-overwrite-quad --pipeline full-sgm|experimental-refinement|experimental-dual-refinement --coarse-manifest FILE --device-id N --depth-topic TOPIC --rgb-topic TOPIC --reliability best_effort|reliable --depth-speckle-min-pixels N --depth-speckle-delta-m METRES --depth-speckle-delta-px PIXELS --diagnostics 0|1 --diagnostic-prefix TOPIC --rig-session-id ID --validation --thread-cpu-timing]\n";std::exit(0);}
+        if(a=="--help"){std::cout<<"--source camera|replay --manifest FILE --clock-map FILE --frame-id ID --run-id ID --trace FILE [--replay DIR --mode depth|rgb|depth-rgb --depth-rate 5|10|20|30|60|adaptive --min-depth-fps N --max-depth-fps N --consumer-min-depth-fps N --max-depth-age-ms N --downshift-ms N --rate-report FILE --capture-fps 15|30|60 --duration-seconds N --subscriber-wait-seconds N --max-frames N --warmup N --disparities N --stereo-variant packed-specialized|packed-specialized-overwrite|packed-specialized-overwrite-quad --pipeline full-sgm|experimental-refinement|experimental-dual-refinement --coarse-manifest FILE --device-id N --depth-topic TOPIC --rgb-topic TOPIC --reliability best_effort|reliable --depth-speckle-min-pixels N --depth-speckle-delta-m METRES --depth-speckle-delta-px PIXELS --gpu-timing-report FILE --diagnostics 0|1 --diagnostic-prefix TOPIC --rig-session-id ID --validation --thread-cpu-timing]\n";std::exit(0);}
         if(a=="--validation"){o.validation=true;continue;}if(a=="--thread-cpu-timing"){o.thread_cpu_timing=true;continue;}if(a=="--verify-payload-checksum"){o.verify_payload_checksum=true;continue;}if(i+1>=argc)throw std::invalid_argument("missing option value");std::string v=argv[++i];
         if(a=="--source")o.source=v;else if(a=="--manifest")o.manifest=v;else if(a=="--replay")o.replay=v;else if(a=="--mode")o.mode=v;
         else if(a=="--clock-map")o.map=v;else if(a=="--frame-id")o.frame=v;else if(a=="--run-id")o.run=v;else if(a=="--trace")o.trace=v;
@@ -89,7 +90,7 @@ Options parse(int argc,char** argv){
         else if(a=="--diagnostics")o.diagnostics=number(v,0,1)!=0;
         else if(a=="--diagnostic-prefix")o.diagnostic_prefix=v;else if(a=="--rig-session-id")o.rig_session_id=v;
         else if(a=="--qos-depth")o.qos_depth=number(v,1,64);
-        else if(a=="--depth-rate")o.depth_rate=v;else if(a=="--rate-report")o.rate_report=v;
+        else if(a=="--depth-rate")o.depth_rate=v;else if(a=="--rate-report")o.rate_report=v;else if(a=="--gpu-timing-report")o.gpu_timing_report=v;
         else if(a=="--depth-speckle-min-pixels")o.depth_speckle_min_pixels=number(v,0,10000);
         else if(a=="--guided-fill-px")o.guided_fill_px=number(v,0,255);
         else if(a=="--depth-speckle-delta-m"){size_t n=0;o.depth_speckle_delta_m=std::stod(v,&n);if(n!=v.size()||!std::isfinite(o.depth_speckle_delta_m)||o.depth_speckle_delta_m<0||o.depth_speckle_delta_m>10)throw std::invalid_argument("invalid depth speckle delta");}
@@ -134,6 +135,7 @@ Options parse(int argc,char** argv){
        o.depth_topic.empty()||o.rgb_topic.empty()||o.completed_depth_topic.empty()||o.completed_provenance_topic.empty()||o.depth_topic.front()!='/'||o.rgb_topic.front()!='/'||o.completed_depth_topic.front()!='/'||o.completed_provenance_topic.front()!='/'||
        o.completed_depth_topic==o.depth_topic||o.completed_depth_topic==o.rgb_topic||o.completed_provenance_topic==o.depth_topic||o.completed_provenance_topic==o.rgb_topic||o.completed_provenance_topic==o.completed_depth_topic||(o.mode=="depth-rgb"&&o.depth_topic==o.rgb_topic))throw std::invalid_argument("invalid publisher configuration");
     if(!o.rate_report.empty()&&o.rate_report==o.trace)throw std::invalid_argument("rate report must differ from ROS delivery trace");
+    if(!o.gpu_timing_report.empty()&&(o.mode=="rgb"||o.pipeline_mode!="full-sgm"||o.gpu_timing_report==o.trace||o.gpu_timing_report==o.rate_report||(o.diagnostics&&o.gpu_timing_report==o.trace+".diagnostics.json")))throw std::invalid_argument("invalid GPU timing report configuration");
     if(o.diagnostics){
         if(o.mode=="rgb"||o.diagnostic_prefix.empty()||o.diagnostic_prefix.front()!='/'||o.diagnostic_prefix.back()=='/'||o.diagnostic_prefix.size()>4096||o.rig_session_id.size()>256)throw std::invalid_argument("invalid diagnostic configuration");
         for(const char* suffix:{"disparity","validity","confidence","uncertainty_m","provenance","source_ids","source_age_ns","metadata"}){
@@ -184,10 +186,14 @@ json output_descriptor(const std::string& topic,unsigned w,unsigned h,const char
 struct Counters {std::uint64_t read=0,admitted=0,ring_drops=0,identity_rejects=0,published_depth=0,published_rgb=0,published_completed_depth=0,published_completed_provenance=0,timeouts=0;};
 json counters_json(const Counters& c,bool has_completed=false){json j={{"read",c.read},{"admitted",c.admitted},{"ring_drops",c.ring_drops},{"identity_rejects",c.identity_rejects},{"published_depth",c.published_depth},{"published_rgb",c.published_rgb},{"received_depth",0},{"received_rgb",0},{"timeouts",c.timeouts}};if(has_completed){j["published_completed_depth"]=c.published_completed_depth;j["published_completed_provenance"]=c.published_completed_provenance;j["received_completed_depth"]=0;j["received_completed_provenance"]=0;}return j;}
 struct DiagnosticCounters {uint64_t frames=0,images=0,metadata=0,bytes=0,pack_ns=0,publish_call_ns=0;};
+struct GpuTimingSample {int64_t source_id;uint64_t capture_ns,producer_ticket,published_ns,query_begin_ns,query_end_ns,start_tick,end_tick;uint32_t timestamp_bits;double timestamp_period_ns,gpu_span_ms;};
 struct Pending {DaxaDepthPipeline::Frame depth;DaxaFrame full;DaxaRefinement::Frame refined;DaxaFrame rgb;DaxaHostExport::Frame output,completed_output;CaptureLease capture;RosCaptureStamp stamp;std::uint64_t producer_observed=0,producer_enqueue_begin=0,producer_enqueue_end=0,export_enqueue_end=0;};
 void initialize_image(sensor_msgs::msg::Image& image,unsigned w,unsigned h,const char* encoding,const std::string& frame,unsigned elem_bytes=4){image.width=w;image.height=h;image.step=w*elem_bytes;image.encoding=encoding;image.is_bigendian=0;image.header.frame_id=frame;image.data.resize(size_t(w)*h*elem_bytes);}
 void run(const Options& o, OutputFile& file){
     if constexpr(std::endian::native!=std::endian::little)throw std::runtime_error("ROS image export requires a little-endian host");
+    std::unique_ptr<OutputFile> gpu_timing_report;
+    std::vector<GpuTimingSample> gpu_timings;
+    if(!o.gpu_timing_report.empty()){gpu_timing_report=std::make_unique<OutputFile>(o.gpu_timing_report);gpu_timings.reserve(o.max_frames);}
     auto mapping_document=load_map(o.map);auto mapping=mapping_from(mapping_document);
     auto host_clock_id=clock_id();
     auto fixture=load_daxa_preprocess_fixture(o.manifest);auto& maps=fixture.rectification;maps.validate(2);
@@ -473,6 +479,13 @@ void run(const Options& o, OutputFile& file){
             else ++counters.published_rgb;
         };
         if(depth)emit(RosDeliveryOutput::Depth,depth_image,depth_pub);
+        if(gpu_timing_report&&!trace_full){
+            // The export completed on this queue, so producer timestamp queries
+            // require no additional GPU wait. Never substitute host observations.
+            const auto query_begin=now_ns<steady>();const auto timing=p.depth.timings();const auto query_end=now_ns<steady>();
+            if(gpu_timings.size()>=o.max_frames||!timing.combined_gpu_timing_available||!std::isfinite(timing.combined_gpu_ms)||timing.combined_gpu_ms<=0)throw std::runtime_error("invalid or overflowing GPU timing samples");
+            gpu_timings.push_back({static_cast<int64_t>(p.capture->frame_id),p.capture->camera_timestamp_ns,p.output.producer_ticket(),trace.records().back().publish_end_ns,query_begin,query_end,timing.preprocessing.start_tick,timing.end_tick,timing.timestamp_bits,timing.timestamp_period,timing.combined_gpu_ms});
+        }
         if(o.diagnostics&&!trace_full){
             const auto before=now_ns<steady>();
             for(unsigned i=0;i<diagnostic_images.size();++i){diagnostic_publishers[i]->publish(diagnostic_images[i]);++diagnostic_counters.images;diagnostic_counters.bytes+=diagnostic_images[i].data.size();}
@@ -487,9 +500,21 @@ void run(const Options& o, OutputFile& file){
         if(rgb&&!trace_full)emit(RosDeliveryOutput::Rgb,rgb_image,rgb_pub);
         p.completed_output={};p.output={};p.refined={};p.full={};p.depth={};p.rgb={};p.capture={};if(completed_exporter)completed_exporter->collect();exporter->collect();if(experimental){refinement->collect();if(!dual)full_preprocess->collect_completed_sources();}if(depth)pipeline->collect();else preprocess->collect_completed_sources();if(dual)dual_preprocess->collect();
     };
+    auto retire_pending=[&](bool drain){
+        for(size_t n=0;n<pending.size();++n){
+            auto oldest=std::min_element(pending.begin(),pending.end(),[](const Pending& a,const Pending& b){
+                if(!a.output)return false;
+                if(!b.output)return true;
+                return a.capture->frame_id<b.capture->frame_id;
+            });
+            if(oldest==pending.end()||!oldest->output)break;
+            retire(*oldest,drain);
+            if(oldest->output||(!drain&&trace_full))break;
+        }
+    };
     try{
         while(rclcpp::ok()&&!trace_full&&now_ns<steady>()<deadline&&counters.admitted<o.max_frames){
-            for(auto& p:pending){retire(p,false);if(trace_full)break;}
+            retire_pending(false);
             if(trace_full)break;
             // Replay is lossless: leave the next input queued until a slot retires.
             // Live capture still dequeues and drops stale inputs when both slots are busy.
@@ -522,7 +547,7 @@ void run(const Options& o, OutputFile& file){
         if(trace_full)reason="trace_full";else if(!rclcpp::ok())reason="shutdown";
     }catch(const std::exception& e){reason="error";failure=e.what();}
     auto window_end=now_ns<steady>();auto window_counters=counters;auto window_diagnostics=diagnostic_counters;auto window_capture=capture->metrics();auto window_pending=count_pending();auto drain_begin=now_ns<steady>();
-    try{capture->stop();for(auto& p:pending)retire(p,true);if(completed_exporter)completed_exporter->drain();exporter->drain();if(depth)pipeline->drain();else preprocess->collect_completed_sources();}
+    try{capture->stop();retire_pending(true);if(completed_exporter)completed_exporter->drain();exporter->drain();if(depth)pipeline->drain();else preprocess->collect_completed_sources();}
     catch(const std::exception& e){reason="error";failure=e.what();}
     if(trace_full&&reason!="error")reason="trace_full";
     auto drain_end=now_ns<steady>();for(auto& p:pending){p.output={};p.refined={};p.full={};p.depth={};p.rgb={};p.capture={};}for(auto& p:pending)p.completed_output={};const bool has_completed=(depth&&experimental&&o.planar_recovery);completed_exporter.reset();exporter.reset();refinement.reset();full_preprocess.reset();pipeline.reset();dual_preprocess.reset();preprocess.reset();
@@ -534,6 +559,16 @@ void run(const Options& o, OutputFile& file){
         {"pending",window_pending},{"trace_drops",trace.dropped()},{"drain_ns",drain_end-drain_begin}};
     if(duty_governor)end["gpu_duty_governor"]={{"budget_pct",o.gpu_duty_budget_pct},{"ema_gpu_ms",duty_governor->ema_gpu_ms()},{"recommended_fps",duty_governor->recommended_fps()},{"estimated_duty_pct",duty_governor->estimated_duty_fraction()*100.0},{"observations",duty_governor->observations()},{"budget_throttles",duty_governor->budget_throttles()}};
     file.reset();file.put("[");file.put(begin.dump());for(auto const& r:trace.records()){file.put(",");file.put(ros_delivery_event_json(r,o.run,"publisher",config).dump());}file.put(",");file.put(end.dump());file.put("]\n");file.complete=true;
+    if(gpu_timing_report){
+        json samples=json::array();
+        for(const auto& s:gpu_timings)samples.push_back({{"source_id",std::to_string(s.source_id)},{"capture_ns",std::to_string(s.capture_ns)},{"producer_ticket",std::to_string(s.producer_ticket)},{"published_ns",std::to_string(s.published_ns)},{"query_begin_ns",std::to_string(s.query_begin_ns)},{"query_end_ns",std::to_string(s.query_end_ns)},{"start_tick",std::to_string(s.start_tick)},{"end_tick",std::to_string(s.end_tick)},{"timestamp_bits",s.timestamp_bits},{"timestamp_period_ns",s.timestamp_period_ns},{"gpu_span_ms",s.gpu_span_ms},{"in_measurement_window",s.published_ns<=window_end}});
+        gpu_timing_report->reset();
+        gpu_timing_report->put(json({{"schema","stereoforge.ros_depth_gpu_timing.v1"},{"run_id",o.run},{"legacy_trace",o.trace},{"configuration",config},
+            {"timing_scope","GPU_timestamp_single_interval_upload_through_metric_metadata_full_sgm"},{"host_query_semantics","post_export_completion_no_additional_GPU_wait"},
+            {"capacity",o.max_frames},{"sample_record_bytes",sizeof(GpuTimingSample)},{"requested_sample_storage_bytes",size_t(o.max_frames)*sizeof(GpuTimingSample)},
+            {"source_window_end_ns",window_end},{"reason",reason},{"samples",samples},{"acquisition_age_qualified",false}}).dump()+"\n");
+        gpu_timing_report->complete=true;
+    }
     if(diagnostic_report){
         diagnostic_report->reset();
         diagnostic_report->put(json({{"schema","stereoforge.ros_depth_diagnostics.report.v1"},{"run_id",o.run},{"legacy_trace",o.trace},{"configuration",diagnostic_configuration},
