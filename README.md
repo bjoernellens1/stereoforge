@@ -391,3 +391,6 @@ PYTHONPATH=python .venv/bin/python benchmarks/multiresolution_fixture.py \
   --source-manifest DONOR/manifest.json --output FRESH_PROFILE \
   --width 960 --height 540
 ```
+
+Optional native ROS depth diagnostics and their qualification limits are documented
+in [ROS depth diagnostics](docs/ros-depth-diagnostics.md).

@@ -6,7 +6,7 @@ namespace stereoforge {
 struct DaxaHostExportConfig {
     unsigned slots=2; bool depth=true; bool rgb=false; bool provenance=false;
     // Raw confidence is a heuristic, never calibrated metric uncertainty.
-    bool confidence=false,validity=false,source_ids=false,age_ns=false;
+    bool confidence=false,validity=false,source_ids=false,age_ns=false,disparity=false;
 };
 struct DaxaHostExportMemory { uint32_t type_index=0,property_flags=0; size_t bytes_per_slot=0; bool host_cached=false; };
 // Selective native publication boundary, not a freshness or ROS delivery claim.

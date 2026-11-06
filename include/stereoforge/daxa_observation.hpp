@@ -2,7 +2,7 @@
 #include <stereoforge/daxa_frame.hpp>
 namespace stereoforge {
 class DaxaDepthPipeline;class DaxaTemporal;class DaxaRefinement;
-enum class DaxaObservationPlane:unsigned { Depth,Confidence,Validity,Provenance,SourceIds,AgeNs };
+enum class DaxaObservationPlane:unsigned { Depth,Confidence,Validity,Provenance,SourceIds,AgeNs,Disparity };
 enum class DaxaProvenance:uint32_t { Invalid=0,Stereo=1,Reprojected=2,Fused=3,Neural=4,StereoLeftAggregated=5,PlanarInferred=6,TemporalPlanarInferred=7 };
 enum class DaxaObservationImage:unsigned { OriginalLeft,OriginalRight,RectifiedLeft,RectifiedRight };
 enum class DaxaObservationAncestryKind { SingleMeasured, BoundedContributors };
@@ -42,9 +42,10 @@ class DaxaObservationFrame {
     const uint64_t* live_generation_=nullptr;
     uint64_t generation_=0,submit_=0;uint32_t width_=0,height_=0;
     std::array<daxa::BufferId,6> planes_{};
+    daxa::BufferId disparity_{};
     std::array<DaxaObservationImageView,4> images_{};
     DaxaObservationAncestryView ancestry_;
-    DaxaObservationFrame(std::shared_ptr<DaxaFoundation>,std::shared_ptr<void> owner,std::shared_ptr<void> lease,const uint64_t* live_generation,uint64_t generation,uint64_t submit,std::shared_ptr<const DaxaRectification>,CaptureLease,std::array<daxa::BufferId,6>,std::array<DaxaObservationImageView,4>,DaxaObservationAncestryView={});
+    DaxaObservationFrame(std::shared_ptr<DaxaFoundation>,std::shared_ptr<void> owner,std::shared_ptr<void> lease,const uint64_t* live_generation,uint64_t generation,uint64_t submit,std::shared_ptr<const DaxaRectification>,CaptureLease,std::array<daxa::BufferId,6>,std::array<DaxaObservationImageView,4>,DaxaObservationAncestryView={},daxa::BufferId disparity={});
     void validate()const;
     friend class DaxaDepthPipeline;friend class DaxaTemporal;friend class DaxaRefinement;
 public:
@@ -59,6 +60,8 @@ public:
     std::shared_ptr<const DaxaRectification> calibration()const{return map_owner();}
     CaptureLease source()const;
     daxa::BufferId buffer(DaxaObservationPlane)const;daxa::BufferId plane(DaxaObservationPlane p)const{return buffer(p);}
+    // Optional GPU disparity aligned to this grid; inference keeps its provenance.
+    bool has_disparity()const;
     size_t size_bytes(DaxaObservationPlane)const;
     DaxaObservationImageView image(DaxaObservationImage)const;
     DaxaObservationAncestryView ancestry()const;

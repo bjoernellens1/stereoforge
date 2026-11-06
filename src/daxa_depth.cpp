@@ -129,7 +129,7 @@ DaxaObservationFrame DaxaDepthPipeline::Frame::observations()const{
     validate();std::array<daxa::BufferId,6> planes{};for(unsigned i=0;i<6;++i)planes[i]=slot_->outputs[i+3];
     std::array<DaxaObservationImageView,4> images{};auto maps=slot_->preprocessing.calibration();
     for(unsigned i=0;i<4;++i)images[i]=DaxaObservationImageView(slot_->preprocessing.plane(DaxaPreprocessPlane(i)).buffer(),i<2?maps->eye_width:maps->width,i<2?maps->source_height:maps->height);
-    return DaxaObservationFrame(owner_->context,owner_,slot_,&slot_->generation,generation_,slot_->submit,std::move(maps),slot_->preprocessing.source(),planes,images);
+    return DaxaObservationFrame(owner_->context,owner_,slot_,&slot_->generation,generation_,slot_->submit,std::move(maps),slot_->preprocessing.source(),planes,images,{},slot_->outputs[0]);
 }
 void DaxaDepthPipeline::Frame::wait()const{validate();owner_->context->device.wait_on_submit({.queue=daxa::QUEUE_MAIN,.queue_submit_index=slot_->submit,.timeout=30'000'000'000ull});}
 bool DaxaDepthPipeline::Frame::ready()const{validate();return detail::completed_submission(slot_->submit,owner_->context->device.oldest_pending_submit_index());}

@@ -73,13 +73,16 @@ class DaxaDepthPipeline{public:struct Owner{std::shared_ptr<DaxaFoundation> cont
 '''+source[source.index('namespace stereoforge {'):]+ '\nnamespace stereoforge {\n'+adapter+'\n}\n'+r'''
 using namespace stereoforge;
 void check(bool b,const char* s){if(!b)throw std::runtime_error(s);}
+void check_disparity(const DaxaObservationFrame& lease,daxa::BufferId expected){
+ check(lease.has_disparity(),"missing leased disparity");check(lease.buffer(DaxaObservationPlane(6))==expected,"disparity producer/assignment mismatch");check(lease.size_bytes(DaxaObservationPlane(6))==7*5*2*4,"disparity extent");
+}
 int main(){try{
  auto context=std::make_shared<DaxaFoundation>();auto owner=std::make_shared<DaxaDepthPipeline::Owner>();owner->context=context;
  auto slot=std::make_shared<DaxaDepthPipeline::Slot>();slot->preprocessing.maps=std::make_shared<DaxaRectification>();auto raw=std::make_shared<CaptureFrame>();raw->source_width=22;raw->height=13;raw->stride_bytes=88;raw->calibration_identity=std::string(200,'c');raw->camera_clock_domain=std::string(200,'t');slot->preprocessing.src=raw;for(unsigned i=0;i<9;++i)slot->outputs[i]={10+i};
- auto other_owner=std::make_shared<DaxaDepthPipeline::Owner>();other_owner->context=context;auto other_slot=std::make_shared<DaxaDepthPipeline::Slot>(*slot);DaxaDepthPipeline::Frame other{other_owner,other_slot};
+ auto other_owner=std::make_shared<DaxaDepthPipeline::Owner>();other_owner->context=context;auto other_slot=std::make_shared<DaxaDepthPipeline::Slot>(*slot);other_slot->outputs[0]={99};DaxaDepthPipeline::Frame other{other_owner,other_slot};
  DaxaDepthPipeline::Frame input{owner,slot};auto initial=slot.use_count();uint64_t checksum=0;constexpr unsigned count=10000;
  track=true;auto start=std::chrono::steady_clock::now();
- for(unsigned n=0;n<count;++n){auto lease=input.observations();auto copy=lease;auto moved=std::move(copy);copy=lease;copy=copy;moved=copy;copy={};moved=other.observations();moved=lease;
+ for(unsigned n=0;n<count;++n){auto lease=input.observations();auto copy=lease;auto moved=std::move(copy);copy=lease;copy=copy;moved=copy;copy={};moved=other.observations();check_disparity(moved,other_slot->outputs[0]);moved=lease;check_disparity(moved,slot->outputs[0]);check_disparity(lease,slot->outputs[0]);
  check(lease.generation()==3&&lease.submit_ticket()==9&&lease.layers()==2,"generation/ticket");check(lease.source()==slot->preprocessing.src&&lease.map_owner()==slot->preprocessing.maps&&lease.context()==context,"owner refs");
  for(unsigned i=0;i<6;++i){check(lease.buffer(DaxaObservationPlane(i))==slot->outputs[i+3],"plane association");check(lease.size_bytes(DaxaObservationPlane(i))==7*5*2*(i<4?4:8),"plane extent");checksum+=lease.buffer(DaxaObservationPlane(i)).id;}
  for(unsigned i=0;i<4;++i){auto image=lease.image(DaxaObservationImage(i));check(image.buffer().id==100+i&&image.width()==(i<2?11:7)&&image.height()==(i<2?13:5)&&image.row_stride_bytes()==image.width()*4&&image.format()==DaxaPlaneFormat::Rgba8PackedUint32,"RGB association");checksum+=image.size_bytes();}

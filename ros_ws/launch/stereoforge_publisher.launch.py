@@ -11,6 +11,9 @@ from launch.substitutions import LaunchConfiguration
 
 _OPTIONAL_VALUE_ARGUMENTS = (
     ("mode", "--mode"),
+    ("diagnostics", "--diagnostics"),
+    ("diagnostic_prefix", "--diagnostic-prefix"),
+    ("rig_session_id", "--rig-session-id"),
     ("duration_seconds", "--duration-seconds"),
     ("subscriber_wait_seconds", "--subscriber-wait-seconds"),
     ("max_frames", "--max-frames"),
@@ -235,6 +238,9 @@ def generate_launch_description():
             default_value="depth-rgb",
             choices=["depth", "rgb", "depth-rgb"],
         ),
+        DeclareLaunchArgument("diagnostics", default_value="0", choices=["0", "1"]),
+        DeclareLaunchArgument("diagnostic_prefix", default_value="/stereoforge/diagnostics"),
+        DeclareLaunchArgument("rig_session_id", default_value=""),
         DeclareLaunchArgument("duration_seconds", default_value="600"),
         DeclareLaunchArgument("subscriber_wait_seconds", default_value="0"),
         DeclareLaunchArgument("max_frames", default_value="100000"),

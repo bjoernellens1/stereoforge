@@ -10,7 +10,7 @@
 namespace stereoforge {
 namespace {
 void require(bool value,const char* message){if(!value)throw std::invalid_argument(message);}
-bool observation_requested(const DaxaHostExportConfig& c){return c.depth||c.provenance||c.confidence||c.validity||c.source_ids||c.age_ns;}
+bool observation_requested(const DaxaHostExportConfig& c){return c.depth||c.provenance||c.confidence||c.validity||c.source_ids||c.age_ns||c.disparity;}
 bool same_owner(const std::shared_ptr<const DaxaRectification>& a,const std::shared_ptr<const DaxaRectification>& b){return a.get()==b.get()&&!a.owner_before(b)&&!b.owner_before(a);}
 }
 struct DaxaHostExport::Slot {
@@ -28,7 +28,7 @@ struct DaxaHostExport::Slot {
 struct DaxaHostExport::Impl {
     std::shared_ptr<DaxaFoundation> context;std::shared_ptr<const DaxaRectification> maps;
     DaxaHostExportConfig config;DaxaHostExportMemory selected;size_t plane_bytes=0;
-    std::array<size_t,6> plane_offsets{},plane_sizes{};
+    std::array<size_t,7> plane_offsets{},plane_sizes{};
     std::thread::id thread=std::this_thread::get_id();std::array<std::shared_ptr<Slot>,3> slots{};
     void require_thread()const{require(thread==std::this_thread::get_id(),"host export submission requires owner thread");}
     Impl(std::shared_ptr<DaxaFoundation> c,std::shared_ptr<const DaxaRectification> m,DaxaHostExportConfig cfg):context(std::move(c)),maps(std::move(m)),config(cfg){
@@ -43,11 +43,11 @@ struct DaxaHostExport::Impl {
         if(cfg.provenance)plane_offsets[3]=plane_bytes*(unsigned(cfg.depth)+unsigned(cfg.rgb));
         auto append=[&](bool requested,unsigned plane){
             if(!requested)return;
-            const size_t alignment=plane>=4?alignof(int64_t):alignof(uint32_t);
+            const size_t alignment=(plane==4||plane==5)?alignof(int64_t):alignof(uint32_t);
             selected.bytes_per_slot=(selected.bytes_per_slot+alignment-1)/alignment*alignment;
             plane_offsets[plane]=selected.bytes_per_slot;selected.bytes_per_slot+=plane_sizes[plane];
         };
-        append(cfg.confidence,1);append(cfg.validity,2);append(cfg.source_ids,4);append(cfg.age_ns,5);
+        append(cfg.confidence,1);append(cfg.validity,2);append(cfg.source_ids,4);append(cfg.age_ns,5);append(cfg.disparity,6);
         auto& d=context->device;daxa::BufferInfo info{.size=selected.bytes_per_slot,.name="persistent selective host export"};
         auto requirements=d.buffer_memory_requirements(info);VkPhysicalDeviceMemoryProperties properties{};
         vkGetPhysicalDeviceMemoryProperties(daxa_dvc_get_vk_physical_device(d.get()),&properties);
@@ -74,7 +74,7 @@ struct DaxaHostExport::Impl {
         for(unsigned i=0;i<config.slots;++i)if(detail::available_slot(slots[i].use_count(),slots[i]->copy_ticket,boundary))return slots[i];
         throw std::runtime_error("host export ring exhausted: retained destination or pending copy");
     }
-    template<class Input>void submit(Slot& s,const Input& input,daxa::BufferId depth,daxa::BufferId rgb,daxa::BufferId prov,uint64_t ticket,std::array<daxa::BufferId,4> diagnostics){
+    template<class Input>void submit(Slot& s,const Input& input,daxa::BufferId depth,daxa::BufferId rgb,daxa::BufferId prov,uint64_t ticket,std::array<daxa::BufferId,5> diagnostics){
         require(s.generation!=std::numeric_limits<uint64_t>::max(),"host export generation overflow");
         auto& d=context->device;auto before=d.latest_queue_submit_index(daxa::QUEUE_MAIN);
         s.producer=input;s.source=input.source();s.producer_ticket=ticket;++s.generation;s.copy_ticket=0;
@@ -88,6 +88,7 @@ struct DaxaHostExport::Impl {
             if(config.validity)recorder.copy_buffer_to_buffer({.src_buffer=diagnostics[1],.dst_buffer=s.buffer,.src_offset=0,.dst_offset=plane_offsets[2],.size=plane_bytes});
             if(config.source_ids)recorder.copy_buffer_to_buffer({.src_buffer=diagnostics[2],.dst_buffer=s.buffer,.src_offset=0,.dst_offset=plane_offsets[4],.size=plane_bytes*2});
             if(config.age_ns)recorder.copy_buffer_to_buffer({.src_buffer=diagnostics[3],.dst_buffer=s.buffer,.src_offset=0,.dst_offset=plane_offsets[5],.size=plane_bytes*2});
+            if(config.disparity)recorder.copy_buffer_to_buffer({.src_buffer=diagnostics[4],.dst_buffer=s.buffer,.src_offset=0,.dst_offset=plane_offsets[6],.size=plane_bytes});
             recorder.pipeline_barrier({.src_access=daxa::AccessConsts::TRANSFER_WRITE,.dst_access=daxa::AccessConsts::HOST_READ});
             auto command=recorder.complete_current_commands();
             s.copy_ticket=d.submit_commands({.command_lists={&command,1}});
@@ -107,6 +108,7 @@ DaxaHostExport::DaxaHostExport(std::shared_ptr<DaxaFoundation> c,const DaxaObser
     require(bool(prototype),"empty host export prototype");
     require(c&&prototype.context_id()==reinterpret_cast<uintptr_t>(c->device.get()),"foreign host export prototype context");
     auto maps=prototype.calibration();require(maps&&prototype.width()==maps->width&&prototype.height()==maps->height,"prototype grid mismatch");
+    if(cfg.disparity)require(prototype.has_disparity(),"observation disparity unavailable");
     auto rgb=prototype.image(DaxaObservationImage::RectifiedLeft);if(cfg.rgb)require(rgb.width()==maps->width&&rgb.height()==maps->height,"prototype RGB grid mismatch");
     impl_=std::make_shared<Impl>(std::move(c),std::move(maps),cfg);
 }
@@ -122,11 +124,12 @@ DaxaHostExport::Frame DaxaHostExport::enqueue(const DaxaObservationFrame& input)
     daxa::BufferId depth{},rgb{},prov{};if(e.config.depth){require(input.size_bytes(DaxaObservationPlane::Depth)>=e.plane_bytes,"short depth source");depth=input.buffer(DaxaObservationPlane::Depth);}
     if(e.config.rgb){auto view=input.image(DaxaObservationImage::RectifiedLeft);require(view.width()==e.maps->width&&view.height()==e.maps->height,"RGB grid mismatch");rgb=view.buffer();}
     if(e.config.provenance){require(input.size_bytes(DaxaObservationPlane::Provenance)>=e.plane_bytes,"short provenance source");prov=input.buffer(DaxaObservationPlane::Provenance);}
-    std::array<daxa::BufferId,4> diagnostics{};
+    std::array<daxa::BufferId,5> diagnostics{};
     if(e.config.confidence){require(input.size_bytes(DaxaObservationPlane::Confidence)>=e.plane_sizes[1],"short confidence source");diagnostics[0]=input.buffer(DaxaObservationPlane::Confidence);}
     if(e.config.validity){require(input.size_bytes(DaxaObservationPlane::Validity)>=e.plane_sizes[2],"short validity source");diagnostics[1]=input.buffer(DaxaObservationPlane::Validity);}
     if(e.config.source_ids){require(input.size_bytes(DaxaObservationPlane::SourceIds)>=e.plane_sizes[4],"short source_ids source");diagnostics[2]=input.buffer(DaxaObservationPlane::SourceIds);}
     if(e.config.age_ns){require(input.size_bytes(DaxaObservationPlane::AgeNs)>=e.plane_sizes[5],"short age_ns source");diagnostics[3]=input.buffer(DaxaObservationPlane::AgeNs);}
+    if(e.config.disparity){require(input.size_bytes(DaxaObservationPlane::Disparity)>=e.plane_sizes[6],"short disparity source");diagnostics[4]=input.buffer(DaxaObservationPlane::Disparity);}
     e.submit(*slot,input,depth,rgb,prov,input.submit_ticket(),diagnostics);return Frame(impl_,slot);
 }
 DaxaHostExport::Frame DaxaHostExport::enqueue(const DaxaFrame& input){

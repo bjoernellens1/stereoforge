@@ -159,8 +159,11 @@ static void gpu_4x_ortho_hybrid_and_repair(){
             check(out_base.timings().total_gpu_ms>0.0&&out_rep.timings().total_gpu_ms>0.0&&out_plan.timings().planar_gpu_ms>0.0);
             auto obs_meas=out_plan.observations(),obs_comp=out_plan.completed_observations();
             check(obs_meas.buffer(DaxaObservationPlane::Depth)==out_plan.buffer(DaxaRefinementPlane::Depth));
+            check(obs_meas.has_disparity()&&obs_comp.has_disparity());
+            check(obs_meas.buffer(DaxaObservationPlane::Disparity)==out_plan.buffer(DaxaRefinementPlane::Disparity));
+            check(obs_comp.buffer(DaxaObservationPlane::Disparity)!=obs_meas.buffer(DaxaObservationPlane::Disparity));
             check(obs_comp.buffer(DaxaObservationPlane::Depth)!=obs_meas.buffer(DaxaObservationPlane::Depth));
-            for(auto pl:{DaxaObservationPlane::Depth,DaxaObservationPlane::Confidence,DaxaObservationPlane::Validity,DaxaObservationPlane::Provenance,DaxaObservationPlane::SourceIds,DaxaObservationPlane::AgeNs}){
+            for(auto pl:{DaxaObservationPlane::Depth,DaxaObservationPlane::Confidence,DaxaObservationPlane::Validity,DaxaObservationPlane::Provenance,DaxaObservationPlane::SourceIds,DaxaObservationPlane::AgeNs,DaxaObservationPlane::Disparity}){
                 check(obs_comp.size_bytes(pl)==obs_meas.size_bytes(pl));
                 check(context->device.info(obs_comp.buffer(pl)).value().size>=obs_comp.size_bytes(pl));
             }

@@ -58,11 +58,11 @@ def check_hotpaths(src):
         assert enqueue.index('e.available()') < enqueue.index('input.context_id()')
         assert 'for(' not in enqueue and 'while(' not in enqueue
     submit = body(export, 'template<class Input>void submit(')
-    assert submit.count('copy_buffer_to_buffer(') == 7
+    assert submit.count('copy_buffer_to_buffer(') == 8
     assert 'if(config.depth)recorder.copy_buffer_to_buffer(' in submit
     assert 'if(config.rgb)recorder.copy_buffer_to_buffer(' in submit
     assert 'if(config.provenance)recorder.copy_buffer_to_buffer(' in submit
-    for flag in ('confidence', 'validity', 'source_ids', 'age_ns'):
+    for flag in ('confidence', 'validity', 'source_ids', 'age_ns', 'disparity'):
         assert f'if(config.{flag})recorder.copy_buffer_to_buffer(' in submit
     assert '.src_offset=0,.dst_offset=0,.size=plane_bytes' in submit
     assert '.dst_offset=config.depth?plane_bytes:0,.size=plane_bytes' in submit

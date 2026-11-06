@@ -58,8 +58,8 @@ static void memory_contract(const DaxaHostExport& output,unsigned requested_plan
  check(output.requested_bytes()==size_t(2)*requested_planes*128*64*4,"requested bytes across two slots exact");
 }
 static void diagnostic_contracts(const std::shared_ptr<DaxaFoundation>& context,const DaxaObservationFrame& observation,const DaxaDepthReadback& expected){
- DaxaHostExportConfig config{2,true,true,true};config.confidence=config.validity=config.source_ids=config.age_ns=true;
- DaxaHostExport output(context,observation,config);memory_contract(output,9);
+ DaxaHostExportConfig config{2,true,true,true};config.confidence=config.validity=config.source_ids=config.age_ns=config.disparity=true;
+ DaxaHostExport output(context,observation,config);memory_contract(output,10);
  auto frame=output.enqueue(observation);frame.wait();
  const size_t pixels=128*64;
  auto compare=[&](DaxaObservationPlane plane,const auto& values){
@@ -67,6 +67,7 @@ static void diagnostic_contracts(const std::shared_ptr<DaxaFoundation>& context,
   check(bytes.size()==expected_bytes,"diagnostic left-only extent");
   check(std::memcmp(bytes.data(),values.data(),bytes.size())==0,"native diagnostic bytes match producer readback including invalid values");
  };
+ compare(DaxaObservationPlane::Disparity,expected.lr_disparity);
  compare(DaxaObservationPlane::Depth,expected.depth);compare(DaxaObservationPlane::Confidence,expected.metric_confidence);
  compare(DaxaObservationPlane::Validity,expected.metric_validity);compare(DaxaObservationPlane::Provenance,expected.provenance);
  compare(DaxaObservationPlane::SourceIds,expected.source_ids);compare(DaxaObservationPlane::AgeNs,expected.age_ns);
@@ -74,7 +75,7 @@ static void diagnostic_contracts(const std::shared_ptr<DaxaFoundation>& context,
  check(frame.source()->frame_id==observation.source()->frame_id,"diagnostics retain exact capture association");
  reject([&]{frame.observation_bytes(static_cast<DaxaObservationPlane>(99));});
  config.depth=config.rgb=config.provenance=false;
- DaxaHostExport only(context,observation,config);memory_contract(only,6);auto selected=only.enqueue(observation);selected.wait();
+ DaxaHostExport only(context,observation,config);memory_contract(only,7);auto selected=only.enqueue(observation);selected.wait();
  check(selected.depth_bytes().empty()&&selected.rgba_bytes().empty()&&selected.provenance_bytes().empty(),"diagnostic-only export omits unrequested legacy planes");
  check(selected.observation_bytes(DaxaObservationPlane::SourceIds).size()==pixels*8,"diagnostic-only 64-bit extent");
 }
