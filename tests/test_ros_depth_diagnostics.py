@@ -17,7 +17,7 @@ def test_measured_depth_diagnostic_contract(tmp_path):
 def test_publisher_diagnostic_options(tmp_path):
     source = (ROOT / 'apps/ros2_depth_publisher.cpp').read_text()
     parser = source[source.index('struct Options {'):source.index('std::string clock_id()')]
-    cpp = ('#include <stereoforge/depth_rate_controller.hpp>\n'
+    cpp = ('#include "stereo_runtime_profiles.hpp"\n#include <stereoforge/depth_rate_controller.hpp>\n'
            '#include <algorithm>\n#include <cctype>\n#include <cmath>\n'
            '#include <cstdlib>\n#include <iostream>\n#include <stdexcept>\n#include <string>\n'
            'using namespace stereoforge;\n' + parser +
@@ -26,7 +26,7 @@ def test_publisher_diagnostic_options(tmp_path):
     path = tmp_path / 'parser.cpp'
     path.write_text(cpp)
     binary = tmp_path / 'parser'
-    subprocess.run(['c++', '-std=c++20', '-I', str(ROOT / 'include'),
+    subprocess.run(['c++', '-std=c++20', '-I', str(ROOT / 'include'), '-I', str(ROOT / 'apps'),
                     str(path), '-o', str(binary)], check=True)
     required = ['--source', 'camera', '--manifest', 'x', '--clock-map', 'x',
                 '--frame-id', 'x', '--run-id', 'x', '--trace', 'x']

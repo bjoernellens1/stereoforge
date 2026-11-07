@@ -23,11 +23,11 @@ def publisher_parser(tmp_path_factory):
     if not compiler: pytest.skip('C++ compiler unavailable')
     source=(ROOT/'apps/ros2_depth_publisher.cpp').read_text()
     parser=source[source.index('struct Options {'):source.index('std::string clock_id()')]
-    cpp='''#include <stereoforge/depth_rate_controller.hpp>\n#include <algorithm>\n#include <cctype>\n#include <cmath>\n#include <cstdlib>\n#include <iostream>\n#include <stdexcept>\n#include <string>\nusing namespace stereoforge;\n''' + parser + '''
+    cpp='''#include "stereo_runtime_profiles.hpp"\n#include <stereoforge/depth_rate_controller.hpp>\n#include <algorithm>\n#include <cctype>\n#include <cmath>\n#include <cstdlib>\n#include <iostream>\n#include <stdexcept>\n#include <string>\nusing namespace stereoforge;\n''' + parser + '''
 int main(int argc,char** argv){try{auto o=parse(argc,argv);std::cout<<o.stereo_variant;return 0;}catch(const std::exception& e){std::cerr<<e.what();return 2;}}
 '''
     path=tmp_path/'parser.cpp';path.write_text(cpp);exe=tmp_path/'parser'
-    compiled=subprocess.run([compiler,'-std=c++20','-I',str(ROOT/'include'),str(path),'-o',str(exe)],capture_output=True,text=True)
+    compiled=subprocess.run([compiler,'-std=c++20','-I',str(ROOT/'include'),'-I',str(ROOT/'apps'),str(path),'-o',str(exe)],capture_output=True,text=True)
     assert compiled.returncode==0, compiled.stderr
     return exe
 
@@ -125,3 +125,46 @@ def test_later_quality_label_cannot_hide_refinement_preset(publisher_parser,prof
                            '--profile',profile,'--profile','quality'],capture_output=True,text=True)
     assert result.returncode==2
     assert 'refinement-only options require an experimental refinement pipeline' in result.stderr
+
+
+@pytest.mark.parametrize('profile,variant', [('quality-reference','packed-specialized'),
+                                          ('live-quality','packed-specialized-overwrite-quad')])
+@pytest.mark.parametrize('mode', ['depth','depth-rgb'])
+def test_named_profile_parser_selects_frozen_variant(publisher_parser, profile, variant, mode):
+    result=subprocess.run([str(publisher_parser),*PUBLISHER_ARGS,'--profile',profile,'--mode',mode],capture_output=True,text=True)
+    assert (result.returncode,result.stdout)==(0,variant),result.stderr
+
+
+@pytest.mark.parametrize('profile', ['quality-reference','live-quality'])
+@pytest.mark.parametrize('extra', [['--disparities','128'],['--stereo-variant','packed-specialized'],
+    ['--descriptor-mode','census'],['--coarse-schedule','sequential'],['--fast-mode','0'],
+    ['--depth-rate','60'],['--capture-fps','60'],['--depth-speckle-min-pixels','0'],
+    ['--gpu-duty-budget-pct','0'],['--pipeline','experimental-refinement'],
+    ['--coarse-manifest','x'],['--coarse-right-reference-mode','independent-sgm'],
+    ['--ultra-fast','0'],['--refinement-subpixel','0'],['--continuous-subpixel','0'],
+    ['--adaptive-tiles','0'],['--min-disparity-bound','0'],['--max-disparity-bound','0'],
+    ['--selective-repair','0'],['--planar-recovery','0'],['--guided-fill-px','0'],
+    ['--fps','60'],['--min-depth-fps','30'],['--max-depth-fps','60'],
+    ['--consumer-min-depth-fps','30'],['--max-depth-age-ms','100'],['--downshift-ms','3000'],
+    ['--depth-speckle-delta-m','0.05'],['--depth-speckle-delta-px','1.25']])
+@pytest.mark.parametrize('profile_first', [False,True])
+def test_named_profile_rejects_control_overrides_in_either_order(publisher_parser,profile,extra,profile_first):
+    choice=['--profile',profile];args=choice+extra if profile_first else extra+choice
+    result=subprocess.run([str(publisher_parser),*PUBLISHER_ARGS,*args],capture_output=True,text=True)
+    assert result.returncode==2 and 'named profile' in result.stderr
+
+
+@pytest.mark.parametrize('profiles', [('quality-reference','quality'),('quality','live-quality'),
+    ('live-quality','quality-reference'),('live-quality','live-quality')])
+def test_named_profiles_cannot_be_relabelled_or_mixed(publisher_parser,profiles):
+    args=[arg for profile in profiles for arg in ['--profile',profile]]
+    result=subprocess.run([str(publisher_parser),*PUBLISHER_ARGS,*args],capture_output=True,text=True)
+    assert result.returncode==2 and 'named profile' in result.stderr
+
+
+@pytest.mark.parametrize('profile', ['quality-reference','live-quality'])
+def test_named_profile_requires_depth_but_allows_explicit_full_sgm(publisher_parser,profile):
+    good=subprocess.run([str(publisher_parser),*PUBLISHER_ARGS,'--profile',profile,'--pipeline','full-sgm'],capture_output=True,text=True)
+    assert good.returncode==0,good.stderr
+    bad=subprocess.run([str(publisher_parser),*PUBLISHER_ARGS,'--profile',profile,'--mode','rgb'],capture_output=True,text=True)
+    assert bad.returncode==2 and 'named profile' in bad.stderr

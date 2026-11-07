@@ -135,7 +135,7 @@ def _start(event):
     s._require(c['nominal_hz'] <= 120, 'nominal_hz too large')
     _outputs(c['outputs']); _qos(c['qos'])
     if role == 'subscriber': return
-    s._require(c['source_mode'] in ('camera', 'replay', 'synthetic') and type(c['slots']) is int and c['slots'] == 2 and
+    s._require(c['source_mode'] in ('camera', 'replay', 'synthetic') and type(c['slots']) is int and c['slots'] in (1, 2) and
                type(c['capture_queue_capacity']) is int and c['capture_queue_capacity'] == 2, 'invalid source/ring')
     s._hex(c['calibration_identity'], 64, 'calibration_identity')
     s._require(type(c['effective_estimator']) is dict, 'invalid estimator')
@@ -182,7 +182,7 @@ def _stop(event, start):
         baseline = start['config']['capture_counters']; final = event['capture_counters']
         for key in (CAPTURE | OPTIONAL_CAPTURE) - {'running', 'queued_frames', 'pool_capacity', 'packed_bytes_per_slot'}:
             s._require(final.get(key, 0) >= baseline.get(key, 0), 'capture counter went backwards: '+key)
-        s._require(event['queued'] <= 2 and event['pending'] <= 2, 'queue exceeds bounded capacity')
+        s._require(event['queued'] <= start['config']['capture_queue_capacity'] and event['pending'] <= start['config']['slots'], 'queue exceeds bounded capacity')
     else:
         s._require(event['capture_counters'] is None and event['queued'] == 0 and event['pending'] == 0, 'invalid subscriber stop')
 
@@ -237,7 +237,7 @@ def _frame(event, start):
         for key in ENQUEUE_TIMING: _int(event[key], key, 1)
         s._require(enqueue == sorted(enqueue) and enqueue[-1] <= order[0] and
                    (config['source_mode'] != 'camera' or event['host_ingress_ns'] <= enqueue[0]), 'invalid enqueue order')
-    s._require(event['capture_queue'] <= 2 and event['pending'] <= 2 and
+    s._require(event['capture_queue'] <= config['capture_queue_capacity'] and event['pending'] <= config['slots'] and
                event['freshness'] in ('measured_single_source','historical','unknown'), 'invalid queue or freshness')
 
 

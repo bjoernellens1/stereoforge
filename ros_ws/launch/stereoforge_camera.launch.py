@@ -9,6 +9,7 @@ from launch.substitutions import LaunchConfiguration
 
 
 _FORWARDED_ARGS = (
+    "profile",
     "publisher_executable",
     "rmw_implementation",
     "zenoh_router_config",
@@ -78,6 +79,8 @@ def generate_launch_description():
         }.items(),
     )
     arguments = [
+        DeclareLaunchArgument("profile", default_value="", choices=["", "quality-reference", "live-quality"],
+                              description="Fixed unqualified development recipe; empty preserves custom defaults."),
         DeclareLaunchArgument(
             "publisher_executable",
             default_value=str(
@@ -147,16 +150,16 @@ def generate_launch_description():
         DeclareLaunchArgument("subscriber_wait_seconds", default_value="0"),
         DeclareLaunchArgument("max_frames", default_value="100000"),
         DeclareLaunchArgument("warmup", default_value="5"),
-        DeclareLaunchArgument("disparities", default_value="128"),
+        DeclareLaunchArgument("disparities", default_value=""),
         DeclareLaunchArgument(
             "stereo_variant",
-            default_value="packed-specialized",
-            choices=["packed-specialized", "packed-specialized-overwrite", "packed-specialized-overwrite-quad"],
+            default_value="",
+            choices=["", "packed-specialized", "packed-specialized-overwrite", "packed-specialized-overwrite-quad"],
         ),
         DeclareLaunchArgument(
             "pipeline",
-            default_value="experimental-dual-refinement",
-            choices=["full-sgm", "experimental-refinement", "experimental-dual-refinement"],
+            default_value="",
+            choices=["", "full-sgm", "experimental-refinement", "experimental-dual-refinement"],
         ),
         DeclareLaunchArgument(
             "coarse_manifest",
@@ -165,23 +168,23 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             "descriptor_mode",
-            default_value="ortho-hybrid",
+            default_value="",
             choices=["", "census", "ortho-hybrid"],
         ),
-        DeclareLaunchArgument("fast_mode", default_value="1"),
+        DeclareLaunchArgument("fast_mode", default_value=""),
         DeclareLaunchArgument(
             "coarse_schedule",
-            default_value="shared-census-sequential",
+            default_value="",
             choices=["", "sequential", "paired-per-path", "layered-per-path", "shared-census-sequential"],
         ),
         DeclareLaunchArgument(
             "coarse_right_reference_mode",
-            default_value="left-aggregated-selection",
+            default_value="",
             choices=["", "independent-sgm", "left-aggregated-selection"],
         ),
-        DeclareLaunchArgument("refinement_subpixel", default_value="1"),
-        DeclareLaunchArgument("selective_repair", default_value="1"),
-        DeclareLaunchArgument("planar_recovery", default_value="1"),
+        DeclareLaunchArgument("refinement_subpixel", default_value=""),
+        DeclareLaunchArgument("selective_repair", default_value=""),
+        DeclareLaunchArgument("planar_recovery", default_value=""),
         DeclareLaunchArgument(
             "completed_depth_topic", default_value="/stereoforge/depth_completed"
         ),
@@ -198,9 +201,9 @@ def generate_launch_description():
             default_value="best_effort",
             choices=["best_effort", "reliable"],
         ),
-        DeclareLaunchArgument("depth_speckle_min_pixels", default_value="0"),
-        DeclareLaunchArgument("depth_speckle_delta_m", default_value="0.05"),
-        DeclareLaunchArgument("depth_speckle_delta_px", default_value="1.25"),
+        DeclareLaunchArgument("depth_speckle_min_pixels", default_value=""),
+        DeclareLaunchArgument("depth_speckle_delta_m", default_value=""),
+        DeclareLaunchArgument("depth_speckle_delta_px", default_value=""),
         DeclareLaunchArgument("validation", default_value="false"),
         DeclareLaunchArgument("thread_cpu_timing", default_value="false"),
         DeclareLaunchArgument(

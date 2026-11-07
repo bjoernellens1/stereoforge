@@ -1,3 +1,4 @@
+#include "stereo_runtime_profiles.hpp"
 // Native capture -> Daxa -> selective host export -> ROS. No Python/SDK path.
 #include "stereo_estimator_metadata.hpp"
 #include <stereoforge/capture.hpp>
@@ -64,7 +65,7 @@ struct Options {
     bool diagnostics=false,cloud=false;unsigned cloud_stride=4,cloud_rate=15;std::string cloud_topic="/stereoforge/points";
     unsigned depth_speckle_min_pixels=0,guided_fill_px=0; double depth_speckle_delta_m=0.05; double depth_speckle_delta_px=1.25; double gpu_duty_budget_pct=0.0;
     unsigned min_depth_fps=5,max_depth_fps=60,consumer_min_depth_fps=5,max_depth_age_ms=250,downshift_ms=3000;
-    unsigned fps=60,disparities=128,warmup=5,max_frames=100000,qos_depth=1,min_disparity_bound=0,max_disparity_bound=0;int device_id=-1;double duration=600,subscriber_wait=0;bool validation=false,thread_cpu_timing=false,fast_mode=false,ultra_fast=false,refinement_subpixel=false,continuous_subpixel=false,adaptive_tiles=false,selective_repair=false,planar_recovery=false,verify_payload_checksum=false;
+    unsigned pipeline_slots=2,profile_margin=0;unsigned fps=60,disparities=128,warmup=5,max_frames=100000,qos_depth=1,min_disparity_bound=0,max_disparity_bound=0;int device_id=-1;double duration=600,subscriber_wait=0;bool validation=false,thread_cpu_timing=false,fast_mode=false,ultra_fast=false,refinement_subpixel=false,continuous_subpixel=false,adaptive_tiles=false,selective_repair=false,planar_recovery=false,verify_payload_checksum=false;
 };
 unsigned number(const std::string& s,unsigned lo,unsigned hi){size_t n=0;auto v=std::stoull(s,&n);if(n!=s.size()||v<lo||v>hi)throw std::invalid_argument("integer option outside bounds");return static_cast<unsigned>(v);}
 DepthRateConfig depth_rate_config(const Options& o) {
@@ -82,10 +83,11 @@ DepthRateConfig depth_rate_config(const Options& o) {
     return c;
 }
 Options parse(int argc,char** argv){
-    Options o;bool refinement_only_requested=false;
+    Options o;bool refinement_only_requested=false,named_profile_requested=false;unsigned profile_selections=0;std::string profile_override;
     for(int i=1;i<argc;++i){std::string a=argv[i];
-        if(a=="--help"){std::cout<<"--source camera|replay --manifest FILE --clock-map FILE --frame-id ID --run-id ID --trace FILE [--replay DIR --mode depth|rgb|depth-rgb --depth-rate 5|10|20|30|60|adaptive --min-depth-fps N --max-depth-fps N --consumer-min-depth-fps N --max-depth-age-ms N --downshift-ms N --rate-report FILE --capture-fps 15|30|60 --duration-seconds N --subscriber-wait-seconds N --max-frames N --warmup N --disparities N --stereo-variant packed-specialized|packed-specialized-overwrite|packed-specialized-overwrite-quad --pipeline full-sgm|experimental-refinement|experimental-dual-refinement --profile quality|exact-ultra|ultra-fast|v11-fast|mobile-balanced|v13-adaptive|adaptive --coarse-manifest FILE --device-id N --depth-topic TOPIC --rgb-topic TOPIC --reliability best_effort|reliable --depth-speckle-min-pixels N --depth-speckle-delta-m METRES --depth-speckle-delta-px PIXELS --cloud 0|1 --cloud-stride N --cloud-rate HZ --cloud-topic TOPIC --gpu-timing-report FILE --diagnostics 0|1 --diagnostic-prefix TOPIC --rig-session-id ID --validation --thread-cpu-timing]\nNon-quality profiles require an experimental refinement pipeline.\nRefinement-only switches, including explicit zero values, require an experimental refinement pipeline.\n";std::exit(0);}
+        if(a=="--help"){std::cout<<"--source camera|replay --manifest FILE --clock-map FILE --frame-id ID --run-id ID --trace FILE [--replay DIR --mode depth|rgb|depth-rgb --depth-rate 5|10|20|30|60|adaptive --min-depth-fps N --max-depth-fps N --consumer-min-depth-fps N --max-depth-age-ms N --downshift-ms N --rate-report FILE --capture-fps 15|30|60 --duration-seconds N --subscriber-wait-seconds N --max-frames N --warmup N --disparities N --stereo-variant packed-specialized|packed-specialized-overwrite|packed-specialized-overwrite-quad --pipeline full-sgm|experimental-refinement|experimental-dual-refinement --profile quality-reference|live-quality|quality|exact-ultra|ultra-fast|v11-fast|mobile-balanced|v13-adaptive|adaptive --coarse-manifest FILE --device-id N --depth-topic TOPIC --rgb-topic TOPIC --reliability best_effort|reliable --depth-speckle-min-pixels N --depth-speckle-delta-m METRES --depth-speckle-delta-px PIXELS --cloud 0|1 --cloud-stride N --cloud-rate HZ --cloud-topic TOPIC --gpu-timing-report FILE --diagnostics 0|1 --diagnostic-prefix TOPIC --rig-session-id ID --validation --thread-cpu-timing]\nLegacy refinement profiles require an experimental refinement pipeline. Named operating profiles are fixed unqualified development recipes.\nRefinement-only switches, including explicit zero values, require an experimental refinement pipeline.\n";std::exit(0);}
         if(a=="--validation"){o.validation=true;continue;}if(a=="--thread-cpu-timing"){o.thread_cpu_timing=true;continue;}if(a=="--verify-payload-checksum"){o.verify_payload_checksum=true;continue;}if(i+1>=argc)throw std::invalid_argument("missing option value");std::string v=argv[++i];
+        if((runtime_profile::controlled(a)||(a=="--pipeline"&&v!="full-sgm"))&&profile_override.empty())profile_override=a;
         if(a=="--source")o.source=v;else if(a=="--manifest")o.manifest=v;else if(a=="--replay")o.replay=v;else if(a=="--mode")o.mode=v;
         else if(a=="--clock-map")o.map=v;else if(a=="--frame-id")o.frame=v;else if(a=="--run-id")o.run=v;else if(a=="--trace")o.trace=v;
         else if(a=="--depth-topic")o.depth_topic=v;else if(a=="--rgb-topic")o.rgb_topic=v;else if(a=="--completed-depth-topic")o.completed_depth_topic=v;else if(a=="--completed-provenance-topic")o.completed_provenance_topic=v;else if(a=="--reliability")o.reliability=v;
@@ -107,7 +109,7 @@ Options parse(int argc,char** argv){
         else if(a=="--max-depth-age-ms")o.max_depth_age_ms=number(v,1,10'000);
         else if(a=="--downshift-ms")o.downshift_ms=number(v,1,60'000);
         else if(a=="--stereo-variant")o.stereo_variant=v;else if(a=="--pipeline")o.pipeline_mode=v;else if(a=="--coarse-manifest")o.coarse_manifest=v;
-        else if(a=="--profile"){if(v!="quality"&&v!="exact-ultra"&&v!="ultra-fast"&&v!="v11-fast"&&v!="mobile-balanced"&&v!="v13-adaptive"&&v!="adaptive")throw std::invalid_argument("invalid profile");o.profile=v;if(v!="quality")refinement_only_requested=true;
+        else if(a=="--profile"){if(!runtime_profile::named(v)&&v!="quality"&&v!="exact-ultra"&&v!="ultra-fast"&&v!="v11-fast"&&v!="mobile-balanced"&&v!="v13-adaptive"&&v!="adaptive")throw std::invalid_argument("invalid profile");o.profile=v;++profile_selections;named_profile_requested|=runtime_profile::named(v);if(v!="quality"&&!runtime_profile::named(v))refinement_only_requested=true;
             if(v=="exact-ultra"){o.descriptor_mode="ortho-hybrid";o.coarse_schedule="shared-census-sequential";o.coarse_right_mode="independent-sgm";o.fast_mode=true;o.ultra_fast=false;o.refinement_subpixel=true;o.selective_repair=true;}
             else if(v=="ultra-fast"){o.descriptor_mode="ortho-hybrid";o.coarse_schedule="shared-census-sequential";o.coarse_right_mode="left-aggregated-selection";o.fast_mode=true;o.ultra_fast=true;o.refinement_subpixel=true;o.selective_repair=true;}
             else if(v=="v11-fast"||v=="mobile-balanced"){o.descriptor_mode="ortho-hybrid";o.coarse_schedule="hierarchical-1to8-fallback";o.coarse_right_mode="independent-sgm";o.fast_mode=true;o.ultra_fast=true;o.refinement_subpixel=true;o.selective_repair=true;}
@@ -133,6 +135,16 @@ Options parse(int argc,char** argv){
         else if(a=="--subscriber-wait-seconds"){size_t n=0;o.subscriber_wait=std::stod(v,&n);if(n!=v.size()||!std::isfinite(o.subscriber_wait)||o.subscriber_wait<0||o.subscriber_wait>60)throw std::invalid_argument("invalid subscriber discovery timeout");}
         else throw std::invalid_argument("unknown option: "+a);
     }
+    if(named_profile_requested){
+        if(profile_selections!=1||!profile_override.empty()||refinement_only_requested||o.mode=="rgb")
+            throw std::invalid_argument("named profile fixes estimator and scheduling controls; remove overrides, repeated profiles or RGB-only mode");
+        const bool live=o.profile=="live-quality";
+        o.pipeline_mode="full-sgm";o.descriptor_mode="census";o.coarse_right_mode="independent-sgm";
+        o.coarse_schedule=live?"sequential":"shared-census-sequential";
+        o.stereo_variant=live?"packed-specialized-overwrite-quad":"packed-specialized";
+        o.depth_rate="60";o.min_depth_fps=live?30u:5u;o.consumer_min_depth_fps=live?30u:5u;
+        o.max_depth_age_ms=live?100u:250u;
+    }
     auto blank=[](const std::string& s){return s.empty()||std::all_of(s.begin(),s.end(),[](unsigned char c){return std::isspace(c)!=0;});};
     if((o.source!="camera"&&o.source!="replay")||(o.source=="replay")!=!o.replay.empty()||o.manifest.empty()||o.map.empty()||o.trace.empty()||
        blank(o.frame)||blank(o.run)||o.frame.size()>4096||o.run.size()>4096||
@@ -140,7 +152,7 @@ Options parse(int argc,char** argv){
        ((o.pipeline_mode!="full-sgm")!=!o.coarse_manifest.empty())||(o.pipeline_mode!="full-sgm"&&(o.mode=="rgb"||o.disparities%2!=0))||(o.stereo_variant!="packed-specialized"&&o.stereo_variant!="packed-specialized-overwrite"&&o.stereo_variant!="packed-specialized-overwrite-quad")||(o.reliability!="best_effort"&&o.reliability!="reliable")||
        o.depth_topic.empty()||o.rgb_topic.empty()||o.completed_depth_topic.empty()||o.completed_provenance_topic.empty()||o.depth_topic.front()!='/'||o.rgb_topic.front()!='/'||o.completed_depth_topic.front()!='/'||o.completed_provenance_topic.front()!='/'||
        o.completed_depth_topic==o.depth_topic||o.completed_depth_topic==o.rgb_topic||o.completed_provenance_topic==o.depth_topic||o.completed_provenance_topic==o.rgb_topic||o.completed_provenance_topic==o.completed_depth_topic||(o.mode=="depth-rgb"&&o.depth_topic==o.rgb_topic))throw std::invalid_argument("invalid publisher configuration");
-    if(o.pipeline_mode=="full-sgm"&&o.profile!="quality")throw std::invalid_argument("refinement profile requires an experimental refinement pipeline");
+    if(o.pipeline_mode=="full-sgm"&&o.profile!="quality"&&!runtime_profile::named(o.profile))throw std::invalid_argument("refinement profile requires an experimental refinement pipeline");
     if(o.pipeline_mode=="full-sgm"&&refinement_only_requested)throw std::invalid_argument("refinement-only options require an experimental refinement pipeline");
     if(o.guided_fill_px&&(o.mode!="depth-rgb"||!o.planar_recovery))throw std::invalid_argument("guided fill requires depth-rgb and planar recovery");
     if(!o.rate_report.empty()&&o.rate_report==o.trace)throw std::invalid_argument("rate report must differ from ROS delivery trace");
@@ -207,7 +219,7 @@ struct GpuTimingSample {int64_t source_id;uint64_t capture_ns,producer_ticket,pu
 struct CloudSample {uint64_t source_id,capture_ns,ingress_ns,submit_ticket,copy_begin_ns,copy_end_ns,serialize_begin_ns,serialize_end_ns,serialized_bytes,publish_begin_ns,publish_end_ns;double generation_gpu_ms,export_gpu_ms;};
 struct Pending {DaxaPointCloud::Frame cloud;DaxaDepthPipeline::Frame depth;DaxaFrame full;DaxaRefinement::Frame refined;DaxaFrame rgb;DaxaHostExport::Frame output,completed_output;CaptureLease capture;RosCaptureStamp stamp;std::uint64_t producer_observed=0,producer_enqueue_begin=0,producer_enqueue_end=0,export_enqueue_end=0;};
 void initialize_image(sensor_msgs::msg::Image& image,unsigned w,unsigned h,const char* encoding,const std::string& frame,unsigned elem_bytes=4){image.width=w;image.height=h;image.step=w*elem_bytes;image.encoding=encoding;image.is_bigendian=0;image.header.frame_id=frame;image.data.resize(size_t(w)*h*elem_bytes);}
-void run(const Options& o, OutputFile& file){
+void run(Options o, OutputFile& file){
     if constexpr(std::endian::native!=std::endian::little)throw std::runtime_error("ROS image export requires a little-endian host");
     std::unique_ptr<OutputFile> cloud_report;if(o.cloud)cloud_report=std::make_unique<OutputFile>(o.trace+".cloud.json");
     std::vector<CloudSample> cloud_samples;if(o.cloud)cloud_samples.reserve(o.max_frames);
@@ -218,6 +230,14 @@ void run(const Options& o, OutputFile& file){
     auto mapping_document=load_map(o.map);auto mapping=mapping_from(mapping_document);
     auto host_clock_id=clock_id();
     auto fixture=load_daxa_preprocess_fixture(o.manifest);auto& maps=fixture.rectification;maps.validate(2);
+    if(runtime_profile::named(o.profile)){
+        const auto metric=maps.metric_calibration();
+        const auto recipe=runtime_profile::geometry(o.profile,maps.eye_width,maps.source_height,maps.width,maps.height,
+            double(metric.fx)*double(metric.baseline_m),metric.cx_offset);
+        o.disparities=recipe.disparities;o.pipeline_slots=recipe.slots;o.profile_margin=recipe.margin_px;
+        o.fps=recipe.fps;o.depth_rate=std::to_string(recipe.fps);o.max_depth_fps=recipe.fps;
+        depth_rate_config(o);
+    }
     const bool dual=o.pipeline_mode=="experimental-dual-refinement";
     const bool experimental=o.pipeline_mode!="full-sgm";
     DaxaRectification coarse_maps;
@@ -297,7 +317,7 @@ void run(const Options& o, OutputFile& file){
     std::unique_ptr<DaxaPointCloud> cloud_generator;
     DaxaRefinementConfig refinement_config;refinement_config.disparities=o.disparities;refinement_config.borrow_full_frame=true;refinement_config.ortho_hybrid=(o.descriptor_mode=="ortho-hybrid");refinement_config.fast_mode=o.fast_mode;refinement_config.ultra_fast=o.ultra_fast;refinement_config.radius=o.ultra_fast?2u:4u;refinement_config.subpixel=o.refinement_subpixel?1u:0u;refinement_config.continuous_subpixel=o.continuous_subpixel;refinement_config.adaptive_tiles=o.adaptive_tiles;refinement_config.min_disparity_bound=o.min_disparity_bound;refinement_config.max_disparity_bound=o.max_disparity_bound;refinement_config.selective_repair=o.selective_repair;refinement_config.planar_recovery=o.planar_recovery;refinement_config.allow_derived_coarse=(o.coarse_right_mode=="left-aggregated-selection");
     uint32_t coarse_scale=(experimental&&maps.width==coarse_maps.width*4)?4u:2u;
-    DaxaDepthConfig depth_config{StereoConfig{experimental?coarse_maps.width:maps.width,experimental?coarse_maps.height:maps.height,experimental?o.disparities/coarse_scale:o.disparities,4,8,32,true,o.descriptor_mode=="ortho-hybrid"},1.f,2,32};
+    DaxaDepthConfig depth_config{StereoConfig{experimental?coarse_maps.width:maps.width,experimental?coarse_maps.height:maps.height,experimental?o.disparities/coarse_scale:o.disparities,4,8,32,true,o.descriptor_mode=="ortho-hybrid"},1.f,o.pipeline_slots,32};
     depth_config.stereo_schedule=o.coarse_schedule=="sequential"?DaxaDepthStereoSchedule::Sequential:o.coarse_schedule=="paired-per-path"?DaxaDepthStereoSchedule::PairedPerPath:o.coarse_schedule=="layered-per-path"?DaxaDepthStereoSchedule::LayeredPerPath:o.coarse_schedule=="hierarchical-1to8-fallback"?DaxaDepthStereoSchedule::Hierarchical1to8Selective1to4:DaxaDepthStereoSchedule::SharedCensusSequential;
     depth_config.right_reference_mode=o.coarse_right_mode=="left-aggregated-selection"?DaxaRightReferenceMode::LeftAggregatedSelection:DaxaRightReferenceMode::IndependentSGM;
     depth_config.stereo_variant=o.stereo_variant=="packed-specialized-overwrite-quad"?DaxaSgmVariant::PackedSpecializedOverwriteQuad:(o.stereo_variant=="packed-specialized-overwrite"?DaxaSgmVariant::PackedSpecializedOverwrite:DaxaSgmVariant::PackedSpecialized);
@@ -310,7 +330,7 @@ void run(const Options& o, OutputFile& file){
         else{exporter=std::make_unique<DaxaHostExport>(context,prototype.observations(),measured_export);if(o.cloud)cloud_generator=std::make_unique<DaxaPointCloud>(context,prototype.observations(),DaxaPointCloudConfig{2,o.cloud_stride});prototype.wait();}prototype={};pair={};pipeline->collect();if(dual)dual_preprocess->collect();}
     else{preprocess=std::make_unique<DaxaPreprocess>(maps,2,context);auto prototype=preprocess->enqueue(first);exporter=std::make_unique<DaxaHostExport>(context,prototype,DaxaHostExportConfig{2,false,true});prototype.wait();prototype={};preprocess->collect_completed_sources();}
     first={};
-    RosDeliveryTrace trace(size_t(o.max_frames)*(unsigned(depth)+unsigned(rgb)+(completed_exporter?2u:0u))+2);std::array<Pending,2> pending{};Counters counters{};
+    RosDeliveryTrace trace(size_t(o.max_frames)*(unsigned(depth)+unsigned(rgb)+(completed_exporter?2u:0u))+2);std::vector<Pending> pending(o.pipeline_slots);Counters counters{};
     std::unique_ptr<DepthSpeckleFilter> depth_speckle;
     std::unique_ptr<DepthSpeckleFilter> completed_speckle;
     if(depth&&o.depth_speckle_min_pixels){
@@ -343,10 +363,22 @@ void run(const Options& o, OutputFile& file){
         stereoforge::native_estimator::shader_hashes(DaxaStereo::shader_directory(),"daxa-stereo-"),
         stereoforge::native_estimator::shader_hashes(DaxaDepthPipeline::shader_directory(),"daxa-depth-"),SF_DAXA_COMPILER_SHA256);
     else if(depth)estimator={{"status","unavailable"},{"reason",experimental?"experimental_refinement_not_qualified":"experimental_variant_not_qualified_for_canonical_estimator_identity"}};
+    const bool named_profile=runtime_profile::named(o.profile);
+    json profile_metadata={{"requested",o.profile},{"recipe_revision",named_profile?json(1):json(nullptr)},
+        {"selection_status",!named_profile?"custom_or_legacy":o.profile=="live-quality"?"unpromoted_live_candidate":"unpromoted_wide_search_reference_baseline"},
+        {"qualification",{{"status","unavailable"},{"reason","physical quality, scene confidence intervals and controlled live acceptance are not qualified"}}},
+        {"original_width",maps.eye_width},{"original_height",maps.source_height},{"rectified_width",maps.width},{"rectified_height",maps.height},{"native_shape_checked",named_profile},{"original_calibration_identity",maps.original_identity},{"rectified_calibration_identity",maps.rectified_identity},
+        {"target_axial_range_m",named_profile?json::array({0.5,3.0}):json(nullptr)},
+        {"search_margin_px",named_profile?json(o.profile_margin):json(nullptr)},
+        {"effective",{{"pipeline",o.pipeline_mode},{"disparities",depth_config.stereo.disparities},{"paths",depth_config.stereo.paths},
+            {"p1",depth_config.stereo.p1},{"p2",depth_config.stereo.p2},{"subpixel",depth_config.stereo.subpixel},{"lr_tolerance",depth_config.lr_tolerance},
+            {"descriptor_mode",o.descriptor_mode},{"stereo_variant",o.stereo_variant},{"stereo_schedule",o.coarse_schedule},{"right_reference_mode",o.coarse_right_mode},
+            {"slots",depth_config.slots},{"pending_slots",o.pipeline_slots},{"export_slots",measured_export.slots},{"cloud_slots",o.cloud?json(2):json(nullptr)},{"capture_fps",o.fps},{"depth_rate",o.depth_rate}}}};
+    if(!depth)profile_metadata["effective"]=nullptr;
     json implementation={{"name","StereoForge"},{"version","native_ros_yuyv_v1"},
         {"commit",{{"status","unavailable"},{"reason","build commit is not attested"}}},
         {"device",{{"status","available"},{"value",json::parse(context->report())}}},
-        {"settings",{{"mode",o.mode},{"depth_rate",o.depth_rate},{"capture_fps",o.fps},
+        {"settings",{{"operating_profile",profile_metadata},{"mode",o.mode},{"depth_rate",o.depth_rate},{"capture_fps",o.fps},
             {"min_depth_fps",o.min_depth_fps},{"max_depth_fps",o.max_depth_fps},
             {"consumer_min_depth_fps",o.consumer_min_depth_fps},{"max_depth_age_ms",o.max_depth_age_ms},
             {"downshift_ms",o.downshift_ms},{"depth_speckle_min_pixels",o.depth_speckle_min_pixels},{"depth_speckle_delta_m",o.depth_speckle_delta_m},{"depth_speckle_delta_px",o.depth_speckle_delta_px},{"pipeline",o.pipeline_mode},{"descriptor_mode",o.descriptor_mode},{"stereo_schedule",stereoforge::native_estimator::schedule_name(depth_config.stereo_schedule)},{"coarse_manifest_sha256",experimental?daxa_preprocess_file_sha256(o.coarse_manifest):"not_executed"},{"stereo_variant",depth?DaxaStereo::variant_name(depth_config.stereo_variant):"not_executed"},{"effective_estimator",estimator},{"validation_requested",o.validation},{"subscriber_wait_seconds",o.subscriber_wait},
@@ -397,7 +429,7 @@ void run(const Options& o, OutputFile& file){
         for(const char* field:{"source_id","capture_timestamp_ns","host_ingress_timestamp_ns","mapped_header_stamp_ns","image_publish_calls_completed_ns","diagnostic_pack_ns"})frame_template[field]=std::string(RosDepthDiagnosticMetadata::placeholder());
         diagnostic_metadata=std::make_unique<RosDepthDiagnosticMetadata>(frame_template.dump());metadata_message.data=std::string(diagnostic_metadata->template_bytes());
     }
-    json config={{"thread_cpu_timing",o.thread_cpu_timing},{"clock_id",host_clock_id},{"source_mode",o.source},{"nominal_hz",o.fps},{"slots",2},{"capture_queue_capacity",2},{"outputs",outputs},{"qos",qos},
+    json config={{"thread_cpu_timing",o.thread_cpu_timing},{"clock_id",host_clock_id},{"source_mode",o.source},{"nominal_hz",o.fps},{"slots",o.pipeline_slots},{"capture_queue_capacity",2},{"outputs",outputs},{"qos",qos},
         {"implementation",{{"status","available"},{"value",implementation}}},{"calibration_identity",maps.rectified_identity},{"effective_estimator",estimator},
         {"view_profile",{{"status","unavailable"},{"reason","view is not executed"}}},{"clock_mapping",mapping_document},{"capture_counters",capture_json(baseline)},
         {"memory",{{"producer_requested_bytes",dual?json(nullptr):json(depth?(pipeline->requested_combined_buffer_bytes()+(experimental?maps.requested_bytes(2)+refinement->requested_buffer_bytes():0)):maps.requested_bytes(2))},{"export_requested_bytes",exporter->requested_bytes()},
@@ -591,7 +623,7 @@ void run(const Options& o, OutputFile& file){
             retire_pending(false);
             if(trace_full)break;
             // Replay is lossless: leave the next input queued until a slot retires.
-            // Live capture still dequeues and drops stale inputs when both slots are busy.
+            // Live capture still dequeues and drops stale inputs when all slots are busy.
             if(o.source=="replay"&&count_pending()==pending.size()){
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));continue;
             }

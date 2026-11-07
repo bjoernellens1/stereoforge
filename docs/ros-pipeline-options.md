@@ -1,7 +1,7 @@
 # ROS pipeline option binding
 
 The native publisher validates the final option set before creating a trace,
-initializing ROS, or opening capture. Non-default `--profile` presets require
+initializing ROS, or opening capture. Legacy refinement `--profile` presets require
 `experimental-refinement` or `experimental-dual-refinement` and a compatible
 coarse manifest.
 
@@ -40,8 +40,8 @@ not change the default experimental recipe.
 
 Keep `stereoforge_launch_options.py` beside both launch files when copying the
 source launch entry points. Existing depth/RGB topics and separate completed
-output topics are unchanged. The requested qualified `quality-reference` and
-`live-quality` profiles remain a separate unfinished requirement.
+output topics are unchanged. Named development recipes are described below;
+qualified accuracy/frontier/live promotion remains unfinished.
 
 ## Effective estimator identity
 
@@ -69,3 +69,54 @@ for quality scoring. That identity stays unavailable: it cannot qualify a
 quality/live estimator match. Canonical matching additionally requires explicit
 packed-specialized settings on both executed implementations. This preserves
 the current whitelist and grants no quality or latency promotion.
+
+## Named operating profiles
+
+Select `--profile quality-reference` or `--profile live-quality` on the native
+publisher, or `profile:=quality-reference` / `profile:=live-quality` on the
+publisher, standard or camera launch entry point. Empty launch `profile`
+preserves the previous custom/experimental defaults. Depth/RGB topics and
+full-resolution geometry stay unchanged.
+
+| Recipe | Native grid | Disparities | Matcher | Depth/pending slots | Capture and offered depth rate |
+|---|---|---:|---|---:|---:|
+| quality-reference | 1280×720 | 256 | Census/4, shared-Census independent references | 2 | 60 Hz |
+| quality-reference | 1920×1080 | 288 | Census/4, shared-Census independent references | 1 | 30 Hz |
+| live-quality | 1280×720 | 128 | Census/4, sequential independent overwrite-quad | 2 | 60 Hz |
+
+Both use P1=8/P2=32, subpixel stereo, LR tolerance1pixel and current-frame
+measured output. Host export and optional cloud retain their existing minimum
+2bounded slots, even for the single depth/pending slot at1080p; producer leases
+retire before that slot is reused. Metadata distinguishes each capacity.
+
+Names identify **unpromoted development recipes**. Wide search is a reference
+baseline, not a claim of improved completeness. Retained D256 near-field and
+8-path thin/edge regressions remain rejected; no threshold or default matcher
+was promoted. The live recipe has unchanged-output development parity and
+historical uncontrolled rate evidence, not controlled live/physical acceptance.
+Its fixed60Hz admission request and30Hz minimum consumer policy do not guarantee
+30fresh outputs/s. The configured freshness bound is100ms.
+
+Profiles require matching original/rectified native shape and the manifest's
+resolution-specific calibration. They never resize inputs or outputs. Geometry
+admission checks calibrated hypotheses throughout axial0.5–3m; reference mode
+also requires16pixels of near search margin. Unsupported shapes/calibration
+ranges reject before capture/GPU construction. This verifies configuration
+arithmetic, not factory calibration provenance or physical accuracy.
+
+Named recipes reject explicit estimator, filtering and scheduling overrides,
+even matching/disabled values, so their meaning cannot depend on argv order.
+Use the legacy/custom route when changing these controls. Explicit
+`--pipeline full-sgm` is allowed; refinement routes, repeated/mixed profile
+selections and RGB-only mode reject. Output, cloud/debug, topic, run and
+validation controls remain available. Launch defaults stay empty until the
+shared resolver chooses a custom route, preventing hidden overrides; the camera
+wrapper forwards the same unset state.
+
+`implementation.settings.operating_profile` records requested name, recipe
+revision, selection status, effective parameters/capacities/rates, original and
+rectified grids and calibration identities. Qualification is explicitly
+unavailable. Experimental live canonical identity remains unavailable; source
+age, rig/clock and uncertainty qualifications remain separate. D288 canonical
+configuration identity is accepted only for its supported sequential/shared
+schedules. Neither configuration identity nor these names grant promotion.

@@ -16,6 +16,7 @@ from launch.substitutions import LaunchConfiguration
 
 
 _OPTIONAL_VALUE_ARGUMENTS = (
+    ("profile", "--profile"),
     ("mode", "--mode"),
     ("device_serial", "--device-serial"),
     ("device_id", "--device-id"),
@@ -216,6 +217,8 @@ def generate_launch_description():
         repo_root / "configs" / "cameras" / "zed2" / "clock_maps" / "SN26041639-clock-map.json"
     )
     arguments = [
+        DeclareLaunchArgument("profile", default_value="", choices=["", "quality-reference", "live-quality"],
+                              description="Fixed unqualified development recipe; empty preserves custom defaults."),
         DeclareLaunchArgument(
             "source",
             default_value="camera",
@@ -252,8 +255,8 @@ def generate_launch_description():
             default_value="",
             description="Replay directory; required when source=replay.",
         ),
-        DeclareLaunchArgument("capture_fps", default_value="60"),
-        DeclareLaunchArgument("depth_rate", default_value="60"),
+        DeclareLaunchArgument("capture_fps", default_value=""),
+        DeclareLaunchArgument("depth_rate", default_value=""),
         DeclareLaunchArgument(
             "mode",
             default_value="depth-rgb",
@@ -261,18 +264,18 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             "stereo_variant",
-            default_value="packed-specialized",
-            choices=["packed-specialized", "packed-specialized-overwrite", "packed-specialized-overwrite-quad"],
+            default_value="",
+            choices=["", "packed-specialized", "packed-specialized-overwrite", "packed-specialized-overwrite-quad"],
         ),
         DeclareLaunchArgument(
             "disparities",
-            default_value="128",
+            default_value="",
             description="Stereo disparity search range (e.g. 128 or 256).",
         ),
         DeclareLaunchArgument(
             "pipeline",
-            default_value="experimental-dual-refinement",
-            choices=["full-sgm", "experimental-refinement", "experimental-dual-refinement"],
+            default_value="",
+            choices=["", "full-sgm", "experimental-refinement", "experimental-dual-refinement"],
         ),
         DeclareLaunchArgument(
             "coarse_manifest",
@@ -310,11 +313,11 @@ def generate_launch_description():
             "completed_provenance_topic",
             default_value="/stereoforge/depth_completed_provenance",
         ),
-        DeclareLaunchArgument("depth_speckle_min_pixels", default_value="0"),
+        DeclareLaunchArgument("depth_speckle_min_pixels", default_value=""),
         DeclareLaunchArgument("guided_fill_px", default_value=""),
         DeclareLaunchArgument("duration_seconds", default_value="3600"),
-        DeclareLaunchArgument("depth_speckle_delta_m", default_value="0.05"),
-        DeclareLaunchArgument("depth_speckle_delta_px", default_value="1.25"),
+        DeclareLaunchArgument("depth_speckle_delta_m", default_value=""),
+        DeclareLaunchArgument("depth_speckle_delta_px", default_value=""),
         DeclareLaunchArgument(
             "reliability",
             default_value="best_effort",

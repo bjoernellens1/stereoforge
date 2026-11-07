@@ -61,3 +61,23 @@ def test_hierarchical_identity_requires_native_domain(key, value):
     profile[key]=value
     with pytest.raises(ValueError):
         validate_full_sgm_profile(profile)
+
+
+@pytest.mark.parametrize('schedule',['sequential','shared-census-sequential'])
+def test_native_d288_profile_is_explicitly_supported(schedule):
+    profile=deepcopy(PROFILE)
+    profile.update(width=1920,height=1080,disparities=288,stereo_schedule=schedule)
+    assert validate_full_sgm_profile(profile)==profile
+
+
+@pytest.mark.parametrize('schedule',['paired-per-path','layered-per-path','hierarchical-1to8-fallback'])
+def test_native_d288_profile_rejects_unsupported_schedule(schedule):
+    profile=deepcopy(PROFILE)
+    profile.update(disparities=288,stereo_schedule=schedule)
+    with pytest.raises(ValueError):validate_full_sgm_profile(profile)
+
+
+@pytest.mark.parametrize('disparities',[257,287,289])
+def test_native_wide_profile_rejects_uncompiled_disparity_count(disparities):
+    profile=deepcopy(PROFILE);profile['disparities']=disparities
+    with pytest.raises(ValueError):validate_full_sgm_profile(profile)

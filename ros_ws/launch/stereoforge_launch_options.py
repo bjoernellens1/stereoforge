@@ -19,9 +19,34 @@ EXPERIMENTAL_STEREO_DEFAULTS = {
 }
 
 
+CUSTOM_DEFAULTS = {
+    "disparities": "128", "stereo_variant": "packed-specialized",
+    "capture_fps": "60", "depth_rate": "60",
+    "depth_speckle_min_pixels": "0", "depth_speckle_delta_m": "0.05",
+    "depth_speckle_delta_px": "1.25",
+}
+NAMED_CONTROL_KEYS = (set(REFINEMENT_DEFAULTS) | set(EXPERIMENTAL_STEREO_DEFAULTS) |
+    set(CUSTOM_DEFAULTS) | {"coarse_manifest", "gpu_duty_budget_pct", "min_depth_fps",
+    "max_depth_fps", "consumer_min_depth_fps", "max_depth_age_ms", "downshift_ms"})
+
+
 def resolve_pipeline_options(values):
     """Return a copy; empty launch values select defaults for the chosen pipeline."""
     resolved = dict(values)
+    profile = resolved.get("profile", "")
+    if profile:
+        if profile not in ("quality-reference", "live-quality"):
+            raise RuntimeError("unknown named profile: " + profile)
+        supplied = [key for key in sorted(NAMED_CONTROL_KEYS) if resolved.get(key, "") != ""]
+        if supplied or resolved.get("pipeline", "") not in ("", "full-sgm") or resolved.get("mode") == "rgb":
+            raise RuntimeError("named profile fixes estimator and scheduling controls; remove overrides or RGB-only mode")
+        resolved["pipeline"] = "full-sgm"
+        return resolved
+    if not resolved.get("pipeline"):
+        resolved["pipeline"] = "experimental-dual-refinement"
+    for key, default in CUSTOM_DEFAULTS.items():
+        if key in resolved and not resolved[key]:
+            resolved[key] = default
     pipeline = resolved["pipeline"]
     if pipeline == "full-sgm":
         supplied = [name for name in REFINEMENT_DEFAULTS if resolved.get(name, "") != ""]

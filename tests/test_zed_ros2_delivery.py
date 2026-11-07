@@ -428,3 +428,26 @@ def test_host_ingress_latency_rejects_conflicting_or_repeated_source_identity():
     row = summarize_delivery(records, policy=POLICY)['runs'][0]['outputs']['depth']
     assert row['host_ingress_to_arrival_ms'] is None
     assert row['host_ingress_to_arrival_status'] == 'ambiguous_source_identity'
+
+
+def test_single_pipeline_pending_slot_is_a_supported_delivery_contract():
+    from benchmarks.zed_comparison.ros2_delivery import _start
+    start=traces()[0];start['config']['slots']=1
+    _start(start)
+
+
+@pytest.mark.parametrize('slots',[0,3,True])
+def test_delivery_pipeline_slots_remain_bounded(slots):
+    from benchmarks.zed_comparison.ros2_delivery import _start
+    start=traces()[0];start['config']['slots']=slots
+    with pytest.raises(ValueError,match='source/ring'):_start(start)
+
+
+@pytest.mark.parametrize('kind',['published','stop'])
+def test_delivery_pending_count_cannot_exceed_declared_single_slot(kind):
+    from benchmarks.zed_comparison.ros2_delivery import _frame, _stop
+    records=traces();start=records[0];start['config']['slots']=1
+    event=next(x for x in records if x['role']=='publisher' and x['kind']==kind)
+    event['pending']=2
+    with pytest.raises(ValueError):
+        (_frame if kind=='published' else _stop)(event,start)

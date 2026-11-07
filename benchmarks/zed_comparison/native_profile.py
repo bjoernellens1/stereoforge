@@ -16,7 +16,11 @@ def validate_full_sgm_profile(profile):
     s._require(profile['stereo_schedule'] in ('sequential','paired-per-path','layered-per-path',
                'shared-census-sequential','hierarchical-1to8-fallback'), 'unsupported stereo schedule')
     for key in ('width','height'): s._integer(profile[key],key,5,8192)
-    s._integer(profile['disparities'],'disparities',1,256)
+    s._integer(profile['disparities'],'disparities',1,288)
+    s._require(profile['disparities'] <= 256 or profile['disparities'] == 288, 'unsupported native disparity count')
+    if profile['disparities'] == 288:
+        s._require(profile['stereo_schedule'] in ('sequential','shared-census-sequential'),
+                   'unsupported D288 stereo schedule')
     if profile['stereo_schedule'] == 'hierarchical-1to8-fallback':
         s._require(all(profile[k] >= 8 and profile[k] % 2 == 0 for k in ('width','height')) and
                    16 <= profile['disparities'] <= 64, 'invalid hierarchical stereo domain')
