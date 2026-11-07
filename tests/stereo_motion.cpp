@@ -116,4 +116,31 @@ static void central_outliers_do_not_hide_observable_consensus() {
     auto r=estimate_stereo_motion(p);
     check(r.status==StereoMotionStatus::Tracked&&r.inliers.size()==60,"central outliers hid observable consensus");
 }
-int main() { try { recovered();failures();static_and_planar();general_rotations_and_noise();invalid_configurations();bearing_refinement();central_outliers_do_not_hide_observable_consensus();std::cout<<"stereo motion contracts passed\n"; } catch(std::exception const& e) { std::cerr<<e.what()<<'\n';return 1; } }
+static void noise_dependent_consensus_gate() {
+    struct Case { double residual, sigma, floor; bool tracked; };
+    for (auto c : {Case{.0149,.005,.003,true}, Case{.0151,.005,.003,false},
+                   Case{.0151,.010,.003,true}, Case{.0089,.002,.003,true},
+                   Case{.0091,.002,.003,false}, Case{.0151,.005,.010,true},
+                   Case{.0299,.020,.003,true}, Case{.0301,.020,.003,false}}) {
+        std::vector<StereoMetricTrack> p;
+        // Each previous landmark has two observations separated by 2*residual.
+        // Above the gate, no rigid prediction can admit both: support is at
+        // most 40/80, below the explicitly configured 65% majority.
+        for (int y=0;y<4;++y) for (int x=0;x<10;++x) for (double sign : {-1.,1.}) {
+            double px=(x-4.5)*.08,py=(y-1.5)*.09;
+            p.push_back({{px,py,1.6},{px,py,1.6+sign*c.residual},c.sigma});
+        }
+        StereoMotionConfig cfg;
+        cfg.min_inlier_fraction=.65;cfg.max_residual_m=.03;cfg.noise_floor_m=c.floor;
+        auto result=estimate_stereo_motion(p,cfg);
+        if (c.tracked) {
+            check(result.status==StereoMotionStatus::Tracked&&result.inliers.size()==80,
+                  "noise-dependent consensus rejected supported identity motion");
+            for (int i=0;i<16;++i)
+                check(std::abs(result.current_from_previous[i]-(i%5==0?1.:0.))<1e-9,
+                      "symmetric landmark noise biased identity motion");
+        } else check(result.status==StereoMotionStatus::NoConsensus,
+                     "noise-dependent consensus gate admitted a split majority");
+    }
+}
+int main() { try { recovered();failures();static_and_planar();general_rotations_and_noise();invalid_configurations();bearing_refinement();central_outliers_do_not_hide_observable_consensus();noise_dependent_consensus_gate();std::cout<<"stereo motion contracts passed\n"; } catch(std::exception const& e) { std::cerr<<e.what()<<'\n';return 1; } }

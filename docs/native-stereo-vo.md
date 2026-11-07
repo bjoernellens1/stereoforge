@@ -44,6 +44,16 @@ and temporal qualification flags remain false. Stability and synthetic controls
 do not qualify accuracy, timing or moving-object rejection. A dominant moving
 object can be indistinguishable from camera motion.
 
+Metric consensus compares the radial point-difference residual with
+`min(max_residual_m, 3 * max(track.sigma_m, noise_floor_m))` for each track.
+The default 30 mm `max_residual_m` is a ceiling: the tracker's assumed 5 mm
+noise and 3 mm floor give an effective **15 mm** gate. Counts below the 30 mm
+ceiling therefore do not establish an admissible metric consensus. The assumed
+noise, its floor and the residual ceiling are not calibrated depth uncertainty;
+neither repeated identical depth nor a successful pose fit establishes that
+calibration. Noise calibration requires residuals against independent known
+geometry, with systematic error kept separate from temporal scatter.
+
 ## Motion-model and image-support guard
 
 The default `DaxaStereoVoConfig::guard` checks primary inlier support in both
