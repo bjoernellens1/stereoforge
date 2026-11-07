@@ -5,6 +5,11 @@ import os
 import sys
 from pathlib import Path
 
+_LAUNCH_DIR = str(Path(__file__).resolve().parent)
+if _LAUNCH_DIR not in sys.path:
+    sys.path.insert(0, _LAUNCH_DIR)
+from stereoforge_launch_options import resolve_pipeline_options
+
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, ExecuteProcess, OpaqueFunction
 from launch.substitutions import LaunchConfiguration
@@ -98,6 +103,7 @@ def _launch_standard(context):
             "person_refine",
         )
     }
+    values = resolve_pipeline_options(values)
     if values["pipeline"] != "full-sgm" and not values["coarse_manifest"]:
         default_coarse = (
             repo_root
@@ -275,28 +281,28 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             "descriptor_mode",
-            default_value="ortho-hybrid",
+            default_value="",
             choices=["", "census", "ortho-hybrid"],
         ),
-        DeclareLaunchArgument("fast_mode", default_value="1"),
-        DeclareLaunchArgument("ultra_fast", default_value="1"),
+        DeclareLaunchArgument("fast_mode", default_value=""),
+        DeclareLaunchArgument("ultra_fast", default_value=""),
         DeclareLaunchArgument(
             "coarse_schedule",
-            default_value="shared-census-sequential",
+            default_value="",
             choices=["", "sequential", "paired-per-path", "layered-per-path", "shared-census-sequential"],
         ),
         DeclareLaunchArgument(
             "coarse_right_reference_mode",
-            default_value="left-aggregated-selection",
+            default_value="",
             choices=["", "independent-sgm", "left-aggregated-selection"],
         ),
-        DeclareLaunchArgument("refinement_subpixel", default_value="1"),
-        DeclareLaunchArgument("continuous_subpixel", default_value="0"),
-        DeclareLaunchArgument("adaptive_tiles", default_value="1"),
-        DeclareLaunchArgument("min_disparity_bound", default_value="0"),
-        DeclareLaunchArgument("max_disparity_bound", default_value="0"),
-        DeclareLaunchArgument("selective_repair", default_value="1"),
-        DeclareLaunchArgument("planar_recovery", default_value="1"),
+        DeclareLaunchArgument("refinement_subpixel", default_value=""),
+        DeclareLaunchArgument("continuous_subpixel", default_value=""),
+        DeclareLaunchArgument("adaptive_tiles", default_value=""),
+        DeclareLaunchArgument("min_disparity_bound", default_value=""),
+        DeclareLaunchArgument("max_disparity_bound", default_value=""),
+        DeclareLaunchArgument("selective_repair", default_value=""),
+        DeclareLaunchArgument("planar_recovery", default_value=""),
         DeclareLaunchArgument(
             "completed_depth_topic", default_value="/stereoforge/depth_completed"
         ),
@@ -305,7 +311,7 @@ def generate_launch_description():
             default_value="/stereoforge/depth_completed_provenance",
         ),
         DeclareLaunchArgument("depth_speckle_min_pixels", default_value="0"),
-        DeclareLaunchArgument("guided_fill_px", default_value="0"),
+        DeclareLaunchArgument("guided_fill_px", default_value=""),
         DeclareLaunchArgument("duration_seconds", default_value="3600"),
         DeclareLaunchArgument("depth_speckle_delta_m", default_value="0.05"),
         DeclareLaunchArgument("depth_speckle_delta_px", default_value="1.25"),

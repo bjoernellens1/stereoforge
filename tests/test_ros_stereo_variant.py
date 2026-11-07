@@ -83,3 +83,45 @@ def test_delivery_evaluator_preserves_unavailable_estimator():
     events[0]['config']['effective_estimator']=unavailable
     result=summarize_delivery(events,policy=POLICY)
     assert result['runs'][0]['effective_estimator']==unavailable
+
+
+REFINEMENT_OPTIONS = (
+    '--fast-mode', '--ultra-fast', '--refinement-subpixel', '--continuous-subpixel',
+    '--adaptive-tiles', '--min-disparity-bound', '--max-disparity-bound',
+    '--selective-repair', '--planar-recovery', '--guided-fill-px',
+)
+
+
+@pytest.mark.parametrize('option', REFINEMENT_OPTIONS)
+@pytest.mark.parametrize('value', ['0', '1'])
+def test_refinement_switch_requires_experimental_pipeline(publisher_parser,option,value):
+    result=subprocess.run([str(publisher_parser),*PUBLISHER_ARGS,option,value],capture_output=True,text=True)
+    assert result.returncode==2
+    assert 'refinement-only options require an experimental refinement pipeline' in result.stderr
+
+
+@pytest.mark.parametrize('pipeline', ['experimental-refinement','experimental-dual-refinement'])
+@pytest.mark.parametrize('option', REFINEMENT_OPTIONS)
+@pytest.mark.parametrize('value', ['0','1'])
+def test_refinement_switch_admitted_by_experimental_pipeline(publisher_parser,pipeline,option,value):
+    extra=['--pipeline',pipeline,'--coarse-manifest','coarse',option,value]
+    if option=='--guided-fill-px' and value=='1':extra+=['--mode','depth-rgb','--planar-recovery','1']
+    result=subprocess.run([str(publisher_parser),*PUBLISHER_ARGS,*extra],capture_output=True,text=True)
+    assert (result.stdout,result.returncode)==('packed-specialized',0)
+
+
+@pytest.mark.parametrize('mode,planar', [('depth','1'),('depth-rgb','0')])
+def test_enabled_guided_fill_requires_its_rgb_and_completed_inputs(publisher_parser,mode,planar):
+    args=[*PUBLISHER_ARGS,'--pipeline','experimental-refinement','--coarse-manifest','coarse',
+          '--guided-fill-px','2','--mode',mode,'--planar-recovery',planar]
+    result=subprocess.run([str(publisher_parser),*args],capture_output=True,text=True)
+    assert result.returncode==2
+    assert 'guided fill requires depth-rgb and planar recovery' in result.stderr
+
+
+@pytest.mark.parametrize('profile',REFINEMENT_PROFILES)
+def test_later_quality_label_cannot_hide_refinement_preset(publisher_parser,profile):
+    result=subprocess.run([str(publisher_parser),*PUBLISHER_ARGS,
+                           '--profile',profile,'--profile','quality'],capture_output=True,text=True)
+    assert result.returncode==2
+    assert 'refinement-only options require an experimental refinement pipeline' in result.stderr

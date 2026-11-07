@@ -82,9 +82,9 @@ DepthRateConfig depth_rate_config(const Options& o) {
     return c;
 }
 Options parse(int argc,char** argv){
-    Options o;
+    Options o;bool refinement_only_requested=false;
     for(int i=1;i<argc;++i){std::string a=argv[i];
-        if(a=="--help"){std::cout<<"--source camera|replay --manifest FILE --clock-map FILE --frame-id ID --run-id ID --trace FILE [--replay DIR --mode depth|rgb|depth-rgb --depth-rate 5|10|20|30|60|adaptive --min-depth-fps N --max-depth-fps N --consumer-min-depth-fps N --max-depth-age-ms N --downshift-ms N --rate-report FILE --capture-fps 15|30|60 --duration-seconds N --subscriber-wait-seconds N --max-frames N --warmup N --disparities N --stereo-variant packed-specialized|packed-specialized-overwrite|packed-specialized-overwrite-quad --pipeline full-sgm|experimental-refinement|experimental-dual-refinement --profile quality|exact-ultra|ultra-fast|v11-fast|mobile-balanced|v13-adaptive|adaptive --coarse-manifest FILE --device-id N --depth-topic TOPIC --rgb-topic TOPIC --reliability best_effort|reliable --depth-speckle-min-pixels N --depth-speckle-delta-m METRES --depth-speckle-delta-px PIXELS --cloud 0|1 --cloud-stride N --cloud-rate HZ --cloud-topic TOPIC --gpu-timing-report FILE --diagnostics 0|1 --diagnostic-prefix TOPIC --rig-session-id ID --validation --thread-cpu-timing]\nNon-quality profiles require an experimental refinement pipeline.\n";std::exit(0);}
+        if(a=="--help"){std::cout<<"--source camera|replay --manifest FILE --clock-map FILE --frame-id ID --run-id ID --trace FILE [--replay DIR --mode depth|rgb|depth-rgb --depth-rate 5|10|20|30|60|adaptive --min-depth-fps N --max-depth-fps N --consumer-min-depth-fps N --max-depth-age-ms N --downshift-ms N --rate-report FILE --capture-fps 15|30|60 --duration-seconds N --subscriber-wait-seconds N --max-frames N --warmup N --disparities N --stereo-variant packed-specialized|packed-specialized-overwrite|packed-specialized-overwrite-quad --pipeline full-sgm|experimental-refinement|experimental-dual-refinement --profile quality|exact-ultra|ultra-fast|v11-fast|mobile-balanced|v13-adaptive|adaptive --coarse-manifest FILE --device-id N --depth-topic TOPIC --rgb-topic TOPIC --reliability best_effort|reliable --depth-speckle-min-pixels N --depth-speckle-delta-m METRES --depth-speckle-delta-px PIXELS --cloud 0|1 --cloud-stride N --cloud-rate HZ --cloud-topic TOPIC --gpu-timing-report FILE --diagnostics 0|1 --diagnostic-prefix TOPIC --rig-session-id ID --validation --thread-cpu-timing]\nNon-quality profiles require an experimental refinement pipeline.\nRefinement-only switches, including explicit zero values, require an experimental refinement pipeline.\n";std::exit(0);}
         if(a=="--validation"){o.validation=true;continue;}if(a=="--thread-cpu-timing"){o.thread_cpu_timing=true;continue;}if(a=="--verify-payload-checksum"){o.verify_payload_checksum=true;continue;}if(i+1>=argc)throw std::invalid_argument("missing option value");std::string v=argv[++i];
         if(a=="--source")o.source=v;else if(a=="--manifest")o.manifest=v;else if(a=="--replay")o.replay=v;else if(a=="--mode")o.mode=v;
         else if(a=="--clock-map")o.map=v;else if(a=="--frame-id")o.frame=v;else if(a=="--run-id")o.run=v;else if(a=="--trace")o.trace=v;
@@ -98,7 +98,7 @@ Options parse(int argc,char** argv){
         else if(a=="--qos-depth")o.qos_depth=number(v,1,64);
         else if(a=="--depth-rate")o.depth_rate=v;else if(a=="--rate-report")o.rate_report=v;else if(a=="--gpu-timing-report")o.gpu_timing_report=v;
         else if(a=="--depth-speckle-min-pixels")o.depth_speckle_min_pixels=number(v,0,10000);
-        else if(a=="--guided-fill-px")o.guided_fill_px=number(v,0,255);
+        else if(a=="--guided-fill-px"){refinement_only_requested=true;o.guided_fill_px=number(v,0,255);}
         else if(a=="--depth-speckle-delta-m"){size_t n=0;o.depth_speckle_delta_m=std::stod(v,&n);if(n!=v.size()||!std::isfinite(o.depth_speckle_delta_m)||o.depth_speckle_delta_m<0||o.depth_speckle_delta_m>10)throw std::invalid_argument("invalid depth speckle delta");}
         else if(a=="--depth-speckle-delta-px"){size_t n=0;o.depth_speckle_delta_px=std::stod(v,&n);if(n!=v.size()||!std::isfinite(o.depth_speckle_delta_px)||o.depth_speckle_delta_px<0||o.depth_speckle_delta_px>32)throw std::invalid_argument("invalid depth speckle disparity delta");}
         else if(a=="--min-depth-fps")o.min_depth_fps=number(v,5,60);
@@ -107,24 +107,24 @@ Options parse(int argc,char** argv){
         else if(a=="--max-depth-age-ms")o.max_depth_age_ms=number(v,1,10'000);
         else if(a=="--downshift-ms")o.downshift_ms=number(v,1,60'000);
         else if(a=="--stereo-variant")o.stereo_variant=v;else if(a=="--pipeline")o.pipeline_mode=v;else if(a=="--coarse-manifest")o.coarse_manifest=v;
-        else if(a=="--profile"){if(v!="quality"&&v!="exact-ultra"&&v!="ultra-fast"&&v!="v11-fast"&&v!="mobile-balanced"&&v!="v13-adaptive"&&v!="adaptive")throw std::invalid_argument("invalid profile");o.profile=v;
+        else if(a=="--profile"){if(v!="quality"&&v!="exact-ultra"&&v!="ultra-fast"&&v!="v11-fast"&&v!="mobile-balanced"&&v!="v13-adaptive"&&v!="adaptive")throw std::invalid_argument("invalid profile");o.profile=v;if(v!="quality")refinement_only_requested=true;
             if(v=="exact-ultra"){o.descriptor_mode="ortho-hybrid";o.coarse_schedule="shared-census-sequential";o.coarse_right_mode="independent-sgm";o.fast_mode=true;o.ultra_fast=false;o.refinement_subpixel=true;o.selective_repair=true;}
             else if(v=="ultra-fast"){o.descriptor_mode="ortho-hybrid";o.coarse_schedule="shared-census-sequential";o.coarse_right_mode="left-aggregated-selection";o.fast_mode=true;o.ultra_fast=true;o.refinement_subpixel=true;o.selective_repair=true;}
             else if(v=="v11-fast"||v=="mobile-balanced"){o.descriptor_mode="ortho-hybrid";o.coarse_schedule="hierarchical-1to8-fallback";o.coarse_right_mode="independent-sgm";o.fast_mode=true;o.ultra_fast=true;o.refinement_subpixel=true;o.selective_repair=true;}
             else if(v=="v13-adaptive"||v=="adaptive"){o.descriptor_mode="ortho-hybrid";o.coarse_schedule="shared-census-sequential";o.coarse_right_mode="left-aggregated-selection";o.fast_mode=true;o.ultra_fast=true;o.refinement_subpixel=true;o.adaptive_tiles=true;o.selective_repair=true;}}
         else if(a=="--gpu-duty-budget-pct"){size_t n=0;o.gpu_duty_budget_pct=std::stod(v,&n);if(n!=v.size()||!std::isfinite(o.gpu_duty_budget_pct)||o.gpu_duty_budget_pct<0.0||o.gpu_duty_budget_pct>100.0)throw std::invalid_argument("invalid gpu-duty-budget-pct");}
         else if(a=="--descriptor-mode"){if(v!="census"&&v!="ortho-hybrid")throw std::invalid_argument("invalid descriptor mode");o.descriptor_mode=v;}
-        else if(a=="--fast-mode")o.fast_mode=(number(v,0,1)==1);
-        else if(a=="--ultra-fast")o.ultra_fast=(number(v,0,1)==1);
+        else if(a=="--fast-mode"){refinement_only_requested=true;o.fast_mode=(number(v,0,1)==1);}
+        else if(a=="--ultra-fast"){refinement_only_requested=true;o.ultra_fast=(number(v,0,1)==1);}
         else if(a=="--coarse-schedule"){if(v!="sequential"&&v!="paired-per-path"&&v!="layered-per-path"&&v!="shared-census-sequential"&&v!="hierarchical-1to8-fallback")throw std::invalid_argument("invalid coarse schedule");o.coarse_schedule=v;}
         else if(a=="--coarse-right-reference-mode"){if(v!="independent-sgm"&&v!="left-aggregated-selection")throw std::invalid_argument("invalid coarse right reference mode");o.coarse_right_mode=v;}
-        else if(a=="--refinement-subpixel")o.refinement_subpixel=(number(v,0,1)==1);
-        else if(a=="--continuous-subpixel")o.continuous_subpixel=(number(v,0,1)==1);
-        else if(a=="--adaptive-tiles")o.adaptive_tiles=(number(v,0,1)==1);
-        else if(a=="--min-disparity-bound")o.min_disparity_bound=number(v,0,256);
-        else if(a=="--max-disparity-bound")o.max_disparity_bound=number(v,0,256);
-        else if(a=="--selective-repair")o.selective_repair=(number(v,0,1)==1);
-        else if(a=="--planar-recovery")o.planar_recovery=(number(v,0,1)==1);
+        else if(a=="--refinement-subpixel"){refinement_only_requested=true;o.refinement_subpixel=(number(v,0,1)==1);}
+        else if(a=="--continuous-subpixel"){refinement_only_requested=true;o.continuous_subpixel=(number(v,0,1)==1);}
+        else if(a=="--adaptive-tiles"){refinement_only_requested=true;o.adaptive_tiles=(number(v,0,1)==1);}
+        else if(a=="--min-disparity-bound"){refinement_only_requested=true;o.min_disparity_bound=number(v,0,256);}
+        else if(a=="--max-disparity-bound"){refinement_only_requested=true;o.max_disparity_bound=number(v,0,256);}
+        else if(a=="--selective-repair"){refinement_only_requested=true;o.selective_repair=(number(v,0,1)==1);}
+        else if(a=="--planar-recovery"){refinement_only_requested=true;o.planar_recovery=(number(v,0,1)==1);}
         else if(a=="--fps"||a=="--capture-fps"){o.fps=number(v,15,60);if(o.fps!=15&&o.fps!=30&&o.fps!=60)throw std::invalid_argument("unsupported camera FPS");}else if(a=="--disparities")o.disparities=number(v,32,256);
         else if(a=="--max-frames")o.max_frames=number(v,1,200000);else if(a=="--warmup")o.warmup=number(v,0,30);
         else if(a=="--device-id"){if(v=="-1")o.device_id=-1;else o.device_id=static_cast<int>(number(v,0,255));}
@@ -141,6 +141,8 @@ Options parse(int argc,char** argv){
        o.depth_topic.empty()||o.rgb_topic.empty()||o.completed_depth_topic.empty()||o.completed_provenance_topic.empty()||o.depth_topic.front()!='/'||o.rgb_topic.front()!='/'||o.completed_depth_topic.front()!='/'||o.completed_provenance_topic.front()!='/'||
        o.completed_depth_topic==o.depth_topic||o.completed_depth_topic==o.rgb_topic||o.completed_provenance_topic==o.depth_topic||o.completed_provenance_topic==o.rgb_topic||o.completed_provenance_topic==o.completed_depth_topic||(o.mode=="depth-rgb"&&o.depth_topic==o.rgb_topic))throw std::invalid_argument("invalid publisher configuration");
     if(o.pipeline_mode=="full-sgm"&&o.profile!="quality")throw std::invalid_argument("refinement profile requires an experimental refinement pipeline");
+    if(o.pipeline_mode=="full-sgm"&&refinement_only_requested)throw std::invalid_argument("refinement-only options require an experimental refinement pipeline");
+    if(o.guided_fill_px&&(o.mode!="depth-rgb"||!o.planar_recovery))throw std::invalid_argument("guided fill requires depth-rgb and planar recovery");
     if(!o.rate_report.empty()&&o.rate_report==o.trace)throw std::invalid_argument("rate report must differ from ROS delivery trace");
     if(!o.gpu_timing_report.empty()&&(o.mode=="rgb"||o.pipeline_mode!="full-sgm"||o.gpu_timing_report==o.trace||o.gpu_timing_report==o.rate_report||(o.diagnostics&&o.gpu_timing_report==o.trace+".diagnostics.json")))throw std::invalid_argument("invalid GPU timing report configuration");
     if(o.diagnostics){
