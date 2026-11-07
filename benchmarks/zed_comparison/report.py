@@ -37,6 +37,9 @@ def _same_estimator(quality_impl, live_impl, live_profile):
             s._integer(quality_device[key], key, 0)
             if type(live_device[key]) is not int or quality_device[key] != live_device[key]:
                 return False
+        if any(impl['settings']['stereo_variant'] != 'packed-specialized'
+               for impl in (quality_impl, live_impl)):
+            return False
         qprofile = validate_full_sgm_profile(quality_impl['settings']['effective_estimator'])
         lprofile = validate_full_sgm_profile(live_profile)
         return qprofile == lprofile == live_impl['settings']['effective_estimator']

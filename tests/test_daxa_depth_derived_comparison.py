@@ -273,3 +273,14 @@ def test_report_compares_requested_point_one_normalized_but_not_actual_report(tm
     if accepted:derived.validate_report(r,m,metadata,metric,bound_identity(),profile(),1,0,1,32,False,lr_tolerance=.1)
     else:
         with pytest.raises(ValueError,match='LR tolerance'):derived.validate_report(r,m,metadata,metric,bound_identity(),profile(),1,0,1,32,False,lr_tolerance=.1)
+
+
+@pytest.mark.parametrize('field,value', [('stereo_variant','packed-specialized-overwrite-quad'),
+    ('stereo_variant',None), ('descriptor_mode','ortho-hybrid'), ('descriptor_mode',None)])
+def test_derived_gate_requires_executed_variant_and_cost(tmp_path, field, value):
+    _,m,metadata,metric=fixture(tmp_path)
+    report=derived_report(m,metadata,metric)
+    if value is None: del report[field]
+    else: report[field]=value
+    with pytest.raises(ValueError, match=field):
+        derived.validate_report(report,m,metadata,metric,bound_identity(),profile(),1,0,1,32,False)

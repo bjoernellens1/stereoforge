@@ -92,6 +92,10 @@ def _settings(report):
         fields += ['radius', 'refinement_subpixel', 'refinement_disparities', 'prior_confidence_floor',
                    'max_coarse_span', 'min_margin', 'lr_tolerance', 'recovery', 'final_right_reference_mode']
     settings = {key: deepcopy(report[key]) for key in fields}
+    if 'stereo_variant' in report:
+        _require(report['stereo_variant'] in ('packed-specialized','packed-specialized-overwrite',
+                 'packed-specialized-overwrite-quad'), 'unsupported executed stereo variant')
+        settings['stereo_variant'] = report['stereo_variant']
     settings['search_bounds'] = dict(min_disparity=0, max_disparity_exclusive=128)
     if 'temporal' in report:
         # Validate only explicit effective metadata. Absence remains unknown;
@@ -108,18 +112,28 @@ def _settings(report):
     if 'effective_estimator' in report:
         from .native_profile import validate_full_sgm_profile
         _require(variant == 'full_sgm', 'effective SGM profile requires full SGM')
-        profile = validate_full_sgm_profile(report['effective_estimator'])
-        for name, report_name in (('descriptor_mode', 'descriptor_mode'), ('stereo_schedule', 'stereo_schedule'),
-                                  ('width', 'width'), ('height', 'height'),
-                                  ('disparities', 'sgm_disparities'), ('paths', 'sgm_directions'),
-                                  ('subpixel', 'sgm_subpixel'), ('temporal', 'temporal'),
-                                  ('stereo_spirv_sha256', 'stereo_spirv_sha256'),
-                                  ('depth_spirv_sha256', 'depth_spirv_sha256')):
-            _require(name in profile and report_name in report and profile[name] == report[report_name],
-                     'native estimator/report mismatch: ' + name)
-        _require(profile['compiler_sha256'] == report.get('shader_compiler', {}).get('compiler_sha256'),
-                 'native estimator/compiler mismatch')
-        settings['effective_estimator'] = profile
+        if report['effective_estimator'] is None:
+            reason = 'experimental_variant_not_qualified_for_canonical_estimator_identity'
+            _require(report.get('stereo_variant') in ('packed-specialized-overwrite','packed-specialized-overwrite-quad') and
+                     report.get('estimator_identity_status') == reason,
+                     'unavailable estimator identity requires explicit experimental variant and reason')
+            settings['effective_estimator'] = dict(status='unavailable', reason=reason)
+        else:
+            _require(report.get('stereo_variant') == 'packed-specialized',
+                     'canonical estimator requires executed packed-specialized variant')
+            _require('estimator_identity_status' not in report, 'contradictory estimator identity status')
+            profile = validate_full_sgm_profile(report['effective_estimator'])
+            for name, report_name in (('descriptor_mode', 'descriptor_mode'), ('stereo_schedule', 'stereo_schedule'),
+                                      ('width', 'width'), ('height', 'height'),
+                                      ('disparities', 'sgm_disparities'), ('paths', 'sgm_directions'),
+                                      ('subpixel', 'sgm_subpixel'), ('temporal', 'temporal'),
+                                      ('stereo_spirv_sha256', 'stereo_spirv_sha256'),
+                                      ('depth_spirv_sha256', 'depth_spirv_sha256')):
+                _require(name in profile and report_name in report and profile[name] == report[report_name],
+                         'native estimator/report mismatch: ' + name)
+            _require(profile['compiler_sha256'] == report.get('shader_compiler', {}).get('compiler_sha256'),
+                     'native estimator/compiler mismatch')
+            settings['effective_estimator'] = profile
     return settings
 
 

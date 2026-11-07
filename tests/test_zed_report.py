@@ -59,9 +59,9 @@ def cross_track_fixture():
     device=dict(device_uuid='1'*32,driver_uuid='2'*32,vendor_id=4098,device_id=123,driver_version=10)
     common=dict(name='StereoForge',commit=dict(status='available',value='d'*40),
                 device=dict(status='available',value=device))
-    quality_impl=dict(common,version='canonical_rgb',settings=dict(effective_estimator=copy.deepcopy(profile)))
+    quality_impl=dict(common,version='canonical_rgb',settings=dict(stereo_variant='packed-specialized',effective_estimator=copy.deepcopy(profile)))
     raw='e'*64; rect='f'*64
-    live_impl=dict(common,version='native_ros_yuyv_v1',settings=dict(effective_estimator=copy.deepcopy(profile),
+    live_impl=dict(common,version='native_ros_yuyv_v1',settings=dict(stereo_variant='packed-specialized',effective_estimator=copy.deepcopy(profile),
                    original_calibration_identity=raw,rectified_calibration_identity=rect))
     geometry=dict(width=1280,height=720,fx=528,fy=528,baseline_m=.119,cx_left=640,cx_right=640)
     calibration=dict(raw=dict(path='raw.json',sha256=raw,size_bytes=10),
@@ -175,3 +175,26 @@ def test_cost_schedule_change_or_absence_blocks_cross_track_binding(monkeypatch,
             profile[field]=value
     result=_run_binding(monkeypatch,fixture)
     assert not result['qualified'] and 'quality_delivery_binding_mismatch' in result['reasons']
+
+
+@pytest.mark.parametrize('side', ['quality','live'])
+@pytest.mark.parametrize('variant', [None,'packed-specialized-overwrite','packed-specialized-overwrite-quad'])
+def test_variant_change_or_absence_blocks_canonical_binding(side, variant):
+    fixture=cross_track_fixture()
+    quality=fixture[0][0]['payload']['records'][0]['implementation']
+    run=fixture[3]['runs'][0];live=run['implementation']['value']
+    assert report._same_estimator(quality,live,run['effective_estimator'])
+    settings=(quality if side=='quality' else live)['settings']
+    if variant is None: settings.pop('stereo_variant')
+    else: settings['stereo_variant']=variant
+    assert not report._same_estimator(quality,live,run['effective_estimator'])
+
+
+@pytest.mark.parametrize('side', ['quality','live'])
+@pytest.mark.parametrize('malformed', [None,[],0,'invalid'])
+def test_malformed_variant_settings_fail_closed(side, malformed):
+    fixture=cross_track_fixture()
+    quality=fixture[0][0]['payload']['records'][0]['implementation']
+    run=fixture[3]['runs'][0];live=run['implementation']['value']
+    (quality if side=='quality' else live)['settings']=malformed
+    assert not report._same_estimator(quality,live,run['effective_estimator'])

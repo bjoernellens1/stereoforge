@@ -87,7 +87,7 @@ def profile():return dict(width=8,height=5,disparities=16,paths=4,p1=8,p2=32,sub
 
 def native_report(m,metadata,metric,schedule="sequential",paths=4):
     stats=dict(p50=1.,p95=2.,mean=1.2)
-    report=dict(profile(),schema='stereoforge.daxa_depth.v1',scope=depth.SCOPE,frames=1,warmup=0,slots=1,required_wave_size=32,lr_tolerance=1.,
+    report=dict(profile(),descriptor_mode='census',stereo_variant='packed-specialized',schema='stereoforge.daxa_depth.v1',scope=depth.SCOPE,frames=1,warmup=0,slots=1,required_wave_size=32,lr_tolerance=1.,
         metric_support_policy=depth.SUPPORT_POLICY,layers='left_then_right',depth_units='axial_Z_metres_rectified_rays',source_metadata=metadata,source_id=metadata['frame_id'],
         camera_timestamp_ns=100,host_ingress_timestamp_ns=0,camera_clock_domain='recorded',host_clock_domain='unknown',controls_json=metadata['controls_json'],
         original_identity='original',rectified_identity='rectified',fixture_manifest_sha256='manifest',capture_sha256='capture',record_ordinal=0,
@@ -367,3 +367,14 @@ def test_shared_census_memory_is_one_quartet_per_slot(paths,p2,slots):
 def test_d96_profile_admission_keeps_existing_penalties_counts_and_lr_gate(validation_only):
     depth.validate_bounds(96,4,8,32,1 if validation_only else 30,0 if validation_only else 3,2,32,validation_only)
     with pytest.raises(ValueError):depth.validate_bounds(96,4,40,32,30,3,2,32,validation_only)
+
+
+@pytest.mark.parametrize('field,value', [('stereo_variant','packed-specialized-overwrite-quad'),
+    ('stereo_variant',None), ('descriptor_mode','ortho-hybrid'), ('descriptor_mode',None)])
+def test_baseline_gate_requires_executed_variant_and_cost(tmp_path, field, value):
+    _,m,metadata,metric=fixture(tmp_path)
+    report=native_report(m,metadata,metric)
+    if value is None: del report[field]
+    else: report[field]=value
+    with pytest.raises(ValueError, match=field):
+        depth.validate_report(report,m,metadata,metric,identity(),profile(),1,0,1,32,False)

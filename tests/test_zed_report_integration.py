@@ -56,7 +56,7 @@ def fixture(root, row):
     for i, timing in enumerate(timings):
         raw = json.loads((root / f'raw{i}.json').read_text())
         p = deepcopy(profile); p['subpixel'] = timing['order']['position'] in (0, 3)
-        raw.update(descriptor_mode=p['descriptor_mode'],stereo_schedule=p['stereo_schedule'],width=width, height=height, input_identity=row['input_identity'],
+        raw.update(stereo_variant='packed-specialized',descriptor_mode=p['descriptor_mode'],stereo_schedule=p['stereo_schedule'],width=width, height=height, input_identity=row['input_identity'],
                    commit='d'*40, device=device, effective_estimator=p,
                    stereo_spirv_sha256=p['stereo_spirv_sha256'], depth_spirv_sha256=p['depth_spirv_sha256'])
         impl = dict(name='StereoForge', version='canonical_native_v1', commit=available(raw['commit']),

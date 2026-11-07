@@ -57,12 +57,12 @@ def export(executed,tmp_path):
 def test_effective_profile_requires_matching_executed_metadata(executed):
     report = deepcopy(executed[2])
     profile = deepcopy(PROFILE)
-    report.update(descriptor_mode=profile['descriptor_mode'],stereo_schedule=profile['stereo_schedule'],width=profile['width'], height=profile['height'], temporal=profile['temporal'],
+    report.update(stereo_variant='packed-specialized',descriptor_mode=profile['descriptor_mode'],stereo_schedule=profile['stereo_schedule'],width=profile['width'], height=profile['height'], temporal=profile['temporal'],
                   stereo_spirv_sha256=profile['stereo_spirv_sha256'],
                   depth_spirv_sha256=profile['depth_spirv_sha256'], effective_estimator=profile)
     report['shader_compiler']['compiler_sha256'] = profile['compiler_sha256']
     assert _settings(report)['effective_estimator'] == profile
-    for key, value in [('descriptor_mode', 'ortho-hybrid'), ('stereo_schedule', 'shared-census-sequential'), ('width', 640), ('sgm_directions', 8), ('sgm_subpixel', False),
+    for key, value in [('stereo_variant', 'packed-specialized-overwrite'), ('estimator_identity_status', 'experimental_variant_not_qualified_for_canonical_estimator_identity'), ('descriptor_mode', 'ortho-hybrid'), ('stereo_schedule', 'shared-census-sequential'), ('width', 640), ('sgm_directions', 8), ('sgm_subpixel', False),
                        ('stereo_spirv_sha256', {'daxa-stereo-census.spv': 'd'*64})]:
         changed = deepcopy(report)
         changed[key] = value
@@ -200,3 +200,55 @@ def test_malformed_explicit_temporal_metadata_is_rejected(executed,tmp_path):
     report['temporal']={'stabilization':{'status':'available','value':True}}
     report_path.write_text(json.dumps(report))
     with pytest.raises(ValueError): export(executed,tmp_path)
+
+
+@pytest.mark.parametrize('variant', ['packed-specialized','packed-specialized-overwrite',
+                                   'packed-specialized-overwrite-quad'])
+def test_executed_variant_preserved_without_inferring_canonical_identity(executed, variant):
+    report=deepcopy(executed[2]);report['stereo_variant']=variant
+    settings=_settings(report)
+    assert settings['stereo_variant']==variant
+    assert 'effective_estimator' not in settings
+
+
+def test_legacy_variant_stays_unknown(executed):
+    assert 'stereo_variant' not in _settings(executed[2])
+
+
+@pytest.mark.parametrize('variant', ['bad',None,True])
+def test_invalid_executed_variant_rejected(executed, variant):
+    report=deepcopy(executed[2]);report['stereo_variant']=variant
+    with pytest.raises(ValueError, match='variant'): _settings(report)
+
+
+@pytest.mark.parametrize('variant', ['packed-specialized-overwrite','packed-specialized-overwrite-quad'])
+def test_experimental_identity_unavailable_but_observation_exportable(executed, tmp_path, variant):
+    record,path,report,report_path,dump=executed
+    report.update(stereo_variant=variant,effective_estimator=None,
+        estimator_identity_status='experimental_variant_not_qualified_for_canonical_estimator_identity')
+    report_path.write_text(json.dumps(report))
+    out=export_native_observation(report_path,path,dump,tmp_path/'variant-portable')
+    settings=schema.load_record(out)['implementation']['settings']
+    assert settings['stereo_variant']==variant
+    assert settings['effective_estimator']==dict(status='unavailable',
+        reason='experimental_variant_not_qualified_for_canonical_estimator_identity')
+
+
+@pytest.mark.parametrize('variant,status', [('packed-specialized','experimental_variant_not_qualified_for_canonical_estimator_identity'),
+    ('packed-specialized-overwrite',None),('packed-specialized-overwrite','unknown')])
+def test_unavailable_identity_requires_explicit_experimental_reason(executed, variant, status):
+    report=deepcopy(executed[2]);report.update(stereo_variant=variant,effective_estimator=None,
+        estimator_identity_status=status)
+    with pytest.raises(ValueError): _settings(report)
+
+
+@pytest.mark.parametrize('variant', [None,'packed-specialized-overwrite','packed-specialized-overwrite-quad'])
+def test_canonical_identity_requires_executed_baseline_variant(executed, variant):
+    report=deepcopy(executed[2]);profile=deepcopy(PROFILE)
+    report.update(effective_estimator=profile,descriptor_mode=profile['descriptor_mode'],
+        stereo_schedule=profile['stereo_schedule'],width=profile['width'],height=profile['height'],
+        temporal=profile['temporal'],stereo_spirv_sha256=profile['stereo_spirv_sha256'],
+        depth_spirv_sha256=profile['depth_spirv_sha256'])
+    report['shader_compiler']['compiler_sha256']=profile['compiler_sha256']
+    if variant is not None: report['stereo_variant']=variant
+    with pytest.raises(ValueError, match='variant'): _settings(report)

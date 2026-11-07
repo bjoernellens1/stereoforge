@@ -56,3 +56,16 @@ Historical profiles missing either field are rejected for estimator matching;
 no cost or schedule is inferred from shader bundle hashes. Original evidence
 remains unchanged. Re-export fresh reports or independently audit their
 source/configuration before making a new comparison.
+
+Native raw-depth benchmark reports now also include the executed
+`stereo_variant`. Both standalone byte-comparison gates require explicit Census
+and packed-specialized settings; their fixed oracle must not admit another
+matcher or infer missing settings.
+
+Canonical observation exports retain an explicitly reported variant. Old
+reports without a variant remain unknown. An experimental overwrite/quad report
+with a null canonical identity and its exact unavailable reason can be exported
+for quality scoring. That identity stays unavailable: it cannot qualify a
+quality/live estimator match. Canonical matching additionally requires explicit
+packed-specialized settings on both executed implementations. This preserves
+the current whitelist and grants no quality or latency promotion.
