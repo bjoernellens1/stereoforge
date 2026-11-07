@@ -73,6 +73,42 @@ def test_short_run_and_missing_receiver_unqualified():
     assert not summarize_delivery(traces()[:4],policy=POLICY)['qualified']
 
 
+@pytest.mark.parametrize('initial,final', [(0, 0), (2, 5)])
+def test_publisher_driver_error_counter_is_accepted_and_summarized(initial, final):
+    records = traces()
+    baseline = records[0]['config']['capture_counters']
+    stop = records[3]['capture_counters']
+    baseline.update(driver_error_drops=initial, source_records=initial, source_frames=initial)
+    stop.update(driver_error_drops=final, source_records=2+final, source_frames=2+final)
+    result = summarize_delivery(records, policy=POLICY)
+    assert result['runs'][0]['capture_counter_deltas']['driver_error_drops'] == final-initial
+
+
+def test_legacy_driver_error_counter_defaults_without_mutating_trace():
+    records = traces()
+    original = copy.deepcopy(records)
+    result = summarize_delivery(records, policy=POLICY)
+    assert result['runs'][0]['capture_counter_deltas']['driver_error_drops'] == 0
+    assert records == original
+
+
+@pytest.mark.parametrize('invalid', [True, -1, 1.5, '2', None, 1 << 63])
+def test_driver_error_counter_rejects_invalid_values(invalid):
+    records = traces()
+    records[0]['config']['capture_counters']['driver_error_drops'] = 0
+    records[3]['capture_counters']['driver_error_drops'] = invalid
+    with pytest.raises(ValueError):
+        summarize_delivery(records, policy=POLICY)
+
+
+def test_driver_error_counter_cannot_go_backwards():
+    records = traces()
+    records[0]['config']['capture_counters']['driver_error_drops'] = 2
+    records[3]['capture_counters']['driver_error_drops'] = 1
+    with pytest.raises(ValueError, match='capture counter went backwards: driver_error_drops'):
+        summarize_delivery(records, policy=POLICY)
+
+
 def test_repeated_depth_not_unique():
     result=summarize_delivery(traces(repeated=True),policy=POLICY)
     assert not result['qualified']

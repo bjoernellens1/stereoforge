@@ -161,7 +161,10 @@ CaptureSource camera_source(const CaptureConfig& c){validate_config(c);
 #endif
 }
 }
-void CaptureFrame::require_calibration()const{if(calibration_identity.empty())throw std::invalid_argument("processing requires explicit validated calibration identity");}
+void CaptureFrame::require_calibration()const{
+    if(calibration_identity.empty())throw std::invalid_argument("processing requires explicit validated calibration identity");
+    if(driver_error())throw std::invalid_argument("processing rejects driver-error frame");
+}
 struct NativeCapture::Impl {
     CaptureConfig config;
     CaptureSource source;
@@ -222,6 +225,7 @@ struct NativeCapture::Impl {
             // Replay retains original ingress and domains; hardware leaves it unset.
             if(status!=CaptureSourceStatus::recorded_frame&&!frame.host_ingress_timestamp_ns){frame.host_ingress_timestamp_ns=ingress;frame.host_clock_domain="host_steady";}
             if(!config.calibration_identity.empty()&&frame.calibration_identity!=config.calibration_identity)throw std::invalid_argument("source calibration identity differs from capture config");
+            if(frame.driver_error()){++stats.driver_error_drops;continue;}
             if(!slot){++stats.no_slot_drops;discard.host_ingress_timestamp_ns=0;continue;}
             if(queue_size==config.queue_capacity){queue[queue_head].reset();queue_head=(queue_head+1)%queue.size();--queue_size;++stats.queue_drops;}
             queue[(queue_head+queue_size)%queue.size()]=std::move(slot);++queue_size;stats.queue_high_watermark=std::max(stats.queue_high_watermark,queue_size);ready.notify_one();

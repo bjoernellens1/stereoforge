@@ -11,7 +11,7 @@ using namespace std::chrono_literals;
 static void check(bool value,const char* message){if(!value)throw std::runtime_error(message);}
 template<class F> static void rejects(F f){bool caught=false;try{f();}catch(const std::exception&){caught=true;}check(caught,"expected rejection");}
 static void conserved(const CaptureMetrics& m,bool live=true){
-    check(m.source_records==m.delivered_frames+m.queue_drops+m.no_slot_drops+m.queued_frames+(live?m.repeated_frames:0),"stopped capture record accounting must conserve queued/delivered/dropped observations");
+    check(m.source_records==m.delivered_frames+m.queue_drops+m.no_slot_drops+m.driver_error_drops+m.queued_frames+(live?m.repeated_frames:0),"stopped capture record accounting must conserve queued/delivered/dropped observations");
 }
 static CaptureConfig config(){CaptureConfig c;c.eye_width=4;c.height=2;c.queue_capacity=2;c.pool_capacity=4;c.calibration_identity="sha256:fixture-calibration";return c;}
 static CaptureSource source(unsigned count,bool gaps=false){return [id=uint64_t{0},count,gaps](CaptureFrame& f,std::chrono::milliseconds) mutable {
@@ -57,6 +57,37 @@ int main(int argc,char** argv){try {
     std::filesystem::remove_all(dir);
     {auto bad=source(1);NativeCapture cap(config(),[bad](CaptureFrame& f,auto t)mutable{auto s=bad(f,t);f.packed_yuyv.clear();return s;});rejects([&]{cap.read(100ms);});}
     {CaptureFrame f;rejects([&]{f.require_calibration();});}
+    {auto f=*held;f.driver_timing=CaptureDriverTiming{1000,7,0x12001,1100,1200,f.camera_timestamp_ns,1000};
+      f.require_calibration();f.driver_timing->flags|=0x40;rejects([&]{f.require_calibration();});}
+    {auto errors=dir/"driver-errors";
+      {PackedCaptureWriter writer(errors);for(unsigned i=0;i<3;++i){auto f=*held;f.frame_id=101+i;f.camera_timestamp_ns=5000+i;
+        f.driver_timing=CaptureDriverTiming{1000+i,10+i,i==1?0x12041u:0x12001u,1100+i,1200+i,5000,1000};writer.append(f);if(i==1)writer.append(f);}writer.close();}
+      auto archived=read_packed_capture(errors);check(archived.size()==4&&archived[1].driver_timing->flags==0x12041,"raw archive retains flagged frame for diagnosis");
+      auto c=config();c.queue_policy=CaptureQueuePolicy::wait_for_consumer;NativeCapture cap(c,packed_replay_source(errors));
+      auto first=cap.read(500ms);auto second=cap.read(500ms);check(first&&first->frame_id==101&&second&&second->frame_id==103,"capture must skip driver-error frame and continue");
+      check(!cap.read(500ms),"all remaining clean frames delivered");cap.stop();auto m=cap.metrics();
+      check(m.source_records==4&&m.source_frames==3&&m.repeated_frames==1&&m.driver_error_drops==2&&m.delivered_frames==2,"repeated replay errors retain distinct recoverable drop accounting");conserved(m,false);
+      std::filesystem::remove_all(errors);}
+    {auto c=config();c.queue_policy=CaptureQueuePolicy::wait_for_consumer;auto make=source(3);
+      NativeCapture cap(c,[make](CaptureFrame& f,auto t)mutable{auto status=make(f,t);
+        if(status==CaptureSourceStatus::frame&&f.frame_id==1)f.driver_timing=CaptureDriverTiming{1000,1,0x12041,1100,1200,f.camera_timestamp_ns,1000};
+        return status;});
+      auto first=cap.read(500ms);auto second=cap.read(500ms);check(first&&first->frame_id==2&&second&&second->frame_id==3,"live driver error skips without contaminating reused clean slots");
+      check(!cap.read(500ms),"live error stream terminates after clean frames");cap.stop();check(cap.metrics().driver_error_drops==1,"live driver error counted once");conserved(cap.metrics());}
+    {auto c=config();c.pool_capacity=3;c.queue_capacity=1;std::atomic<unsigned> permit=0;unsigned next=0;auto make=source(5);
+      NativeCapture cap(c,[&](CaptureFrame& f,auto timeout){if(next==5)return CaptureSourceStatus::end;
+        auto deadline=std::chrono::steady_clock::now()+timeout;
+        while(permit.load()<next+1){if(std::chrono::steady_clock::now()>=deadline)return CaptureSourceStatus::timeout;std::this_thread::sleep_for(1ms);}
+        auto status=make(f,timeout);++next;f.packed_yuyv[0]=static_cast<uint8_t>(next);
+        if(next==4)f.driver_timing=CaptureDriverTiming{1000,4,0x12041,1100,1200,f.camera_timestamp_ns,1000};
+        return status;});
+      std::array<CaptureLease,3> leases;
+      for(unsigned i=1;i<=3;++i){permit=i;leases[i-1]=cap.read(500ms);check(leases[i-1]&&leases[i-1]->frame_id==i,"hold every pool slot before error");}
+      permit=4;for(int i=0;i<500&&!cap.metrics().driver_error_drops;++i)std::this_thread::sleep_for(1ms);
+      check(cap.metrics().driver_error_drops==1,"error on discard storage counted before pool exhaustion");
+      permit=5;for(int i=0;i<500&&cap.metrics().running;++i)std::this_thread::sleep_for(1ms);cap.stop();auto m=cap.metrics();
+      check(m.source_records==5&&m.driver_error_drops==1&&m.no_slot_drops==1&&m.delivered_frames==3,"error and pool drops remain distinct");
+      for(unsigned i=0;i<3;++i)check(leases[i]->packed_yuyv[0]==i+1,"discard errors preserve held frame bytes");conserved(m);}
     {NativeCapture cap(config(),[](CaptureFrame&,auto){throw std::runtime_error("source failed");return CaptureSourceStatus::end;});rejects([&]{cap.read(100ms);});}
     {auto c=config();c.pool_capacity=3;c.queue_capacity=1;std::atomic<unsigned> step=0;
       NativeCapture cap(c,[&](CaptureFrame& f,auto){while(step.load()==0)std::this_thread::sleep_for(1ms);auto s=source(1);s(f,1ms);f.frame_id=step.fetch_add(1);f.camera_timestamp_ns=f.frame_id*100;std::this_thread::sleep_for(1ms);return CaptureSourceStatus::frame;});

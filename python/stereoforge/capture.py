@@ -110,6 +110,11 @@ class ZedCamera:
     def sensor_dropped_count(self):
         return 0 if self._native is None else self._native.sensor_dropped_count
 
+    @property
+    def driver_error_drops(self):
+        """Observed corrupt-snapshot rejections, or None for unavailable counters."""
+        return None if self._native is None else getattr(self._native, 'driver_error_drops', None)
+
     def read(self,timeout_ms=1000):
         if self._native is None:
             raise RuntimeError('camera is closed')

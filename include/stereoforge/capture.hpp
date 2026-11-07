@@ -20,6 +20,8 @@ enum class CaptureSourceKind { PackedYuyv,CanonicalRgbMetadata };
 // Device identity and both SDK anchors identify this SDK stream; retain them
 // across replay and do not reuse the association after reinitialization.
 struct CaptureDriverTiming {
+    // Portable value of the Linux V4L2_BUF_FLAG_ERROR observation.
+    static constexpr uint32_t error_flag=0x40u;
     uint64_t timestamp_ns=0;
     uint32_t sequence=0,flags=0;
     uint64_t dequeue_begin_monotonic_ns=0,dequeue_end_monotonic_ns=0;
@@ -46,6 +48,7 @@ struct CaptureFrame {
     uint64_t sensor_dropped_count=0;
     std::vector<CaptureImuSample> imu_samples;
     std::vector<uint8_t> packed_yuyv;
+    bool driver_error() const noexcept {return driver_timing&&(driver_timing->flags&CaptureDriverTiming::error_flag);}
     void require_calibration() const;
 };
 using CaptureLease=std::shared_ptr<const CaptureFrame>;
@@ -65,12 +68,15 @@ struct CaptureConfig {
 struct CaptureMetrics {
     uint64_t source_records=0,source_frames=0,delivered_frames=0,queue_drops=0,no_slot_drops=0;
     uint64_t source_frame_gaps=0,repeated_frames=0,source_timeouts=0,invalid_frames=0;
+    // Recoverable, error-marked observations counted before queue admission.
+    uint64_t driver_error_drops=0;
     uint64_t backpressure_waits=0,backpressure_wait_ns=0;
     size_t queued_frames=0,queue_high_watermark=0,pool_capacity=0,packed_bytes_per_slot=0;
     bool running=false;
 };
 enum class CaptureSourceStatus { frame,recorded_frame,timeout,end };
-// recorded_frame preserves all stored metadata and repeated identities during replay.
+// recorded_frame preserves stored metadata and repeated identities during replay;
+// driver-error observations remain in raw archives but are not admitted to consumers.
 // Source must honour timeout and return within it; never retain/mutate a frame after returning.
 // Native camera/replay sources obey this. Injection is for deterministic sources and CPU fixtures.
 using CaptureSource=std::function<CaptureSourceStatus(CaptureFrame&,std::chrono::milliseconds)>;

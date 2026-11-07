@@ -4,6 +4,7 @@
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
 #include "videocapture.hpp"
+#include <linux/videodev2.h>
 #include "sensorcapture.hpp"
 #include <algorithm>
 #include <atomic>
@@ -120,7 +121,7 @@ class ZedCapture {
     std::thread sensor_thread_;
     std::atomic<bool> stop_{false};
     std::deque<sl_oc::sensors::data::Imu> samples_;
-    std::atomic<uint64_t> dropped_{0};
+    std::atomic<uint64_t> dropped_{0},driver_error_drops_{0};
     uint64_t last_timestamp_ = 0;
     uint64_t consecutive_timeout_ms_ = 0;
     unsigned recoveries_ = 0;
@@ -221,6 +222,7 @@ public:
     bool sensors_available() const { return sensors_available_; }
     std::string sensor_status() const { return sensor_status_; }
     uint64_t sensor_dropped_count() const { return dropped_.load(); }
+    uint64_t driver_error_drops() const { return driver_error_drops_.load(); }
     py::dict get_controls() {
         ControlSnapshot state;
         {py::gil_scoped_release release;std::lock_guard<std::mutex> lock(io_mutex_);
@@ -290,6 +292,10 @@ public:
             if (frame.width!=2*width_ || frame.height!=height_ || frame.channels!=2)
                 throw std::runtime_error("unexpected ZED YUYV frame format");
             last_timestamp_=frame.timestamp;
+            if(frame.driver_timing_available&&(frame.driver_flags&V4L2_BUF_FLAG_ERROR)){
+                ++driver_error_drops_;
+                throw FrameTimeout("driver reported a corrupt ZED frame; skipped");
+            }
             std::lock_guard<std::mutex> sample_lock(sample_mutex_);
             // Include all collected samples up to this observation. Samples newer
             // than the frame stay queued for the next frame rather than misassociate.
@@ -331,6 +337,7 @@ PYBIND11_MODULE(_zed_capture,m) {
       .def_property_readonly("sensors_available",&ZedCapture::sensors_available)
       .def_property_readonly("sensor_status",&ZedCapture::sensor_status)
       .def_property_readonly("sensor_dropped_count",&ZedCapture::sensor_dropped_count)
+      .def_property_readonly("driver_error_drops",&ZedCapture::driver_error_drops)
       .def("get_controls",&ZedCapture::get_controls,
         "Read camera API controls. Bool automatic getters cannot distinguish I/O failure; values are API-reported, not physically verified. Known read failures are None with read_errors. LED is None with readback_limitations because its upstream getter changes GPIO direction.")
       .def("set_controls",&ZedCapture::set_controls,py::arg("controls"),

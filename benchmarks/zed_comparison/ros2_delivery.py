@@ -22,6 +22,7 @@ CAPTURE = {'source_records', 'source_frames', 'delivered_frames', 'queue_drops',
            'no_slot_drops', 'source_frame_gaps', 'repeated_frames', 'source_timeouts',
            'invalid_frames', 'backpressure_waits', 'backpressure_wait_ns', 'queued_frames',
            'queue_high_watermark', 'pool_capacity', 'packed_bytes_per_slot', 'running'}
+OPTIONAL_CAPTURE = {'driver_error_drops'}
 MEMORY = {'producer_requested_bytes', 'export_requested_bytes', 'capture_requested_bytes',
           'trace_capacity', 'trace_record_bytes', 'ros_requested_bytes',
           'export_memory_type_index', 'export_memory_property_flags', 'export_host_cached',
@@ -73,8 +74,9 @@ def _bounded_metadata(value):
 
 
 def _capture(value):
-    s._keys(value, CAPTURE, 'capture counters')
-    for key in CAPTURE - {'running'}:
+    optional = OPTIONAL_CAPTURE & value.keys() if isinstance(value, dict) else set()
+    s._keys(value, CAPTURE | optional, 'capture counters')
+    for key in (CAPTURE | optional) - {'running'}:
         _int(value[key], key)
     s._require(type(value['running']) is bool, 'capture running must be boolean')
     s._require(value['queued_frames'] <= value['queue_high_watermark'], 'invalid capture high watermark')
@@ -178,8 +180,8 @@ def _stop(event, start):
     if event['role'] == 'publisher':
         _capture(event['capture_counters'])
         baseline = start['config']['capture_counters']; final = event['capture_counters']
-        for key in CAPTURE - {'running', 'queued_frames', 'pool_capacity', 'packed_bytes_per_slot'}:
-            s._require(final[key] >= baseline[key], 'capture counter went backwards: '+key)
+        for key in (CAPTURE | OPTIONAL_CAPTURE) - {'running', 'queued_frames', 'pool_capacity', 'packed_bytes_per_slot'}:
+            s._require(final.get(key, 0) >= baseline.get(key, 0), 'capture counter went backwards: '+key)
         s._require(event['queued'] <= 2 and event['pending'] <= 2, 'queue exceeds bounded capacity')
     else:
         s._require(event['capture_counters'] is None and event['queued'] == 0 and event['pending'] == 0, 'invalid subscriber stop')
@@ -397,8 +399,8 @@ def summarize_delivery(events, *, policy=None):
             capture_queue_high_watermark_since_capture_start=pub[-1]['capture_counters']['queue_high_watermark'],
             observed_capture_queue_peak=max((e['capture_queue'] for e in pframes),default=0),
             observed_pending_peak=max((e['pending'] for e in pframes),default=0),
-            capture_counter_deltas={key:pub[-1]['capture_counters'][key]-pc['capture_counters'][key]
-                for key in CAPTURE-{'running','queued_frames','queue_high_watermark','pool_capacity','packed_bytes_per_slot'}},
+            capture_counter_deltas={key:pub[-1]['capture_counters'].get(key,0)-pc['capture_counters'].get(key,0)
+                for key in (CAPTURE | OPTIONAL_CAPTURE)-{'running','queued_frames','queue_high_watermark','pool_capacity','packed_bytes_per_slot'}},
             publisher_counters=deepcopy(pub[-1]['counters']),subscriber_counters=deepcopy(sub[-1]['counters']),
             publisher_drain_ns=pub[-1]['drain_ns'],subscriber_drain_ns=sub[-1]['drain_ns'],outputs=outputs))
     return dict(schema=SUMMARY_SCHEMA,qualified=bool(runs) and all(x['qualified'] for x in runs),runs=runs)

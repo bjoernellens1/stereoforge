@@ -92,3 +92,17 @@ def test_native_adapter_read_and_context_close(monkeypatch):
     assert state['closed']
     assert camera.sensor_status=='closed'
     with pytest.raises(RuntimeError,match='closed'): camera.read()
+
+
+def test_camera_exposes_driver_error_drops_and_preserves_unavailability():
+    from types import SimpleNamespace
+    camera = object.__new__(ZedCamera)
+    camera._native = SimpleNamespace(driver_error_drops=7, close=lambda: None)
+    camera._camera_control = None
+    assert camera.driver_error_drops == 7
+    camera._native.driver_error_drops = 8
+    assert camera.driver_error_drops == 8
+    del camera._native.driver_error_drops
+    assert camera.driver_error_drops is None
+    camera.close()
+    assert camera.driver_error_drops is None
