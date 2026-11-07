@@ -140,6 +140,7 @@ int main(int argc,char** argv) { try {
         {"producer",record.producer},{"record_ordinal",record.ordinal},{"source_id",source.frame_id},{"camera_timestamp_ns",source.camera_timestamp_ns},
         {"input_identity",source.canonical_rgb->input_identity},{"original_pixel_identity",source.canonical_rgb->original_pixel_identity},{"rectified_pixel_identity",source.canonical_rgb->rectified_pixel_identity},
         {"original_calibration_identity",full.original_identity},{"rectified_calibration_identity",full.rectified_identity},{"sampling_profile",canonical_rgb_sampling_profile},
+        {"descriptor_mode",depth_config.stereo.ortho_hybrid?"ortho-hybrid":"census"},{"stereo_schedule",stereoforge::native_estimator::schedule_name(depth_config.stereo_schedule)},
         {"width",full.width},{"height",full.height},{"sgm_disparities",depth_config.stereo.disparities},{"sgm_directions",4},{"right_reference_mode","independent_sgm"},{"lr_dependency","independent_references"},
         {"metric_calibration",{{"fx",calibration.fx},{"baseline_m",calibration.baseline_m},{"cx_offset",calibration.cx_offset}}},
         {"device",json::parse(context->report())},{"validation_requested",options.validation},

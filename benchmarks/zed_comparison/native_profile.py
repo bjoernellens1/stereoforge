@@ -3,7 +3,7 @@ from copy import deepcopy
 from . import schema as s
 from .evaluate_temporal import temporal_settings
 
-FIELDS={'algorithm','width','height','disparities','paths','p1','p2','subpixel','lr_tolerance',
+FIELDS={'descriptor_mode','stereo_schedule','algorithm','width','height','disparities','paths','p1','p2','subpixel','lr_tolerance',
         'right_reference_mode','depth_units','temporal','compiler_sha256',
         'stereo_spirv_sha256','depth_spirv_sha256'}
 
@@ -12,8 +12,14 @@ def validate_full_sgm_profile(profile):
     s._keys(profile,FIELDS,'native estimator profile')
     s._require(profile['algorithm']=='independent_sgm' and profile['right_reference_mode']=='independent_sgm' and
                profile['depth_units']=='axial_Z_metres_rectified_rays', 'unsupported estimator semantics')
+    s._require(profile['descriptor_mode'] in ('census','ortho-hybrid'), 'unsupported descriptor mode')
+    s._require(profile['stereo_schedule'] in ('sequential','paired-per-path','layered-per-path',
+               'shared-census-sequential','hierarchical-1to8-fallback'), 'unsupported stereo schedule')
     for key in ('width','height'): s._integer(profile[key],key,5,8192)
     s._integer(profile['disparities'],'disparities',1,256)
+    if profile['stereo_schedule'] == 'hierarchical-1to8-fallback':
+        s._require(all(profile[k] >= 8 and profile[k] % 2 == 0 for k in ('width','height')) and
+                   16 <= profile['disparities'] <= 64, 'invalid hierarchical stereo domain')
     s._require(profile['width']*profile['height']*profile['disparities'] <= 0xffffffff,'stereo volume overflow')
     s._integer(profile['paths'],'paths'); s._require(profile['paths'] in (4,8),'invalid path count')
     s._integer(profile['p1'],'p1',0,10000);s._integer(profile['p2'],'p2',profile['p1'],10000)

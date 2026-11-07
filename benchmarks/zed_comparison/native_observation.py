@@ -109,7 +109,8 @@ def _settings(report):
         from .native_profile import validate_full_sgm_profile
         _require(variant == 'full_sgm', 'effective SGM profile requires full SGM')
         profile = validate_full_sgm_profile(report['effective_estimator'])
-        for name, report_name in (('width', 'width'), ('height', 'height'),
+        for name, report_name in (('descriptor_mode', 'descriptor_mode'), ('stereo_schedule', 'stereo_schedule'),
+                                  ('width', 'width'), ('height', 'height'),
                                   ('disparities', 'sgm_disparities'), ('paths', 'sgm_directions'),
                                   ('subpixel', 'sgm_subpixel'), ('temporal', 'temporal'),
                                   ('stereo_spirv_sha256', 'stereo_spirv_sha256'),

@@ -51,7 +51,7 @@ def cross_track_fixture():
     """A binding fixture; evaluators are stubbed, so this is not qualification evidence."""
     temporal={k:dict(status='available', value=v) for k,v in
               [('stabilization',0),('tracking',False),('filling',False)]}
-    profile=dict(algorithm='independent_sgm',width=1280,height=720,disparities=128,paths=4,
+    profile=dict(descriptor_mode='census',stereo_schedule='sequential',algorithm='independent_sgm',width=1280,height=720,disparities=128,paths=4,
                  p1=8,p2=32,subpixel=True,lr_tolerance=1.0,right_reference_mode='independent_sgm',
                  depth_units='axial_Z_metres_rectified_rays',temporal=temporal,compiler_sha256='a'*64,
                  stereo_spirv_sha256={'daxa-stereo-census.spv':'b'*64},
@@ -161,3 +161,17 @@ def test_timing_must_be_in_qualified_comparison_for_same_method_and_stratum(monk
     elif mutation == 'comparison': timing['comparisons'][0]['qualified']=False
     result=_run_binding(monkeypatch,fixture)
     assert not result['qualified'] and 'timing_delivery_binding_mismatch' in result['reasons']
+
+
+@pytest.mark.parametrize('field,value', [('descriptor_mode','ortho-hybrid'),
+    ('stereo_schedule','shared-census-sequential'), ('descriptor_mode',None), ('stereo_schedule',None)])
+def test_cost_schedule_change_or_absence_blocks_cross_track_binding(monkeypatch, field, value):
+    fixture=cross_track_fixture()
+    run=fixture[3]['runs'][0]
+    for profile in (run['effective_estimator'],run['implementation']['value']['settings']['effective_estimator']):
+        if value is None:
+            profile.pop(field, None)
+        else:
+            profile[field]=value
+    result=_run_binding(monkeypatch,fixture)
+    assert not result['qualified'] and 'quality_delivery_binding_mismatch' in result['reasons']

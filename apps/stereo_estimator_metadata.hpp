@@ -21,6 +21,16 @@ inline nlohmann::json shader_hashes(const std::string& directory,const std::stri
 }
 inline nlohmann::json instantaneous(){return {{"stabilization",{{"status","available"},{"value",0}}},
     {"tracking",{{"status","available"},{"value",false}}},{"filling",{{"status","available"},{"value",false}}}};}
+inline const char* schedule_name(DaxaDepthStereoSchedule schedule){
+    switch(schedule){
+    case DaxaDepthStereoSchedule::Sequential:return "sequential";
+    case DaxaDepthStereoSchedule::PairedPerPath:return "paired-per-path";
+    case DaxaDepthStereoSchedule::LayeredPerPath:return "layered-per-path";
+    case DaxaDepthStereoSchedule::SharedCensusSequential:return "shared-census-sequential";
+    case DaxaDepthStereoSchedule::Hierarchical1to8Selective1to4:return "hierarchical-1to8-fallback";
+    }
+    throw std::invalid_argument("unknown stereo schedule identity");
+}
 // Only instantiated for the independently matched, non-temporal SGM path.
 inline nlohmann::json profile(const DaxaDepthConfig& config,const nlohmann::json& temporal,
                                const nlohmann::json& stereo_shaders,const nlohmann::json& depth_shaders,
@@ -29,7 +39,8 @@ inline nlohmann::json profile(const DaxaDepthConfig& config,const nlohmann::json
     if(config.stereo_variant!=DaxaSgmVariant::PackedSpecialized || config.right_reference_mode!=DaxaRightReferenceMode::IndependentSGM || stereo_shaders.empty() || depth_shaders.empty() || compiler_sha256.empty())
         throw std::invalid_argument("independent SGM shader identity required");
     auto const& s=config.stereo;
-    return {{"algorithm","independent_sgm"},{"width",s.width},{"height",s.height},{"disparities",s.disparities},
+    return {{"descriptor_mode",s.ortho_hybrid?"ortho-hybrid":"census"},{"stereo_schedule",schedule_name(config.stereo_schedule)},
+        {"algorithm","independent_sgm"},{"width",s.width},{"height",s.height},{"disparities",s.disparities},
         {"paths",s.paths},{"p1",s.p1},{"p2",s.p2},{"subpixel",s.subpixel},{"lr_tolerance",config.lr_tolerance},
         {"right_reference_mode","independent_sgm"},{"depth_units","axial_Z_metres_rectified_rays"},{"temporal",temporal},
         {"compiler_sha256",compiler_sha256},{"stereo_spirv_sha256",stereo_shaders},{"depth_spirv_sha256",depth_shaders}};

@@ -42,3 +42,17 @@ Keep `stereoforge_launch_options.py` beside both launch files when copying the
 source launch entry points. Existing depth/RGB topics and separate completed
 output topics are unchanged. The requested qualified `quality-reference` and
 `live-quality` profiles remain a separate unfinished requirement.
+
+## Effective estimator identity
+
+Independent SGM identities require explicit `descriptor_mode` (`census` or
+`ortho-hybrid`) and `stereo_schedule`. All five native schedules have distinct
+identities, including hierarchical fallback. Recording a configuration identity
+does not qualify its accuracy or latency. ROS metadata and canonical benchmark
+reports obtain these fields from the effective native configuration. Canonical
+observation admission checks them against the executed report.
+
+Historical profiles missing either field are rejected for estimator matching;
+no cost or schedule is inferred from shader bundle hashes. Original evidence
+remains unchanged. Re-export fresh reports or independently audit their
+source/configuration before making a new comparison.

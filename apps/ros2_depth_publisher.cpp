@@ -349,7 +349,7 @@ void run(const Options& o, OutputFile& file){
         {"settings",{{"mode",o.mode},{"depth_rate",o.depth_rate},{"capture_fps",o.fps},
             {"min_depth_fps",o.min_depth_fps},{"max_depth_fps",o.max_depth_fps},
             {"consumer_min_depth_fps",o.consumer_min_depth_fps},{"max_depth_age_ms",o.max_depth_age_ms},
-            {"downshift_ms",o.downshift_ms},{"depth_speckle_min_pixels",o.depth_speckle_min_pixels},{"depth_speckle_delta_m",o.depth_speckle_delta_m},{"depth_speckle_delta_px",o.depth_speckle_delta_px},{"pipeline",o.pipeline_mode},{"coarse_manifest_sha256",experimental?daxa_preprocess_file_sha256(o.coarse_manifest):"not_executed"},{"stereo_variant",depth?DaxaStereo::variant_name(depth_config.stereo_variant):"not_executed"},{"effective_estimator",estimator},{"validation_requested",o.validation},{"subscriber_wait_seconds",o.subscriber_wait},
+            {"downshift_ms",o.downshift_ms},{"depth_speckle_min_pixels",o.depth_speckle_min_pixels},{"depth_speckle_delta_m",o.depth_speckle_delta_m},{"depth_speckle_delta_px",o.depth_speckle_delta_px},{"pipeline",o.pipeline_mode},{"descriptor_mode",o.descriptor_mode},{"stereo_schedule",stereoforge::native_estimator::schedule_name(depth_config.stereo_schedule)},{"coarse_manifest_sha256",experimental?daxa_preprocess_file_sha256(o.coarse_manifest):"not_executed"},{"stereo_variant",depth?DaxaStereo::variant_name(depth_config.stereo_variant):"not_executed"},{"effective_estimator",estimator},{"validation_requested",o.validation},{"subscriber_wait_seconds",o.subscriber_wait},
             {"reference_capture_sha256",fixture.capture_sha256},{"reference_record_ordinal",fixture.record_ordinal},
             {"calibration_manifest_sha256",daxa_preprocess_file_sha256(o.manifest)},{"device_serial_override",o.device_serial.empty()?json(nullptr):json(o.device_serial)},
             {"original_calibration_identity",maps.original_identity},{"rectified_calibration_identity",maps.rectified_identity}}}};
@@ -360,7 +360,7 @@ void run(const Options& o, OutputFile& file){
         {"radius",refinement_config.radius},{"min_margin",refinement_config.min_margin},
         {"prior_confidence_floor",refinement_config.prior_confidence_floor},{"max_coarse_span",refinement_config.max_coarse_span},
         {"lr_tolerance",refinement_config.lr_tolerance},{"subpixel",refinement_config.subpixel},
-        {"descriptor_mode",o.descriptor_mode},{"profile",o.profile},{"gpu_duty_budget_pct",o.gpu_duty_budget_pct},{"fast_mode",refinement_config.fast_mode},{"ultra_fast",refinement_config.ultra_fast},{"selective_repair",refinement_config.selective_repair},{"planar_recovery",refinement_config.planar_recovery},
+        {"profile",o.profile},{"gpu_duty_budget_pct",o.gpu_duty_budget_pct},{"fast_mode",refinement_config.fast_mode},{"ultra_fast",refinement_config.ultra_fast},{"selective_repair",refinement_config.selective_repair},{"planar_recovery",refinement_config.planar_recovery},
         {"coarse_schedule",o.coarse_schedule},{"coarse_right_reference_mode",o.coarse_right_mode},
         {"borrow_full_frame",refinement_config.borrow_full_frame},{"refinement_shader_identity",DaxaRefinement::shader_identity()},
         {"refinement_compiler_sha256",DaxaRefinement::compiler_sha256()},

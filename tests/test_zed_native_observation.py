@@ -57,12 +57,12 @@ def export(executed,tmp_path):
 def test_effective_profile_requires_matching_executed_metadata(executed):
     report = deepcopy(executed[2])
     profile = deepcopy(PROFILE)
-    report.update(width=profile['width'], height=profile['height'], temporal=profile['temporal'],
+    report.update(descriptor_mode=profile['descriptor_mode'],stereo_schedule=profile['stereo_schedule'],width=profile['width'], height=profile['height'], temporal=profile['temporal'],
                   stereo_spirv_sha256=profile['stereo_spirv_sha256'],
                   depth_spirv_sha256=profile['depth_spirv_sha256'], effective_estimator=profile)
     report['shader_compiler']['compiler_sha256'] = profile['compiler_sha256']
     assert _settings(report)['effective_estimator'] == profile
-    for key, value in [('width', 640), ('sgm_directions', 8), ('sgm_subpixel', False),
+    for key, value in [('descriptor_mode', 'ortho-hybrid'), ('stereo_schedule', 'shared-census-sequential'), ('width', 640), ('sgm_directions', 8), ('sgm_subpixel', False),
                        ('stereo_spirv_sha256', {'daxa-stereo-census.spv': 'd'*64})]:
         changed = deepcopy(report)
         changed[key] = value
