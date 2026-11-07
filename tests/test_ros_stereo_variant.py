@@ -1,27 +1,66 @@
 from pathlib import Path
-import subprocess
 import shutil
+import subprocess
+
 import pytest
+
 from benchmarks.zed_comparison.report import _same_estimator
 
 ROOT = Path(__file__).resolve().parents[1]
+REFINEMENT_PROFILES = (
+    "exact-ultra", "ultra-fast", "v11-fast", "mobile-balanced", "v13-adaptive", "adaptive"
+)
+PUBLISHER_ARGS = (
+    "--source", "camera", "--manifest", "x", "--clock-map", "x",
+    "--frame-id", "x", "--run-id", "x", "--trace", "x",
+)
 
 
-def test_ros_variant_parser_executable(tmp_path):
+@pytest.fixture(scope='module')
+def publisher_parser(tmp_path_factory):
+    tmp_path=tmp_path_factory.mktemp('ros_publisher_parser')
     compiler=shutil.which('c++')
     if not compiler: pytest.skip('C++ compiler unavailable')
     source=(ROOT/'apps/ros2_depth_publisher.cpp').read_text()
     parser=source[source.index('struct Options {'):source.index('std::string clock_id()')]
     cpp='''#include <stereoforge/depth_rate_controller.hpp>\n#include <algorithm>\n#include <cctype>\n#include <cmath>\n#include <cstdlib>\n#include <iostream>\n#include <stdexcept>\n#include <string>\nusing namespace stereoforge;\n''' + parser + '''
-int main(int argc,char** argv){try{auto o=parse(argc,argv);std::cout<<o.stereo_variant;return 0;}catch(const std::exception&){return 2;}}
+int main(int argc,char** argv){try{auto o=parse(argc,argv);std::cout<<o.stereo_variant;return 0;}catch(const std::exception& e){std::cerr<<e.what();return 2;}}
 '''
     path=tmp_path/'parser.cpp';path.write_text(cpp);exe=tmp_path/'parser'
     compiled=subprocess.run([compiler,'-std=c++20','-I',str(ROOT/'include'),str(path),'-o',str(exe)],capture_output=True,text=True)
     assert compiled.returncode==0, compiled.stderr
-    args=['--source','camera','--manifest','x','--clock-map','x','--frame-id','x','--run-id','x','--trace','x']
+    return exe
+
+
+def test_ros_variant_parser_executable(publisher_parser):
+    exe=publisher_parser
+    args=PUBLISHER_ARGS
     for extra, expected, status in [([], 'packed-specialized',0),(['--stereo-variant','packed-specialized-overwrite'],'packed-specialized-overwrite',0),(['--stereo-variant','bad'],'',2)]:
         result=subprocess.run([str(exe),*args,*extra],capture_output=True,text=True)
         assert (result.stdout,result.returncode)==(expected,status)
+
+
+@pytest.mark.parametrize('profile', REFINEMENT_PROFILES)
+def test_refinement_profile_rejected_by_full_sgm(publisher_parser,profile):
+    result=subprocess.run([str(publisher_parser),*PUBLISHER_ARGS,'--profile',profile],capture_output=True,text=True)
+    assert result.returncode==2
+    assert "refinement profile requires an experimental refinement pipeline" in result.stderr
+
+
+@pytest.mark.parametrize('pipeline', ['experimental-refinement','experimental-dual-refinement'])
+@pytest.mark.parametrize('profile', ('quality', *REFINEMENT_PROFILES))
+@pytest.mark.parametrize('profile_first', [False,True])
+def test_refinement_profiles_remain_available_to_experimental_pipelines(publisher_parser,pipeline,profile,profile_first):
+    preset=['--profile',profile]
+    route=['--pipeline',pipeline,'--coarse-manifest','x']
+    extra=preset+route if profile_first else route+preset
+    result=subprocess.run([str(publisher_parser),*PUBLISHER_ARGS,*extra],capture_output=True,text=True)
+    assert (result.stdout,result.returncode)==('packed-specialized',0)
+
+
+def test_default_quality_profile_remains_available_to_full_sgm(publisher_parser):
+    result=subprocess.run([str(publisher_parser),*PUBLISHER_ARGS,'--profile','quality'],capture_output=True,text=True)
+    assert (result.stdout,result.returncode)==('packed-specialized',0)
 
 
 def test_unavailable_estimator_never_matches_quality_profile():
